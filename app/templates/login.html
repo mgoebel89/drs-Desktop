@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Anmelden · DRS{% endblock %}
+{% block content %}
+<div class="card card-narrow">
+  <h1>Anmelden</h1>
+  <p class="muted">David-Roentgen-Schule · Unterrichtsmaterial-System</p>
+
+  {% if error %}<div class="flash flash-err">{{ error }}</div>{% endif %}
+
+  <form method="post" action="/login">
+    <label for="username">Benutzername</label>
+    <input id="username" name="username" type="text" required autofocus autocomplete="username">
+    <label for="password">Passwort</label>
+    <input id="password" name="password" type="password" required autocomplete="current-password">
+    <div style="margin-top:1.3rem">
+      <button class="btn" type="submit">Anmelden</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

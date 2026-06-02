@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}DRS Unterrichtsmaterial{% endblock %}</title>
+<link rel="stylesheet" href="/static/drs.css">
+</head>
+<body>
+{% if user %}
+<nav class="nav">
+  <div>
+    <a href="/">Start</a>
+    <a href="/worksheets">Aufgabenblätter</a>
+    <a href="/profile">Profil</a>
+    {% if user.role == 'admin' %}<a href="/admin/users">Nutzer</a>{% endif %}
+  </div>
+  <div class="right">
+    {{ user.full_name or user.username }}
+    {% if user.role == 'admin' %}<span class="badge b-admin">Admin</span>{% endif %}
+    &nbsp;·&nbsp;
+    <form method="post" action="/logout" style="display:inline">
+      <button class="btn-sec" style="padding:4px 10px;font-size:12px" type="submit">Abmelden</button>
+    </form>
+  </div>
+</nav>
+{% endif %}
+<div class="wrapper">
+  {% block content %}{% endblock %}
+</div>
+<div class="cbar" style="max-width:960px;margin:1rem auto 2rem"><span></span><span></span><span></span><span></span></div>
+</body>
+</html>

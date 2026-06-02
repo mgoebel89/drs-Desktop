@@ -1,0 +1,11 @@
+[project]
+name = "drs-lxc"
+version = "0.1.0"
+description = "DRS Unterrichtsmaterial-System"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[project.scripts]
+drs-admin = "app.cli:app"

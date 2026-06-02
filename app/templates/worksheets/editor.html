@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Editor{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row-spread">
+    <h1 id="ws-title-display">{{ title }}</h1>
+    <div>
+      {% if ws_id %}
+        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/revisions">Verlauf</a>
+        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.html">HTML</a>
+        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.pdf">PDF</a>
+      {% endif %}
+      <button class="btn" type="button" id="btn-save">Speichern</button>
+    </div>
+  </div>
+
+  <div id="save-flash" class="flash" style="display:none"></div>
+
+  <label>Titel des Aufgabenblatts</label>
+  <input id="f-title" value="{{ title }}">
+
+  <h2>Allgemein</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem 1rem">
+    <div>
+      <label>Fach</label>
+      <input id="m-fach" placeholder="z.B. Elektrotechnik · Klasse ET2B">
+    </div>
+    <div>
+      <label>Lernfeld</label>
+      <input id="m-lernfeld" placeholder="z.B. Lernfeld 3 · Einheit 02">
+    </div>
+  </div>
+
+  <h2>Lernsituation</h2>
+  <label>Überschrift</label>
+  <input id="m-ls-titel" placeholder="z.B. Auftrag aus dem Betrieb">
+  <label>Beschreibung (mehrere Absätze möglich; LaTeX mit <code>$$…$$</code> oder <code>$…$</code>)</label>
+  <textarea id="m-ls-text" rows="5" style="width:100%;font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:#fafafa"></textarea>
+
+  <label>Bild zur Lernsituation (optional)</label>
+  <div class="img-drop" data-target="m-ls-bild">
+    <input type="file" accept="image/*" class="img-input" hidden>
+    <button type="button" class="btn-sec" style="padding:6px 12px;font-size:12px">Bild wählen…</button>
+    <span class="img-status muted" style="margin-left:.6rem">kein Bild</span>
+    <div class="img-prev" style="margin-top:.5rem"></div>
+    <input type="hidden" id="m-ls-bild" value="">
+  </div>
+
+  <h2 style="margin-top:1.8rem">Aufgaben</h2>
+  <div id="aufgaben"></div>
+  <p style="margin-top:.8rem">
+    <button class="btn-sec btn" type="button" id="btn-add">+ Aufgabe hinzufügen</button>
+  </p>
+</div>
+
+<template id="tpl-aufgabe">
+  <div class="aufgabe-row" style="border:1px solid var(--border);border-radius:8px;padding:1rem;margin-top:.9rem;background:#fafafa">
+    <div class="row-spread" style="margin-bottom:.5rem">
+      <strong style="color:var(--blau)">Aufgabe <span class="aufg-nr"></span></strong>
+      <div>
+        <button class="btn-sec" type="button" data-act="up" style="padding:4px 8px;font-size:12px">↑</button>
+        <button class="btn-sec" type="button" data-act="down" style="padding:4px 8px;font-size:12px">↓</button>
+        <button class="btn-sec" type="button" data-act="del" style="padding:4px 8px;font-size:12px;color:var(--pink);border-color:var(--pink)">Entfernen</button>
+      </div>
+    </div>
+
+    <label>Aufgabentext (LaTeX erlaubt)</label>
+    <textarea data-f="text" rows="3" style="width:100%;font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff"></textarea>
+
+    <label>Bewertungskriterien</label>
+    <textarea data-f="kriterien" rows="2" style="width:100%;font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff"></textarea>
+
+    <label>Musterlösung (Text, LaTeX erlaubt)</label>
+    <textarea data-f="musterloesungText" rows="3" style="width:100%;font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff"></textarea>
+
+    <label>Musterlösung (Bild, optional)</label>
+    <div class="img-drop" data-target-rel="musterloesungBild">
+      <input type="file" accept="image/*" class="img-input" hidden>
+      <button type="button" class="btn-sec" style="padding:6px 12px;font-size:12px">Bild wählen…</button>
+      <span class="img-status muted" style="margin-left:.6rem">kein Bild</span>
+      <div class="img-prev" style="margin-top:.5rem"></div>
+    </div>
+
+    <div style="display:flex;gap:1.2rem;margin-top:.8rem">
+      <label style="font-weight:normal;margin:0"><input type="checkbox" data-f="upload" checked> Foto-Upload erlauben</label>
+      <label style="font-weight:normal;margin:0"><input type="checkbox" data-f="uploadPDF"> PDF-Upload erlauben</label>
+    </div>
+  </div>
+</template>
+
+<style>
+  .img-prev img { max-width: 220px; max-height: 140px; border-radius: 6px; border: 1px solid var(--border); }
+  textarea { resize: vertical; }
+  .aufgabe-row label { margin-top: .9rem; }
+</style>
+
+<script>
+const WS_ID = {{ ws_id|tojson }};
+const INITIAL = {{ data_json|safe }};
+
+const $ = (s, root=document) => root.querySelector(s);
+const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
+
+function setImgPreview(wrap, dataUrl) {
+  const prev = $('.img-prev', wrap);
+  const status = $('.img-status', wrap);
+  prev.innerHTML = '';
+  if (dataUrl) {
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    prev.appendChild(img);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'btn-sec';
+    rm.style.cssText = 'padding:4px 10px;font-size:12px;margin-left:.6rem;color:var(--pink);border-color:var(--pink)';
+    rm.textContent = 'Entfernen';
+    rm.onclick = () => {
+      wrap.dataset.value = '';
+      const hidden = wrap.querySelector('input[type=hidden]');
+      if (hidden) hidden.value = '';
+      setImgPreview(wrap, '');
+    };
+    prev.appendChild(rm);
+    status.textContent = 'Bild gesetzt';
+  } else {
+    status.textContent = 'kein Bild';
+  }
+}
+
+function wireImgDrop(wrap) {
+  const fileInput = $('.img-input', wrap);
+  const btn = wrap.querySelector('button.btn-sec');
+  btn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      wrap.dataset.value = dataUrl;
+      const hidden = wrap.querySelector('input[type=hidden]');
+      if (hidden) hidden.value = dataUrl;
+      setImgPreview(wrap, dataUrl);
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+function renderAufgabe(data, idx) {
+  const tpl = $('#tpl-aufgabe').content.cloneNode(true);
+  const row = tpl.querySelector('.aufgabe-row');
+  row.dataset.idx = idx;
+  $('.aufg-nr', row).textContent = idx + 1;
+  $('[data-f=text]', row).value = data.text || '';
+  $('[data-f=kriterien]', row).value = data.kriterien || '';
+  $('[data-f=musterloesungText]', row).value = data.musterloesungText || '';
+  $('[data-f=upload]', row).checked = data.upload !== false;
+  $('[data-f=uploadPDF]', row).checked = data.uploadPDF === true;
+
+  const imgWrap = $('.img-drop', row);
+  imgWrap.dataset.value = data.musterloesungBild || '';
+  wireImgDrop(imgWrap);
+  if (data.musterloesungBild) setImgPreview(imgWrap, data.musterloesungBild);
+
+  row.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
+    const act = b.dataset.act;
+    if (act === 'del') {
+      if (confirm('Aufgabe entfernen?')) { row.remove(); renumber(); }
+    } else if (act === 'up') {
+      const prev = row.previousElementSibling;
+      if (prev) row.parentElement.insertBefore(row, prev);
+      renumber();
+    } else if (act === 'down') {
+      const next = row.nextElementSibling;
+      if (next) row.parentElement.insertBefore(next, row);
+      renumber();
+    }
+  }));
+  return row;
+}
+
+function renumber() {
+  $$('#aufgaben .aufgabe-row').forEach((r, i) => {
+    r.dataset.idx = i;
+    $('.aufg-nr', r).textContent = i + 1;
+  });
+}
+
+function loadInitial() {
+  $('#m-fach').value = INITIAL.meta.fach || '';
+  $('#m-lernfeld').value = INITIAL.meta.lernfeld || '';
+  $('#m-ls-titel').value = INITIAL.meta.lernsituationTitel || '';
+  $('#m-ls-text').value = INITIAL.meta.lernsituationText || '';
+  $('#m-ls-bild').value = INITIAL.meta.lernsituationBild || '';
+
+  const lsWrap = document.querySelector('[data-target="m-ls-bild"]');
+  lsWrap.dataset.value = INITIAL.meta.lernsituationBild || '';
+  wireImgDrop(lsWrap);
+  if (INITIAL.meta.lernsituationBild) setImgPreview(lsWrap, INITIAL.meta.lernsituationBild);
+
+  const container = $('#aufgaben');
+  (INITIAL.aufgaben || []).forEach((a, i) => container.appendChild(renderAufgabe(a, i)));
+}
+
+$('#btn-add').addEventListener('click', () => {
+  const idx = $$('#aufgaben .aufgabe-row').length;
+  $('#aufgaben').appendChild(renderAufgabe({}, idx));
+});
+
+function collect() {
+  const meta = {
+    fach: $('#m-fach').value.trim(),
+    lernfeld: $('#m-lernfeld').value.trim(),
+    lernsituationTitel: $('#m-ls-titel').value.trim(),
+    lernsituationText: $('#m-ls-text').value,
+    lernsituationBild: document.querySelector('[data-target="m-ls-bild"]').dataset.value || '',
+  };
+  const aufgaben = $$('#aufgaben .aufgabe-row').map((r, i) => ({
+    id: i + 1,
+    text: $('[data-f=text]', r).value,
+    kriterien: $('[data-f=kriterien]', r).value,
+    musterloesungText: $('[data-f=musterloesungText]', r).value,
+    musterloesungBild: r.querySelector('.img-drop').dataset.value || '',
+    upload: $('[data-f=upload]', r).checked,
+    uploadPDF: $('[data-f=uploadPDF]', r).checked,
+  }));
+  return { title: $('#f-title').value.trim() || 'Unbenanntes Aufgabenblatt', meta, aufgaben };
+}
+
+function flash(msg, kind='ok') {
+  const f = $('#save-flash');
+  f.className = 'flash flash-' + (kind === 'ok' ? 'ok' : 'err');
+  f.textContent = msg;
+  f.style.display = 'block';
+  setTimeout(() => f.style.display = 'none', 4000);
+}
+
+$('#btn-save').addEventListener('click', async () => {
+  const payload = collect();
+  if (WS_ID) payload.worksheet_id = WS_ID;
+  const btn = $('#btn-save');
+  btn.disabled = true;
+  btn.textContent = 'Speichere…';
+  try {
+    const res = await fetch('/worksheets/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (!WS_ID) {
+      // neu angelegt → auf Editor-URL umleiten, damit ws_id stimmt
+      location.href = '/worksheets/' + data.worksheet_id;
+      return;
+    }
+    $('#ws-title-display').textContent = data.title;
+    flash('Gespeichert (Revision #' + data.revision_id + ')');
+  } catch (e) {
+    flash('Fehler: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Speichern';
+  }
+});
+
+loadInitial();
+</script>
+{% endblock %}

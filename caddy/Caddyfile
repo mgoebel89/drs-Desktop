@@ -1,0 +1,28 @@
+# DRS Unterrichtsmaterial — Reverse Proxy
+# Default: HTTP-only auf Port 80 (Schul-LAN intern).
+# Für HTTPS mit self-signed Cert: siehe Block unten (auskommentieren + Domain setzen).
+
+:80 {
+    encode zstd gzip
+    request_body {
+        max_size 20MB    # erlaubt PDF-/Bild-Uploads
+    }
+    reverse_proxy 127.0.0.1:8000
+
+    log {
+        output file /var/log/caddy/drs.log {
+            roll_size 10MB
+            roll_keep 5
+        }
+        format console
+    }
+}
+
+# Optional: HTTPS mit self-signed Cert.
+# {
+#     auto_https off
+# }
+# https://drs.lokal {
+#     tls internal
+#     reverse_proxy 127.0.0.1:8000
+# }

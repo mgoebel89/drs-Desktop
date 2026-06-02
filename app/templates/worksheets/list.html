@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Aufgabenblätter · DRS{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row-spread">
+    <h1>Meine Aufgabenblätter</h1>
+    <a class="btn" href="/worksheets/new">+ Neues Aufgabenblatt</a>
+  </div>
+
+  {% if items %}
+  <table>
+    <thead><tr>
+      <th>Titel</th><th>Zuletzt geändert</th><th>Revisionen</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for ws in items %}
+    <tr>
+      <td><a href="/worksheets/{{ ws.id }}"><strong>{{ ws.title }}</strong></a></td>
+      <td>{{ ws.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td><a href="/worksheets/{{ ws.id }}/revisions">{{ ws.revisions|length }}</a></td>
+      <td style="white-space:nowrap">
+        <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/worksheets/{{ ws.id }}/export.html">HTML</a>
+        <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/worksheets/{{ ws.id }}/export.pdf">PDF</a>
+        <form method="post" action="/worksheets/{{ ws.id }}/delete" style="display:inline" onsubmit="return confirm('Aufgabenblatt löschen? Alle Revisionen gehen verloren.');">
+          <button class="btn-sec" style="padding:5px 10px;font-size:12px;color:var(--pink);border-color:var(--pink)">Löschen</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Noch keine Aufgabenblätter. Lege das erste über „+ Neues Aufgabenblatt" an.</p>
+  {% endif %}
+</div>
+{% endblock %}

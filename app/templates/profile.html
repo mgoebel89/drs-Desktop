@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Profil · DRS{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Profil</h1>
+  <p class="muted">{{ user.username }} · {{ user.full_name or '—' }}</p>
+
+  <h2>Passwort ändern</h2>
+  <p><a class="btn-sec btn" href="/change-password">Passwort ändern</a></p>
+
+  <h2>Anthropic API-Key</h2>
+  {% if anthropic_set %}
+    <p>Aktueller Key: <code>{{ anthropic_masked }}</code></p>
+    <form method="post" action="/profile/anthropic" style="display:inline" onsubmit="return confirm('Key entfernen?');">
+      <input type="hidden" name="clear" value="1">
+      <button class="btn-sec" type="submit" style="padding:6px 12px;font-size:12px">Entfernen</button>
+    </form>
+  {% else %}
+    <p class="muted">Noch kein Key hinterlegt.</p>
+  {% endif %}
+  <form method="post" action="/profile/anthropic" style="margin-top:.8rem">
+    <label>Neuer Key (sk-ant-...)</label>
+    <input name="api_key" type="password" autocomplete="off" placeholder="sk-ant-…">
+    <div style="margin-top:.6rem"><button class="btn" type="submit">Speichern</button></div>
+  </form>
+
+  <h2>WebUntis-Zugang</h2>
+  <form method="post" action="/profile/untis" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+    <div>
+      <label>Server (z.B. neilo.webuntis.com)</label>
+      <input name="server" value="{{ untis.server or '' }}">
+    </div>
+    <div>
+      <label>Schule</label>
+      <input name="school" value="{{ untis.school or '' }}">
+    </div>
+    <div>
+      <label>Benutzername</label>
+      <input name="username" value="{{ untis.username or '' }}">
+    </div>
+    <div>
+      <label>Passwort {% if untis_pw_set %}<span class="muted">(gespeichert — leer lassen um zu behalten)</span>{% endif %}</label>
+      <input name="password" type="password" autocomplete="off">
+    </div>
+    <div style="grid-column:1/3;display:flex;gap:.6rem;margin-top:.4rem">
+      <button class="btn" type="submit">Speichern</button>
+      {% if untis_pw_set %}
+        <button class="btn btn-sec" type="submit" name="clear" value="1"
+                onclick="return confirm('WebUntis-Zugang entfernen?');">Entfernen</button>
+      {% endif %}
+    </div>
+  </form>
+  <p class="muted" style="margin-top:.8rem">Verbindungstest folgt mit der WebUntis-Integration.</p>
+</div>
+{% endblock %}

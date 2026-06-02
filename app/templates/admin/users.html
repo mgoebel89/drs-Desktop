@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Nutzer · DRS{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row-spread">
+    <h1>Nutzerverwaltung</h1>
+  </div>
+
+  {% if error %}<div class="flash flash-err">{{ error }}</div>{% endif %}
+  {% if new_user %}
+  <div class="flash flash-ok">
+    Initial-Passwort für <strong>{{ new_user.username }}</strong>:
+    <code style="font-size:14px;background:#fff;padding:2px 6px;border-radius:4px">{{ new_user.password }}</code>
+    <br><span class="muted">Bitte sicher übergeben — wird hier nicht erneut angezeigt.</span>
+  </div>
+  {% endif %}
+
+  <h2>Neuen Nutzer anlegen</h2>
+  <form method="post" action="/admin/users/create" style="display:grid;grid-template-columns:1fr 1fr 160px auto;gap:.7rem;align-items:end">
+    <div>
+      <label>Benutzername</label>
+      <input name="username" required>
+    </div>
+    <div>
+      <label>Vollständiger Name</label>
+      <input name="full_name">
+    </div>
+    <div>
+      <label>Rolle</label>
+      <select name="role">
+        <option value="teacher" selected>Teacher</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <div><button class="btn" type="submit">Anlegen</button></div>
+  </form>
+
+  <h2>Bestehende Nutzer</h2>
+  <table>
+    <thead><tr>
+      <th>Benutzername</th><th>Name</th><th>Rolle</th><th>Status</th><th>Letzter Login</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+      <td><strong>{{ u.username }}</strong>{% if u.must_change_pw %} <span class="badge b-inactive">PW initial</span>{% endif %}</td>
+      <td>{{ u.full_name }}</td>
+      <td>
+        {% if u.role == 'admin' %}<span class="badge b-admin">Admin</span>{% else %}<span class="badge b-teacher">Teacher</span>{% endif %}
+      </td>
+      <td>{% if u.active %}aktiv{% else %}<span class="badge b-inactive">inaktiv</span>{% endif %}</td>
+      <td>{{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else '–' }}</td>
+      <td style="white-space:nowrap">
+        <form method="post" action="/admin/users/{{ u.id }}/reset" style="display:inline" onsubmit="return confirm('Passwort zurücksetzen?');">
+          <button class="btn-sec" style="padding:5px 10px;font-size:12px">PW Reset</button>
+        </form>
+        {% if u.id != user.id %}
+        <form method="post" action="/admin/users/{{ u.id }}/toggle" style="display:inline">
+          <button class="btn-sec" style="padding:5px 10px;font-size:12px">{% if u.active %}Deaktivieren{% else %}Aktivieren{% endif %}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

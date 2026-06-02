@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Update-Befehl: zieht den aktuellen Code aus Git, installiert Dependencies,
+# fährt DB-Migrationen und startet den API-Dienst neu.
+set -euo pipefail
+
+APP_DIR=/opt/drs/app
+VENV_DIR=/opt/drs/venv
+CFG=/etc/drs/config.env
+
+[[ $EUID -eq 0 ]] || { echo "Bitte als root ausführen (sudo drs-update)" >&2; exit 1; }
+[[ -f $CFG ]] || { echo "Fehlt: $CFG" >&2; exit 1; }
+
+echo "==> Aktualisiere Code"
+sudo -u drs git -C "$APP_DIR" fetch --depth 1 origin
+BRANCH="$(sudo -u drs git -C "$APP_DIR" rev-parse --abbrev-ref HEAD)"
+sudo -u drs git -C "$APP_DIR" reset --hard "origin/$BRANCH"
+
+echo "==> Dependencies"
+sudo -u drs "$VENV_DIR/bin/pip" install -q --upgrade -r "$APP_DIR/requirements.txt"
+
+echo "==> Datenbank-Migration"
+sudo -u drs --preserve-env=PATH env $(grep -v '^#' "$CFG" | xargs) \
+  "$VENV_DIR/bin/alembic" -c "$APP_DIR/alembic.ini" upgrade head
+
+echo "==> Helper-Skripte aktualisieren"
+install -m 0755 "$APP_DIR/bin/drs-update" /usr/local/sbin/drs-update
+install -m 0755 "$APP_DIR/bin/drs-admin"  /usr/local/sbin/drs-admin
+install -m 0644 "$APP_DIR/systemd/drs-api.service" /etc/systemd/system/drs-api.service
+install -m 0644 "$APP_DIR/caddy/Caddyfile" /etc/caddy/Caddyfile
+systemctl daemon-reload
+
+echo "==> Dienste neu starten"
+systemctl restart drs-api
+systemctl reload caddy || systemctl restart caddy
+
+echo "✓ Update abgeschlossen."

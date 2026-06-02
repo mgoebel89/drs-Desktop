@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ ws_title }}</title>
+
+{% raw %}
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$','$']],
+    displayMath: [['$$','$$']],
+    packages: {'[+]': ['physics']},
+    tags: 'none',
+    macros: {
+      V:'{\\,\\mathrm{V}}', A:'{\\,\\mathrm{A}}', W:'{\\,\\mathrm{W}}',
+      Hz:'{\\,\\mathrm{Hz}}', Ohm:'{\\,\\Omega}', kohm:'{\\,\\mathrm{k\\Omega}}',
+      mohm:'{\\,\\mathrm{M\\Omega}}', mA:'{\\,\\mathrm{mA}}', kV:'{\\,\\mathrm{kV}}',
+      mV:'{\\,\\mathrm{mV}}', kW:'{\\,\\mathrm{kW}}', kHz:'{\\,\\mathrm{kHz}}',
+      MHz:'{\\,\\mathrm{MHz}}', F:'{\\,\\mathrm{F}}', uF:'{\\,\\mu\\mathrm{F}}',
+      nF:'{\\,\\mathrm{nF}}', H:'{\\,\\mathrm{H}}', mH:'{\\,\\mathrm{mH}}',
+      m:'{\\,\\mathrm{m}}', km:'{\\,\\mathrm{km}}', cm:'{\\,\\mathrm{cm}}',
+      mm:'{\\,\\mathrm{mm}}', kg:'{\\,\\mathrm{kg}}', g:'{\\,\\mathrm{g}}',
+      s:'{\\,\\mathrm{s}}', ms:'{\\,\\mathrm{ms}}', N:'{\\,\\mathrm{N}}',
+      Pa:'{\\,\\mathrm{Pa}}', J:'{\\,\\mathrm{J}}', C:'{\\,\\mathrm{C}}',
+      K:'{\\,\\mathrm{K}}', ges:'{_{\\mathrm{ges}}}'
+    }
+  },
+  options: { skipHtmlTags: ['script','noscript','style','textarea'] }
+};
+</script>
+{% endraw %}
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
+
+<style>
+:root {
+  --blau:#00639C; --blau-hell:#E6F3FA;
+  --gruen:#B1C800; --pink:#D4005E; --gelb:#F8B442;
+  --border:#ddd; --bg:#f4f5f6; --white:#fff;
+  --text:#1a1a1a; --muted:#666; --r:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DIN Pro',Calibri,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:15px;}
+.wrapper{max-width:860px;margin:0 auto;padding:2rem 1rem 5rem;}
+.drs-page{background:var(--white);border:1px solid var(--border);border-radius:var(--r);padding:2rem;}
+.drs-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid #eee;}
+.brand{font-weight:700;color:var(--blau);font-size:14px;letter-spacing:.5px;}
+.meta{text-align:right;font-size:12px;color:var(--muted);line-height:1.8;}
+.meta strong{color:var(--text);font-size:13px;}
+.sec-label{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--blau);margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.sec-label::before{content:'';width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid var(--blau);display:inline-block;}
+.lernsituation{background:var(--blau-hell);border-left:3px solid var(--blau);border-radius:0 8px 8px 0;padding:1rem 1.25rem;margin-bottom:1.5rem;overflow:hidden;}
+.lernsituation-titel{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--blau);margin-bottom:8px;}
+.lernsituation-bild{float:right;margin:0 0 10px 16px;width:200px;border-radius:6px;overflow:hidden;border:1px solid rgba(0,99,156,.15);}
+.lernsituation-bild img{width:100%;height:auto;display:block;}
+.lernsituation-text{font-size:14px;line-height:1.7;color:var(--text);}
+.lernsituation-text p{margin-bottom:.6em;}
+.lernsituation::after{content:'';display:table;clear:both;}
+.aufgabe{border:1px solid var(--border);border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:1.1rem;}
+.aufgabe.done{border-color:#a5d6a7;}
+.aufg-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px;}
+.aufg-nr{font-size:12px;font-weight:700;color:var(--blau);white-space:nowrap;}
+.aufg-text{font-size:14px;line-height:1.7;margin-bottom:11px;}
+.aufg-text p{margin-bottom:.5em;}
+textarea.antwort{width:100%;min-height:90px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;background:#fafafa;color:var(--text);resize:vertical;line-height:1.55;}
+textarea.antwort:focus{outline:none;border-color:var(--blau);box-shadow:0 0 0 2px rgba(0,99,156,.1);}
+.upload-row{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;}
+.upl-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border:1px dashed #ccc;border-radius:6px;background:#fafafa;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit;}
+.upl-btn:hover{border-color:var(--blau);color:var(--blau);background:var(--blau-hell);}
+input[type=file]{display:none;}
+.preview-area{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.prev-img{position:relative;width:70px;height:70px;border-radius:6px;overflow:hidden;border:1px solid var(--border);}
+.prev-img img{width:100%;height:100%;object-fit:cover;}
+.prev-pdf{position:relative;display:flex;align-items:center;gap:6px;padding:6px 28px 6px 10px;background:#f0f4ff;border:1px solid #c5d0e8;border-radius:6px;font-size:12px;color:#2d4a8a;}
+.del-btn{position:absolute;top:50%;right:5px;transform:translateY(-50%);background:none;border:none;color:#aaa;cursor:pointer;font-size:15px;}
+.del-btn:hover{color:#c00;}
+.prev-img .del-btn{top:3px;right:3px;transform:none;background:rgba(0,0,0,.5);color:#fff;border-radius:3px;width:17px;height:17px;font-size:11px;display:flex;align-items:center;justify-content:center;}
+.aktions-row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:1.5rem;}
+.btn-primary{background:var(--blau);color:#fff;border:none;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+.btn-primary:hover{opacity:.87;}
+.btn-sec{background:transparent;color:var(--blau);border:1px solid var(--blau);border-radius:6px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+.save-note{font-size:12px;color:var(--muted);}
+.drs-footer{display:flex;justify-content:space-between;align-items:center;margin-top:1.5rem;padding-top:.85rem;border-top:1px solid #eee;font-size:11px;color:#bbb;}
+.cbar{display:flex;height:3px;gap:2px;margin-bottom:4px;}
+.cbar span:nth-child(1){flex:4;background:var(--blau);border-radius:2px;}
+.cbar span:nth-child(2){flex:1;background:var(--gruen);border-radius:2px;}
+.cbar span:nth-child(3){flex:1;background:var(--pink);border-radius:2px;}
+.cbar span:nth-child(4){flex:1;background:var(--gelb);border-radius:2px;}
+
+@media print {
+  body { background: #fff; }
+  .wrapper { max-width: none; padding: 0; }
+  .drs-page { border: none; padding: 0; }
+  .upload-row, .aktions-row { display: none !important; }
+  textarea.antwort { background: #fff; border: 1px solid #ccc; min-height: 100px; }
+  .aufgabe { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<div class="drs-page">
+
+  <div class="drs-header">
+    <div class="brand">David-Roentgen-Schule · Neuwied</div>
+    <div class="meta">
+      <strong id="m-fach"></strong><br>
+      <span id="m-lf"></span><br>
+      Datum: <span id="m-datum"></span>
+    </div>
+  </div>
+
+  <div class="sec-label">Lernsituation</div>
+  <div class="lernsituation" id="d-lernsituation">
+    <div id="ls-bild-wrap"></div>
+    <div class="lernsituation-titel" id="ls-titel"></div>
+    <div class="lernsituation-text" id="ls-text"></div>
+  </div>
+
+  <div class="sec-label">Aufgaben</div>
+  <div id="aufg-container"></div>
+
+  <div class="aktions-row">
+    <button class="btn-primary" type="button" id="btn-speichern">Im Browser speichern</button>
+    <button class="btn-sec" type="button" onclick="window.print()">Drucken</button>
+    <span class="save-note" id="save-info"></span>
+  </div>
+
+  <div class="drs-footer">
+    <div>
+      <div class="cbar"><span></span><span></span><span></span><span></span></div>
+      © David-Roentgen-Schule Neuwied
+    </div>
+    <div id="ws-id-tag"></div>
+  </div>
+
+</div>
+</div>
+
+<script id="drs-config" type="application/json">
+{{ config_json|safe }}
+</script>
+
+{% raw %}
+<script>
+const CFG = JSON.parse(document.getElementById('drs-config').textContent);
+const STORAGE_KEY = 'drs-ws-' + (document.title || 'sheet').replace(/\W+/g, '-');
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function paragraphs(text) {
+  return String(text || '').split(/\n\s*\n/).filter(Boolean).map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('');
+}
+
+document.getElementById('m-fach').textContent = CFG.meta.fach || '';
+document.getElementById('m-lf').textContent = CFG.meta.lernfeld || '';
+document.getElementById('m-datum').textContent = new Date().toLocaleDateString('de-DE');
+document.getElementById('ls-titel').textContent = CFG.meta.lernsituationTitel || '';
+document.getElementById('ls-text').innerHTML = paragraphs(CFG.meta.lernsituationText);
+if (CFG.meta.lernsituationBild) {
+  document.getElementById('ls-bild-wrap').innerHTML =
+    '<div class="lernsituation-bild"><img src="' + CFG.meta.lernsituationBild + '" alt=""></div>';
+}
+
+// Aufgaben rendern (Text bewusst MIT $ ... $, damit MathJax es findet)
+const uploads = {}; // {aufgabeId: [{type, dataUrl, name}]}
+
+function renderAufgaben() {
+  const container = document.getElementById('aufg-container');
+  let html = '';
+  (CFG.aufgaben || []).forEach((a, idx) => {
+    const id = a.id || (idx + 1);
+    const text = a.text || '';
+    const musterBild = a.musterloesungBild;
+    let uploadHtml = '';
+    if (a.upload || a.uploadPDF) {
+      uploadHtml = '<div class="upload-row">';
+      if (a.upload) uploadHtml += '<label class="upl-btn" for="cam-' + id + '">📷 Foto aufnehmen / wählen<input id="cam-' + id + '" type="file" accept="image/*" capture="environment" onchange="addFile(' + id + ',this,\'img\')"></label>';
+      if (a.uploadPDF) uploadHtml += '<label class="upl-btn" for="pdf-' + id + '">📎 PDF anhängen<input id="pdf-' + id + '" type="file" accept="application/pdf" onchange="addFile(' + id + ',this,\'pdf\')"></label>';
+      uploadHtml += '</div><div class="preview-area" id="prev-' + id + '"></div>';
+    }
+    html += '<div class="aufgabe" id="aufgabe-' + id + '">'
+      + '<div class="aufg-top"><span class="aufg-nr">Aufgabe ' + id + '</span></div>'
+      + '<div class="aufg-text">' + paragraphs(text) + '</div>'
+      + '<textarea class="antwort" id="ant-' + id + '" placeholder="Deine Antwort…"></textarea>'
+      + uploadHtml
+      + '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function addFile(id, input, kind) {
+  const f = input.files[0];
+  if (!f) return;
+  if (f.size > 5 * 1024 * 1024) { alert('Datei zu groß (max. 5 MB).'); input.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    uploads[id] = uploads[id] || [];
+    uploads[id].push({ type: kind, dataUrl: e.target.result, name: f.name });
+    renderPreviews(id);
+    input.value = '';
+    persist();
+  };
+  reader.readAsDataURL(f);
+}
+
+function renderPreviews(id) {
+  const el = document.getElementById('prev-' + id);
+  if (!el) return;
+  el.innerHTML = (uploads[id] || []).map((u, i) => {
+    if (u.type === 'img') {
+      return '<div class="prev-img"><img src="' + u.dataUrl + '"><button class="del-btn" onclick="delFile(' + id + ',' + i + ')">×</button></div>';
+    } else {
+      return '<div class="prev-pdf">📎 ' + esc(u.name) + '<button class="del-btn" onclick="delFile(' + id + ',' + i + ')">×</button></div>';
+    }
+  }).join('');
+}
+
+function delFile(id, i) {
+  if (uploads[id]) { uploads[id].splice(i, 1); renderPreviews(id); persist(); }
+}
+
+function persist() {
+  const state = { answers: {}, uploads };
+  (CFG.aufgaben || []).forEach(a => {
+    const ta = document.getElementById('ant-' + (a.id));
+    if (ta) state.answers[a.id] = ta.value;
+  });
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); document.getElementById('save-info').textContent = 'gespeichert ' + new Date().toLocaleTimeString('de-DE'); }
+  catch (e) { document.getElementById('save-info').textContent = 'Speichern fehlgeschlagen'; }
+}
+
+function restore() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const state = JSON.parse(raw);
+    Object.entries(state.answers || {}).forEach(([id, val]) => {
+      const ta = document.getElementById('ant-' + id);
+      if (ta) ta.value = val;
+    });
+    Object.entries(state.uploads || {}).forEach(([id, arr]) => { uploads[id] = arr; renderPreviews(id); });
+  } catch (e) {}
+}
+
+renderAufgaben();
+restore();
+document.getElementById('btn-speichern').addEventListener('click', persist);
+document.querySelectorAll('.antwort').forEach(ta => ta.addEventListener('input', persist));
+</script>
+{% endraw %}
+
+</body>
+</html>
