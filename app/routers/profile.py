@@ -3,13 +3,14 @@ import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.crypto import decrypt_secret, encrypt_secret, mask_key
 from app.db import get_db
 from app.models import User
+from app.services.webuntis_client import test_connection as untis_test
 from app.templating import templates
 
 router = APIRouter()
@@ -83,3 +84,16 @@ def profile_untis(
         audit(db, "untis_creds_set", actor=user, request=request)
     db.commit()
     return RedirectResponse("/profile", status_code=303)
+
+
+@router.post("/profile/untis/test")
+def profile_untis_test(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ok, msg = untis_test(user)
+    audit(db, "untis_test", actor=user,
+          detail=("ok" if ok else "fail") + f": {msg}", request=request)
+    db.commit()
+    return JSONResponse({"ok": ok, "message": msg})

@@ -32,7 +32,11 @@
     </div>
     <div>
       <label>Inhalt (erscheint im Header des Arbeitsblatts)</label>
-      <input id="m-header-value" placeholder="z.B. Lernfeld 3 · Einheit 02 — Stromkreise analysieren">
+      <div style="display:flex;gap:.5rem;align-items:stretch">
+        <input id="m-header-value" placeholder="z.B. Lernfeld 3 · Einheit 02 — Stromkreise analysieren" style="flex:1">
+        <button type="button" class="btn-sec" id="btn-untis-pick" style="padding:6px 12px;font-size:12px;white-space:nowrap">Aus Stundenplan…</button>
+      </div>
+      <div id="untis-pick-list" style="display:none;margin-top:.5rem;background:#fafafa;border:1px solid var(--border);border-radius:6px;padding:.6rem"></div>
     </div>
   </div>
 
@@ -295,6 +299,59 @@ const _previewHtmlBtn = document.getElementById('btn-preview-html');
 if (_previewHtmlBtn) _previewHtmlBtn.addEventListener('click', () => saveThenOpen('/preview.html'));
 const _previewPdfBtn = document.getElementById('btn-preview-pdf');
 if (_previewPdfBtn) _previewPdfBtn.addEventListener('click', () => saveThenOpen('/preview.pdf'));
+
+// ── WebUntis-Integration: "Aus Stundenplan…" ─────────────────────────────
+const _untisBtn = document.getElementById('btn-untis-pick');
+const _untisList = document.getElementById('untis-pick-list');
+function _renderUntisError(msg) {
+  _untisList.style.display = 'block';
+  _untisList.innerHTML = '<span style="color:#c62828">⚠ ' + msg + '</span>';
+}
+_untisBtn.addEventListener('click', async () => {
+  _untisBtn.disabled = true;
+  _untisList.style.display = 'block';
+  _untisList.innerHTML = '<span class="muted">Stundenplan wird geladen…</span>';
+  try {
+    const res = await fetch('/api/timetable/today');
+    const data = await res.json();
+    if (!data.ok) { _renderUntisError(data.error || 'Unbekannter Fehler'); return; }
+    if (!data.lessons || data.lessons.length === 0) {
+      _untisList.innerHTML = '<span class="muted">Heute keine Stunden gefunden.</span>';
+      return;
+    }
+    // Liste aufbauen
+    let html = '<div class="muted" style="margin-bottom:.4rem;font-size:12px">Klick übernimmt Klasse + Fach ins Header-Feld:</div>';
+    data.lessons.forEach(l => {
+      const klasse = (l.klassen || []).join(', ');
+      const fach = (l.subjects || []).join(', ');
+      const raum = (l.rooms || []).join(', ');
+      const st = (l.start || '').slice(11,16);
+      const en = (l.end || '').slice(11,16);
+      const text = (klasse || '—') + (fach ? ' · ' + fach : '');
+      html += '<div style="padding:6px 0;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:.5rem">'
+        + '<div><strong>' + st + '–' + en + '</strong> &nbsp;' + (klasse || '—')
+        + (fach ? ' · ' + fach : '') + (raum ? ' <span class="muted">(' + raum + ')</span>' : '') + '</div>'
+        + '<button type="button" class="btn-sec" data-pick="' + encodeURIComponent(text) + '" style="padding:3px 9px;font-size:11px">übernehmen</button>'
+        + '</div>';
+    });
+    _untisList.innerHTML = html;
+    _untisList.querySelectorAll('[data-pick]').forEach(b => {
+      b.addEventListener('click', () => {
+        const v = decodeURIComponent(b.dataset.pick);
+        document.getElementById('m-header-value').value = v;
+        // Sinnvoller Default: Lernfeld-Label wenn leer
+        const sel = document.getElementById('m-header-label');
+        if (!sel.value) sel.value = 'lernfeld';
+        _untisList.style.display = 'none';
+        flash('Übernommen: ' + v);
+      });
+    });
+  } catch (e) {
+    _renderUntisError(e.message);
+  } finally {
+    _untisBtn.disabled = false;
+  }
+});
 
 loadInitial();
 </script>

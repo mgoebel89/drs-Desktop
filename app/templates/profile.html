@@ -50,6 +50,27 @@
       {% endif %}
     </div>
   </form>
-  <p class="muted" style="margin-top:.8rem">Verbindungstest folgt mit der WebUntis-Integration.</p>
+  <div style="margin-top:.9rem">
+    <button class="btn btn-sec" type="button" id="btn-untis-test">Verbindung testen</button>
+    <span id="untis-test-status" style="margin-left:.7rem;font-size:13px"></span>
+  </div>
+  <script>
+  document.getElementById('btn-untis-test').addEventListener('click', async () => {
+    const status = document.getElementById('untis-test-status');
+    const btn = document.getElementById('btn-untis-test');
+    btn.disabled = true; status.textContent = 'Teste…'; status.style.color = '#666';
+    try {
+      const res = await fetch('/profile/untis/test', {method: 'POST'});
+      const data = await res.json();
+      status.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
+      status.style.color = data.ok ? '#2e7d32' : '#c62828';
+    } catch (e) {
+      status.textContent = '✗ Fehler: ' + e.message;
+      status.style.color = '#c62828';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  </script>
 </div>
 {% endblock %}

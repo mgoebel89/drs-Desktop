@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Stundenplan · DRS{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row-spread">
+    <h1>Mein Stundenplan</h1>
+    {% if monday %}
+    <div style="display:flex;gap:.4rem;align-items:center">
+      <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ prev_week }}">← vorige Woche</a>
+      <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ this_week }}">heute</a>
+      <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ next_week }}">nächste Woche →</a>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if error %}
+    <div class="flash flash-err">{{ error }}</div>
+  {% endif %}
+
+  {% if monday %}
+    <p class="muted" style="margin-bottom:1rem">
+      Woche vom <strong>{{ monday.strftime('%d.%m.%Y') }}</strong>
+      bis <strong>{{ friday.strftime('%d.%m.%Y') }}</strong>
+    </p>
+  {% endif %}
+
+  {% if lessons %}
+    <table>
+      <thead><tr>
+        <th>Tag</th><th>Beginn</th><th>Ende</th><th>Klasse(n)</th><th>Fach</th><th>Raum</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+      {% for l in lessons %}
+      {% set d = l.start[:10] %}
+      {% set st = l.start[11:16] %}
+      {% set en = l.end[11:16] %}
+      <tr {% if l.code == 'cancelled' %}style="opacity:.5;text-decoration:line-through"{% endif %}>
+        <td>{{ d }}</td>
+        <td>{{ st }}</td>
+        <td>{{ en }}</td>
+        <td>{{ l.klassen|join(', ') }}</td>
+        <td>{{ l.subjects|join(', ') }}</td>
+        <td>{{ l.rooms|join(', ') }}</td>
+        <td>
+          {% if l.code == 'cancelled' %}<span class="badge b-inactive">entfällt</span>
+          {% elif l.code == 'irregular' %}<span class="badge b-admin">Vertretung</span>
+          {% endif %}
+          {% if l.info %}<span class="muted">{{ l.info }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% elif not error %}
+    <p class="muted">Keine Stunden in dieser Woche gefunden.</p>
+  {% endif %}
+</div>
+{% endblock %}

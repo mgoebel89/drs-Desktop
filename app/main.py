@@ -15,6 +15,7 @@ from app.routers import profile as profile_router
 from app.routers import worksheets as worksheets_router
 from app.routers import settings as settings_router
 from app.routers import help as help_router
+from app.routers import timetable as timetable_router
 from app.models import User
 from app.templating import templates
 
@@ -30,6 +31,7 @@ app.include_router(profile_router.router)
 app.include_router(worksheets_router.router)
 app.include_router(settings_router.router)
 app.include_router(help_router.router)
+app.include_router(timetable_router.router)
 
 
 @app.get("/")
