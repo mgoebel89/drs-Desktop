@@ -34,20 +34,19 @@ def timetable_view(
     if not user.untis_creds_enc:
         return templates.TemplateResponse(request, "timetable.html", {
             "user": user, "error": "Bitte hinterlege zuerst WebUntis-Zugangsdaten im Profil.",
-            "lessons": [], "monday": None, "friday": None, "prev_week": None, "next_week": None,
+            "grid": None, "prev_week": None, "next_week": None,
         })
 
     ref = _parse_iso_date(week)
     try:
-        monday, friday, lessons = webuntis_client.get_week(user, ref)
+        grid = webuntis_client.get_week_grid(user, ref)
         err = None
     except Exception as e:
-        monday, friday, lessons = None, None, []
+        grid = None
         err = f"{type(e).__name__}: {e}"
 
     return templates.TemplateResponse(request, "timetable.html", {
-        "user": user, "error": err,
-        "lessons": lessons, "monday": monday, "friday": friday,
+        "user": user, "error": err, "grid": grid,
         "prev_week": (ref - timedelta(days=7)).isoformat(),
         "next_week": (ref + timedelta(days=7)).isoformat(),
         "this_week": date.today().isoformat(),

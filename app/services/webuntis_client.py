@@ -161,6 +161,104 @@ def get_week(user: User, ref: date | None = None) -> tuple[date, date, list[dict
     return monday, friday, get_my_timetable(user, monday, friday)
 
 
+def _fmt_hhmm(v) -> str:
+    """Untis liefert Zeiten je nach Lib als time-Objekt, datetime oder int (HHMM).
+    Vereinheitlichen auf 'HH:MM'."""
+    if v is None:
+        return ""
+    if hasattr(v, "strftime"):
+        return v.strftime("%H:%M")
+    s = str(v).zfill(4)
+    return f"{s[:2]}:{s[2:]}" if s.isdigit() and len(s) == 4 else s
+
+
+def get_timegrid(user: User) -> list[dict]:
+    """Liefert die schul-weiten Stundenblöcke aus Untis als Liste von Slots,
+    gemerged über alle Wochentage. Format: [{name, start, end}]."""
+    with session_for(user) as s:
+        _warmup(s)
+        grid = s.timegrid_units()
+        slots: dict[tuple[str, str], str] = {}
+        # TimegridObject iteriert über Day-Objekte; jedes Day hat .dayUnits oder Liste von Slots
+        try:
+            for day in grid:
+                units = getattr(day, "dayUnits", None) or getattr(day, "_data", {}).get("timeUnits", []) or []
+                for u in units:
+                    name = (u.get("name") if isinstance(u, dict) else getattr(u, "name", "")) or ""
+                    start = _fmt_hhmm((u.get("startTime") if isinstance(u, dict) else getattr(u, "start", None)))
+                    end = _fmt_hhmm((u.get("endTime") if isinstance(u, dict) else getattr(u, "end", None)))
+                    if start and end:
+                        slots.setdefault((start, end), str(name))
+        except Exception:
+            log.debug("timegrid_units konnte nicht geparst werden", exc_info=True)
+    out = [{"name": n, "start": s_, "end": e} for (s_, e), n in slots.items()]
+    out.sort(key=lambda x: x["start"])
+    # Falls Namen leer: durchnummerieren
+    for i, slot in enumerate(out, start=1):
+        if not slot["name"]:
+            slot["name"] = str(i)
+    return out
+
+
+def get_week_grid(user: User, ref: date | None = None) -> dict:
+    """Vollständige Wochenansicht im Grid-Format.
+    Liefert: {monday, friday, days: [{date, weekday_name}], slots: [{name,start,end}],
+              cells: dict[(slot_start, day_idx)] -> list[lesson_dict]}."""
+    ref = ref or date.today()
+    monday = ref - timedelta(days=ref.weekday())
+    friday = monday + timedelta(days=4)
+    lessons = get_my_timetable(user, monday, friday)
+    slots = get_timegrid(user)
+
+    # Fallback: kein timegrid lieferbar → dynamisch aus den Lessons ableiten
+    if not slots:
+        unique = {}
+        for l in lessons:
+            st = (l["start"] or "")[11:16]
+            en = (l["end"] or "")[11:16]
+            if st and en:
+                unique.setdefault((st, en), True)
+        slots = [{"name": str(i+1), "start": s_, "end": e}
+                 for i, (s_, e) in enumerate(sorted(unique.keys()))]
+
+    days = []
+    weekday_names = ["Mo", "Di", "Mi", "Do", "Fr"]
+    for i in range(5):
+        d = monday + timedelta(days=i)
+        days.append({"date": d, "weekday_name": weekday_names[i]})
+
+    # Cells befüllen: key = (slot_start, day_idx)
+    cells: dict[tuple[str, int], list[dict]] = {}
+    for l in lessons:
+        lstart = (l["start"] or "")[:10]   # 'YYYY-MM-DD'
+        ltime = (l["start"] or "")[11:16]
+        # Tag-Index 0..4
+        try:
+            lday = datetime.fromisoformat(l["start"]).date()
+            day_idx = (lday - monday).days
+        except Exception:
+            continue
+        if not (0 <= day_idx <= 4):
+            continue
+        # Slot finden: exakte Startzeit oder umschließendes Intervall
+        slot_key = None
+        for sl in slots:
+            if sl["start"] == ltime:
+                slot_key = sl["start"]; break
+        if slot_key is None:
+            for sl in slots:
+                if sl["start"] <= ltime < sl["end"]:
+                    slot_key = sl["start"]; break
+        if slot_key is None:
+            continue
+        cells.setdefault((slot_key, day_idx), []).append(l)
+
+    return {
+        "monday": monday, "friday": friday,
+        "days": days, "slots": slots, "cells": cells,
+    }
+
+
 def diagnose(user: User) -> list[dict]:
     """Schrittweise Diagnose: testet einzelne API-Calls und liefert Statusliste."""
     results: list[dict] = []

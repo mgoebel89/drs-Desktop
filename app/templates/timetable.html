@@ -1,10 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Stundenplan · DRS{% endblock %}
 {% block content %}
+<style>
+  .tt-grid { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+  .tt-grid th, .tt-grid td { border: 1px solid #e2e2e2; padding: 4px 6px; vertical-align: top; }
+  .tt-grid thead th { background: var(--blau-hell); color: var(--blau); font-weight: 700; text-align: center; }
+  .tt-grid th.slot { background: #f4f5f6; width: 95px; text-align: left; }
+  .tt-grid .slot-name { font-weight: 700; color: var(--blau); }
+  .tt-grid .slot-time { color: var(--muted); font-size: 11px; }
+  .tt-grid td.empty { background: #fafafa; }
+  .tt-cell { min-height: 38px; }
+  .tt-lesson { padding: 4px 6px; border-radius: 4px; background: var(--blau-hell); border-left: 3px solid var(--blau); margin-bottom: 3px; }
+  .tt-lesson:last-child { margin-bottom: 0; }
+  .tt-klasse { font-weight: 700; color: var(--text); font-size: 12px; line-height: 1.25; }
+  .tt-room { color: var(--muted); font-size: 11px; margin-top: 1px; }
+  .tt-lesson.cancelled { opacity: .55; text-decoration: line-through; background: #f5f5f5; border-left-color: #aaa; }
+  .tt-lesson.irregular { background: #fff3e0; border-left-color: var(--gelb); }
+</style>
+
 <div class="card">
   <div class="row-spread">
     <h1>Mein Stundenplan</h1>
-    {% if monday %}
+    {% if grid %}
     <div style="display:flex;gap:.4rem;align-items:center">
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ prev_week }}">← vorige Woche</a>
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ this_week }}">heute</a>
@@ -18,42 +35,57 @@
     <p><a class="btn btn-sec" href="/timetable/diagnose">→ Diagnose ausführen</a></p>
   {% endif %}
 
-  {% if monday %}
+  {% if grid %}
     <p class="muted" style="margin-bottom:1rem">
-      Woche vom <strong>{{ monday.strftime('%d.%m.%Y') }}</strong>
-      bis <strong>{{ friday.strftime('%d.%m.%Y') }}</strong>
+      Woche vom <strong>{{ grid.monday.strftime('%d.%m.%Y') }}</strong>
+      bis <strong>{{ grid.friday.strftime('%d.%m.%Y') }}</strong>
     </p>
-  {% endif %}
-
-  {% if lessons %}
-    <table>
-      <thead><tr>
-        <th>Tag</th><th>Beginn</th><th>Ende</th><th>Klasse(n)</th><th>Fach</th><th>Raum</th><th>Status</th>
-      </tr></thead>
+    {% if grid.slots %}
+    <table class="tt-grid">
+      <thead>
+        <tr>
+          <th class="slot">Stunde</th>
+          {% for d in grid.days %}
+            <th>{{ d.weekday_name }}<br><span style="font-weight:normal;font-size:11px">{{ d.date.strftime('%d.%m.') }}</span></th>
+          {% endfor %}
+        </tr>
+      </thead>
       <tbody>
-      {% for l in lessons %}
-      {% set d = l.start[:10] %}
-      {% set st = l.start[11:16] %}
-      {% set en = l.end[11:16] %}
-      <tr {% if l.code == 'cancelled' %}style="opacity:.5;text-decoration:line-through"{% endif %}>
-        <td>{{ d }}</td>
-        <td>{{ st }}</td>
-        <td>{{ en }}</td>
-        <td>{{ l.klassen|join(', ') }}</td>
-        <td>{{ l.subjects|join(', ') }}</td>
-        <td>{{ l.rooms|join(', ') }}</td>
-        <td>
-          {% if l.code == 'cancelled' %}<span class="badge b-inactive">entfällt</span>
-          {% elif l.code == 'irregular' %}<span class="badge b-admin">Vertretung</span>
-          {% endif %}
-          {% if l.info %}<span class="muted">{{ l.info }}</span>{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
+        {% for sl in grid.slots %}
+        <tr>
+          <th class="slot">
+            <div class="slot-name">{{ sl.name }}.</div>
+            <div class="slot-time">{{ sl.start }}–{{ sl.end }}</div>
+          </th>
+          {% for d_idx in range(grid.days|length) %}
+            {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
+            <td class="tt-cell {% if not lessons %}empty{% endif %}">
+              {% for l in lessons %}
+                {% set cls = (l.klassen|join(' / ')) or '—' %}
+                {% set fach = l.subjects|join(', ') %}
+                {% set raum = l.rooms|join(', ') %}
+                {% set state = '' %}
+                {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
+                {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
+                <div class="tt-lesson {{ state }}" title="{{ fach }}{% if l.info %} · {{ l.info }}{% endif %}">
+                  <div class="tt-klasse">{{ cls }}</div>
+                  {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
+                </div>
+              {% endfor %}
+            </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
       </tbody>
     </table>
-  {% elif not error %}
-    <p class="muted">Keine Stunden in dieser Woche gefunden.</p>
+    <p class="muted" style="font-size:11px;margin-top:.8rem">
+      Mehrere Klassen pro Slot mit „ / " getrennt · Fach erscheint im Tooltip (Mouseover) ·
+      <span style="color:var(--gelb)">■</span> Vertretung ·
+      <span style="color:#aaa">■</span> entfällt
+    </p>
+    {% else %}
+      <p class="muted">Keine Stundenblöcke gefunden.</p>
+    {% endif %}
   {% endif %}
 </div>
 {% endblock %}
