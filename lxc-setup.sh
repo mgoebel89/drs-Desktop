@@ -4,6 +4,11 @@
 #   DRS_REPO, DRS_BRANCH, DRS_ADMIN_USER, DRS_ADMIN_NAME, DRS_ADMIN_PW
 set -euo pipefail
 
+# Universelles Locale — viele Debian-LXC-Templates haben kein en_US.UTF-8
+# generiert. C.UTF-8 ist immer verfügbar und unterdrückt perl/locale-Warnungen.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
 : "${DRS_REPO:?DRS_REPO fehlt}"
 : "${DRS_BRANCH:=main}"
 : "${DRS_ADMIN_USER:?DRS_ADMIN_USER fehlt}"
