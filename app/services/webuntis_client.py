@@ -121,6 +121,10 @@ def _period_to_dict(p) -> dict:
         "rooms": _names(p.rooms),
         "code": getattr(p, "code", None),
         "info": getattr(p, "info", "") or "",
+        # Lernstoff/Lehrtext aus Untis (Unterrichtsbezeichnung). Felder können je
+        # nach Schule befüllt sein oder leer bleiben.
+        "lstext": (getattr(p, "lstext", "") or "").strip(),
+        "subst_text": (getattr(p, "substText", "") or "").strip(),
     }
 
 
@@ -200,6 +204,54 @@ def get_timegrid(user: User) -> list[dict]:
     return out
 
 
+def _pair_slots(slots: list[dict]) -> list[dict]:
+    """Fasst je zwei aufeinanderfolgende Slots zu einem 90-Min-Block zusammen,
+    sofern sie nahtlos sind (Ende[i] == Start[i+1]). Sonst Slot solo."""
+    out: list[dict] = []
+    i = 0
+    while i < len(slots):
+        a = slots[i]
+        b = slots[i + 1] if i + 1 < len(slots) else None
+        if b and a["end"] == b["start"]:
+            out.append({
+                "name": f"{a['name']}./{b['name']}.",
+                "start": a["start"],
+                "end": b["end"],
+                "sub_starts": [a["start"], b["start"]],
+            })
+            i += 2
+        else:
+            out.append({"name": a["name"] + ".", "start": a["start"],
+                        "end": a["end"], "sub_starts": [a["start"]]})
+            i += 1
+    return out
+
+
+def _merge_block_lessons(lessons: list[dict]) -> list[dict]:
+    """Innerhalb eines Block-Slots: gleichartige Lessons (selbe Klasse/Fach/Raum)
+    zu einem einzigen Eintrag zusammenfassen, Lernstoff vereinen."""
+    by_key: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for l in lessons:
+        key = (tuple(l.get("klassen") or []),
+               tuple(l.get("subjects") or []),
+               tuple(l.get("rooms") or []),
+               l.get("code") or "")
+        if key not in by_key:
+            by_key[key] = dict(l)
+            order.append(key)
+        else:
+            existing = by_key[key]
+            # Lernstoff aus beiden Hälften zusammenführen (uniq)
+            stoff = [s for s in [existing.get("lstext"), l.get("lstext")] if s]
+            if stoff:
+                existing["lstext"] = " · ".join(dict.fromkeys(stoff))
+            infos = [s for s in [existing.get("info"), l.get("info")] if s]
+            if infos:
+                existing["info"] = " · ".join(dict.fromkeys(infos))
+    return [by_key[k] for k in order]
+
+
 def get_week_grid(user: User, ref: date | None = None) -> dict:
     """Vollständige Wochenansicht im Grid-Format.
     Liefert: {monday, friday, days: [{date, weekday_name}], slots: [{name,start,end}],
@@ -221,18 +273,19 @@ def get_week_grid(user: User, ref: date | None = None) -> dict:
         slots = [{"name": str(i+1), "start": s_, "end": e}
                  for i, (s_, e) in enumerate(sorted(unique.keys()))]
 
+    # Doppelstunden bilden (DRS: 90-Min-Raster).
+    blocks = _pair_slots(slots)
+
     days = []
     weekday_names = ["Mo", "Di", "Mi", "Do", "Fr"]
     for i in range(5):
         d = monday + timedelta(days=i)
         days.append({"date": d, "weekday_name": weekday_names[i]})
 
-    # Cells befüllen: key = (slot_start, day_idx)
+    # Cells befüllen: key = (block_start, day_idx)
     cells: dict[tuple[str, int], list[dict]] = {}
     for l in lessons:
-        lstart = (l["start"] or "")[:10]   # 'YYYY-MM-DD'
         ltime = (l["start"] or "")[11:16]
-        # Tag-Index 0..4
         try:
             lday = datetime.fromisoformat(l["start"]).date()
             day_idx = (lday - monday).days
@@ -240,22 +293,25 @@ def get_week_grid(user: User, ref: date | None = None) -> dict:
             continue
         if not (0 <= day_idx <= 4):
             continue
-        # Slot finden: exakte Startzeit oder umschließendes Intervall
-        slot_key = None
-        for sl in slots:
-            if sl["start"] == ltime:
-                slot_key = sl["start"]; break
-        if slot_key is None:
-            for sl in slots:
-                if sl["start"] <= ltime < sl["end"]:
-                    slot_key = sl["start"]; break
-        if slot_key is None:
+        # Block finden: lesson-Start liegt in einem der sub_starts ODER innerhalb [start, end)
+        block_key = None
+        for bl in blocks:
+            if ltime in bl["sub_starts"]:
+                block_key = bl["start"]; break
+        if block_key is None:
+            for bl in blocks:
+                if bl["start"] <= ltime < bl["end"]:
+                    block_key = bl["start"]; break
+        if block_key is None:
             continue
-        cells.setdefault((slot_key, day_idx), []).append(l)
+        cells.setdefault((block_key, day_idx), []).append(l)
+
+    # Innerhalb jedes Blocks gleichartige Lessons zusammenfassen
+    cells = {k: _merge_block_lessons(v) for k, v in cells.items()}
 
     return {
         "monday": monday, "friday": friday,
-        "days": days, "slots": slots, "cells": cells,
+        "days": days, "slots": blocks, "cells": cells,
     }
 
 
