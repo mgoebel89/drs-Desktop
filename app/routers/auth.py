@@ -14,7 +14,10 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_form(request: Request):
+def login_form(request: Request, db: Annotated[Session, Depends(get_db)]):
+    from app.models import User
+    if db.query(User.id).first() is None:
+        return RedirectResponse("/setup", status_code=303)
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 

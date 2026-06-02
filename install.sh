@@ -78,9 +78,7 @@ if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
 fi
 TEMPLATE_REF="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}"
 
-ADMIN_USER="$(ask "Admin-Benutzername für die Web-UI" "admin")"
-ADMIN_NAME="$(ask "Vollständiger Name (Admin)" "Administrator")"
-ADMIN_PW="$(ask_pw "Initial-Passwort für ${ADMIN_USER}")"
+# Admin-Account wird nach dem Boot über die Web-UI angelegt (First-Run-Setup).
 
 # ─── Netzwerk-String zusammenbauen ────────────────────────────────────────
 if [[ "$NET_CFG" == "dhcp" ]]; then
@@ -125,9 +123,6 @@ msg "Führe Setup im Container aus (dauert einige Minuten) …"
 pct exec "$CTID" -- env \
   DRS_REPO="$GIT_REPO" \
   DRS_BRANCH="$GIT_BRANCH" \
-  DRS_ADMIN_USER="$ADMIN_USER" \
-  DRS_ADMIN_NAME="$ADMIN_NAME" \
-  DRS_ADMIN_PW="$ADMIN_PW" \
   bash /root/lxc-setup.sh
 
 # ─── Container-IP ermitteln ───────────────────────────────────────────────
@@ -142,10 +137,11 @@ ${GRN}╔═══════════════════════�
   CT-ID:       $CTID
   Hostname:    $HOSTNAME
   IP:          $CT_IP
-  Web-UI:      http://$CT_IP/
-  Login:       $ADMIN_USER
 
-  Update:      pct exec $CTID -- drs-update
+  → Öffne im Browser:  http://$CT_IP/
+     Die Seite führt dich durch die Anlage des ersten Admin-Accounts.
+
+  Update:      pct exec $CTID -- /usr/local/sbin/drs-update
   Logs:        pct exec $CTID -- journalctl -u drs-api -f
   Shell:       pct enter $CTID
 

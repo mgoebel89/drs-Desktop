@@ -11,9 +11,12 @@ export LC_ALL=C.UTF-8
 
 : "${DRS_REPO:?DRS_REPO fehlt}"
 : "${DRS_BRANCH:=main}"
-: "${DRS_ADMIN_USER:?DRS_ADMIN_USER fehlt}"
+# Admin-Account wird über das Browser-Setup angelegt (First-Run-Dialog).
+# Optional: DRS_ADMIN_USER + DRS_ADMIN_PW können trotzdem gesetzt sein,
+# dann wird CLI-Anlage versucht (Rückwärtskompatibilität).
+: "${DRS_ADMIN_USER:=}"
 : "${DRS_ADMIN_NAME:=}"
-: "${DRS_ADMIN_PW:?DRS_ADMIN_PW fehlt}"
+: "${DRS_ADMIN_PW:=}"
 
 APP_DIR=/opt/drs/app
 VENV_DIR=/opt/drs/venv
@@ -109,12 +112,16 @@ msg "Alembic migration"
 ( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
     "$VENV_DIR/bin/alembic" -c alembic.ini upgrade head )
 
-# ─── 9) Admin-Account ─────────────────────────────────────────────────────
-msg "Lege Admin-Account '$DRS_ADMIN_USER' an"
-( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
-    "$VENV_DIR/bin/python" -m app.cli create-admin \
-      -u "$DRS_ADMIN_USER" -n "$DRS_ADMIN_NAME" -p "$DRS_ADMIN_PW" ) || \
-  msg "Hinweis: Falls Admin schon existiert, wurde keine Aktion ausgeführt."
+# ─── 9) Admin-Account (optional via CLI; sonst über Browser-Setup) ────────
+if [[ -n "$DRS_ADMIN_USER" && -n "$DRS_ADMIN_PW" ]]; then
+  msg "Lege Admin-Account '$DRS_ADMIN_USER' per CLI an"
+  ( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
+      "$VENV_DIR/bin/python" -m app.cli create-admin \
+        -u "$DRS_ADMIN_USER" -n "$DRS_ADMIN_NAME" -p "$DRS_ADMIN_PW" ) || \
+    msg "Hinweis: Admin existiert evtl. schon — keine Aktion."
+else
+  msg "Admin-Account: wird beim ersten Aufruf der Web-UI angelegt (First-Run-Setup)"
+fi
 
 # ─── 10) systemd-Unit + Caddyfile installieren ────────────────────────────
 msg "Installiere systemd-Unit + Caddy-Konfig"
