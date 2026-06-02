@@ -7,5 +7,5 @@ VENV=/opt/drs/venv/bin/python
 CFG=/etc/drs/config.env
 
 [[ -f $CFG ]] || { echo "Fehlt: $CFG" >&2; exit 1; }
-exec sudo -u drs --preserve-env=PATH env $(grep -v '^#' "$CFG" | xargs) \
+exec runuser -u drs -- env $(grep -v '^#' "$CFG" | xargs) \
   bash -c "cd $APP_DIR && $VENV -m app.cli $*"

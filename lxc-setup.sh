@@ -23,7 +23,6 @@ msg "apt update + Pakete"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
-  sudo \
   python3 python3-venv python3-dev \
   build-essential pkg-config libffi-dev libssl-dev \
   git curl ca-certificates \
@@ -59,22 +58,24 @@ fi
 # ─── 4) Code holen ────────────────────────────────────────────────────────
 msg "Klone Repository ($DRS_REPO @ $DRS_BRANCH)"
 if [[ -d "$APP_DIR/.git" ]]; then
-  sudo -u drs git -C "$APP_DIR" fetch --depth 1 origin "$DRS_BRANCH"
-  sudo -u drs git -C "$APP_DIR" reset --hard "origin/$DRS_BRANCH"
+  runuser -u drs -- git -C "$APP_DIR" fetch --depth 1 origin "$DRS_BRANCH"
+  runuser -u drs -- git -C "$APP_DIR" reset --hard "origin/$DRS_BRANCH"
 else
-  rm -rf "$APP_DIR"
-  sudo -u drs git clone --depth 1 -b "$DRS_BRANCH" "$DRS_REPO" "$APP_DIR"
+  # rm -rf, da der Verzeichnisbesitzer drs ist (Verzeichnis zuvor angelegt)
+  find "$APP_DIR" -mindepth 1 -delete 2>/dev/null || true
+  runuser -u drs -- git clone --depth 1 -b "$DRS_BRANCH" "$DRS_REPO" "$APP_DIR"
 fi
 
 # ─── 5) Python venv + Dependencies ────────────────────────────────────────
 msg "Erstelle venv und installiere Python-Dependencies"
-sudo -u drs python3 -m venv "$VENV_DIR"
-sudo -u drs "$VENV_DIR/bin/pip" install --upgrade pip -q
-sudo -u drs "$VENV_DIR/bin/pip" install -q -r "$APP_DIR/requirements.txt"
+runuser -u drs -- python3 -m venv "$VENV_DIR"
+runuser -u drs -- "$VENV_DIR/bin/pip" install --upgrade pip -q
+runuser -u drs -- "$VENV_DIR/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
 # ─── 6) Playwright + Chromium ─────────────────────────────────────────────
 msg "Installiere Chromium für Playwright (~250 MB)"
-sudo -u drs PLAYWRIGHT_BROWSERS_PATH=/opt/drs/playwright \
+install -d -o drs -g drs -m 0755 /opt/drs/playwright
+runuser -u drs -- env PLAYWRIGHT_BROWSERS_PATH=/opt/drs/playwright \
   "$VENV_DIR/bin/playwright" install chromium
 # System-Deps für Chromium (als root)
 PLAYWRIGHT_BROWSERS_PATH=/opt/drs/playwright \
@@ -99,14 +100,12 @@ ln -sfn "$DATA_DIR" "$APP_DIR/data"
 
 # ─── 8) DB migrieren ──────────────────────────────────────────────────────
 msg "Alembic migration"
-sudo -u drs --preserve-env=DRS_SECRET_KEY,DRS_DATA_DIR,DRS_DB_URL \
-  env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
+runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
   "$VENV_DIR/bin/alembic" -c "$APP_DIR/alembic.ini" upgrade head
 
 # ─── 9) Admin-Account ─────────────────────────────────────────────────────
 msg "Lege Admin-Account '$DRS_ADMIN_USER' an"
-sudo -u drs --preserve-env=DRS_SECRET_KEY,DRS_DATA_DIR,DRS_DB_URL \
-  env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
+runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
   bash -c "cd $APP_DIR && $VENV_DIR/bin/python -m app.cli create-admin -u '$DRS_ADMIN_USER' -n '$DRS_ADMIN_NAME' -p '$DRS_ADMIN_PW'" || \
   msg "Hinweis: Falls Admin schon existiert, wurde keine Aktion ausgeführt."
 

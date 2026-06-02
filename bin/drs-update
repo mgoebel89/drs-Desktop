@@ -11,15 +11,15 @@ CFG=/etc/drs/config.env
 [[ -f $CFG ]] || { echo "Fehlt: $CFG" >&2; exit 1; }
 
 echo "==> Aktualisiere Code"
-sudo -u drs git -C "$APP_DIR" fetch --depth 1 origin
-BRANCH="$(sudo -u drs git -C "$APP_DIR" rev-parse --abbrev-ref HEAD)"
-sudo -u drs git -C "$APP_DIR" reset --hard "origin/$BRANCH"
+runuser -u drs -- git -C "$APP_DIR" fetch --depth 1 origin
+BRANCH="$(runuser -u drs -- git -C "$APP_DIR" rev-parse --abbrev-ref HEAD)"
+runuser -u drs -- git -C "$APP_DIR" reset --hard "origin/$BRANCH"
 
 echo "==> Dependencies"
-sudo -u drs "$VENV_DIR/bin/pip" install -q --upgrade -r "$APP_DIR/requirements.txt"
+runuser -u drs -- "$VENV_DIR/bin/pip" install -q --upgrade -r "$APP_DIR/requirements.txt"
 
 echo "==> Datenbank-Migration"
-sudo -u drs --preserve-env=PATH env $(grep -v '^#' "$CFG" | xargs) \
+runuser -u drs -- env $(grep -v '^#' "$CFG" | xargs) \
   "$VENV_DIR/bin/alembic" -c "$APP_DIR/alembic.ini" upgrade head
 
 echo "==> Helper-Skripte aktualisieren"
