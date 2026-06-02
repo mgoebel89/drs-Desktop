@@ -136,3 +136,57 @@ def get_week(user: User, ref: date | None = None) -> tuple[date, date, list[dict
     monday = ref - timedelta(days=ref.weekday())
     friday = monday + timedelta(days=4)
     return monday, friday, get_my_timetable(user, monday, friday)
+
+
+def diagnose(user: User) -> list[dict]:
+    """Schrittweise Diagnose: testet einzelne API-Calls und liefert Statusliste."""
+    results: list[dict] = []
+
+    def step(name: str, fn):
+        try:
+            v = fn()
+            results.append({"step": name, "ok": True, "info": str(v)[:200]})
+            return v
+        except Exception as e:
+            results.append({"step": name, "ok": False,
+                            "info": f"{type(e).__name__}: {e}"})
+            return None
+
+    creds = get_creds(user)
+    if not creds:
+        results.append({"step": "credentials", "ok": False,
+                        "info": "Keine Untis-Credentials hinterlegt."})
+        return results
+    results.append({"step": "credentials", "ok": True,
+                    "info": f"server={_normalize_server(creds.get('server',''))}, "
+                            f"school={creds.get('school','')}, "
+                            f"user={creds.get('username','')}"})
+
+    try:
+        with session_for(user) as s:
+            results.append({"step": "login", "ok": True, "info": "Session etabliert"})
+            step("schoolyears", lambda: f"{len(list(s.schoolyears()))} Jahre")
+            step("statusdata", lambda: f"{type(s.statusdata()).__name__}")
+            klassen = step("klassen", lambda: f"{len(list(s.klassen()))} Klassen")
+            teachers = step("teachers", lambda: f"{len(list(s.teachers()))} Lehrer")
+            step("subjects", lambda: f"{len(list(s.subjects()))} Fächer")
+            step("rooms", lambda: f"{len(list(s.rooms()))} Räume")
+            # Stundenplan-Versuche
+            today = date.today()
+            in_week = today + timedelta(days=6)
+            step("my_timetable(heute…+6 Tage)",
+                 lambda: f"{len(list(s.my_timetable(start=today, end=in_week)))} Lessons")
+            # Falls Teachers ging: erste(n) probieren um zu sehen ob timetable allgemein geht
+            if teachers and "0 " not in (results[-2]["info"] or ""):
+                try:
+                    t_first = next(iter(s.teachers()))
+                    step(f"timetable(teacher={t_first.id})",
+                         lambda: f"{len(list(s.timetable(teacher=t_first, start=today, end=in_week)))} Lessons")
+                except Exception as e:
+                    results.append({"step": "timetable(teacher=...)", "ok": False,
+                                    "info": f"{type(e).__name__}: {e}"})
+    except Exception as e:
+        results.append({"step": "login", "ok": False,
+                        "info": f"{type(e).__name__}: {e}"})
+
+    return results

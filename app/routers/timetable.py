@@ -54,6 +54,16 @@ def timetable_view(
     })
 
 
+@router.get("/timetable/diagnose", response_class=HTMLResponse)
+def timetable_diagnose(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+):
+    results = webuntis_client.diagnose(user)
+    return templates.TemplateResponse(request, "timetable_diagnose.html",
+                                      {"user": user, "results": results})
+
+
 @router.get("/api/timetable/today")
 def api_today(
     user: Annotated[User, Depends(require_user)],

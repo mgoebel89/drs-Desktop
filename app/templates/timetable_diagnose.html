@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}WebUntis-Diagnose · DRS{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row-spread">
+    <h1>WebUntis-Diagnose</h1>
+    <a class="btn-sec btn" href="/timetable">← Stundenplan</a>
+  </div>
+  <p class="muted">Diese Seite testet jeden API-Aufruf einzeln, damit wir sehen wo es klemmt.</p>
+
+  <table>
+    <thead><tr><th style="width:35%">Schritt</th><th>Ergebnis</th></tr></thead>
+    <tbody>
+    {% for r in results %}
+    <tr>
+      <td><strong>{{ r.step }}</strong></td>
+      <td>
+        {% if r.ok %}<span style="color:#2e7d32">✓</span>{% else %}<span style="color:#c62828">✗</span>{% endif %}
+        <code style="font-size:12px;background:#fafafa;padding:2px 6px;border-radius:3px;margin-left:4px">{{ r.info }}</code>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
