@@ -100,8 +100,9 @@ def test_connection(user: User) -> tuple[bool, str]:
 def _period_to_dict(p) -> dict:
     """Period-Objekt in serialisierbares Dict umformen.
 
-    Wichtig: NICHT auf p.teachers zugreifen — die Lazy-Resolution triggert
-    intern getTeachers(), wofür viele Lehrer-Accounts keine Berechtigung haben.
+    Wichtig: NICHT auf p.teachers oder p.original_teachers zugreifen — die
+    Lazy-Resolution triggert intern getTeachers(), wofür viele Lehrer-Accounts
+    keine Berechtigung haben.
     """
     def _names(items):
         out = []
@@ -112,19 +113,47 @@ def _period_to_dict(p) -> dict:
         except Exception:
             log.debug("Auflösung fehlgeschlagen", exc_info=True)
         return out
+    def _names_long(items):
+        out = []
+        try:
+            for it in (items or []):
+                ln = getattr(it, "long_name", None) or getattr(it, "name", None) or str(it)
+                out.append(ln)
+        except Exception:
+            pass
+        return out
+    def _str(v):
+        return (str(v).strip() if v not in (None, "", []) else "")
+    raw = {}
+    try:
+        raw = dict(getattr(p, "_data", {}) or {})
+        # IDs raus, dafür kompakter — wir wollen nur die Text-Felder sehen
+    except Exception:
+        pass
     return {
         "id": getattr(p, "id", None),
         "start": p.start.isoformat() if p.start else None,
         "end": p.end.isoformat() if p.end else None,
         "klassen": _names(p.klassen),
+        "klassen_long": _names_long(p.klassen),
         "subjects": _names(p.subjects),
+        "subjects_long": _names_long(p.subjects),
         "rooms": _names(p.rooms),
+        "rooms_long": _names_long(p.rooms),
+        "original_rooms": _names(getattr(p, "original_rooms", None)),
         "code": getattr(p, "code", None),
-        "info": getattr(p, "info", "") or "",
-        # Lernstoff/Lehrtext aus Untis (Unterrichtsbezeichnung). Felder können je
-        # nach Schule befüllt sein oder leer bleiben.
-        "lstext": (getattr(p, "lstext", "") or "").strip(),
-        "subst_text": (getattr(p, "substText", "") or "").strip(),
+        "info": _str(getattr(p, "info", "")),
+        "lstext": _str(getattr(p, "lstext", "")),
+        "subst_text": _str(getattr(p, "substText", "")),
+        "bk_text": _str(getattr(p, "bkText", "")),
+        "bk_remark": _str(getattr(p, "bkRemark", "")),
+        "activity_type": _str(getattr(p, "activityType", "")),
+        "ls_number": getattr(p, "lsnumber", None),
+        "student_group": _str(getattr(p, "studentGroup", "")),
+        "type": _str(getattr(p, "type", "")),
+        # Rohdaten (für Diagnose) — wir clippen Listenwerte mit IDs raus
+        "_raw": {k: v for k, v in raw.items()
+                 if k not in ("kl", "su", "ro", "te")},
     }
 
 
@@ -242,13 +271,11 @@ def _merge_block_lessons(lessons: list[dict]) -> list[dict]:
             order.append(key)
         else:
             existing = by_key[key]
-            # Lernstoff aus beiden Hälften zusammenführen (uniq)
-            stoff = [s for s in [existing.get("lstext"), l.get("lstext")] if s]
-            if stoff:
-                existing["lstext"] = " · ".join(dict.fromkeys(stoff))
-            infos = [s for s in [existing.get("info"), l.get("info")] if s]
-            if infos:
-                existing["info"] = " · ".join(dict.fromkeys(infos))
+            # Textfelder aus beiden Hälften zusammenführen (uniq, mit · getrennt)
+            for fld in ("lstext", "info", "subst_text", "bk_text", "bk_remark"):
+                vals = [s for s in [existing.get(fld), l.get(fld)] if s]
+                if vals:
+                    existing[fld] = " · ".join(dict.fromkeys(vals))
     return [by_key[k] for k in order]
 
 

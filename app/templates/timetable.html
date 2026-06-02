@@ -9,14 +9,57 @@
   .tt-grid .slot-name { font-weight: 700; color: var(--blau); }
   .tt-grid .slot-time { color: var(--muted); font-size: 11px; }
   .tt-grid td.empty { background: #fafafa; }
-  .tt-cell { min-height: 38px; }
-  .tt-lesson { padding: 4px 6px; border-radius: 4px; background: var(--blau-hell); border-left: 3px solid var(--blau); margin-bottom: 3px; }
+  .tt-cell { min-height: 50px; }
+  .tt-lesson {
+    padding: 5px 7px; border-radius: 4px; background: var(--blau-hell);
+    border-left: 3px solid var(--blau); margin-bottom: 3px; cursor: pointer;
+    transition: background .12s;
+  }
+  .tt-lesson:hover { background: #d8ebf8; }
   .tt-lesson:last-child { margin-bottom: 0; }
   .tt-klasse { font-weight: 700; color: var(--text); font-size: 12px; line-height: 1.25; }
   .tt-room { color: var(--muted); font-size: 11px; margin-top: 1px; }
-  .tt-stoff { color: var(--text); font-size: 11px; margin-top: 3px; font-style: italic; line-height: 1.3; opacity: .85; }
   .tt-lesson.cancelled { opacity: .55; text-decoration: line-through; background: #f5f5f5; border-left-color: #aaa; }
   .tt-lesson.irregular { background: #fff3e0; border-left-color: var(--gelb); }
+
+  /* Side-Panel */
+  .tt-panel {
+    position: fixed; top: 0; right: -440px; width: 420px; height: 100vh;
+    background: #fff; border-left: 1px solid var(--border);
+    box-shadow: -4px 0 16px rgba(0,0,0,.08);
+    transition: right .25s ease; overflow-y: auto; z-index: 1000;
+  }
+  .tt-panel.open { right: 0; }
+  .tt-panel-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 1rem 1.25rem; border-bottom: 1px solid #eee;
+    background: var(--blau); color: #fff;
+  }
+  .tt-panel-head h3 { margin: 0; color: #fff; font-size: 16px; }
+  .tt-panel-close {
+    background: transparent; border: none; color: #fff; font-size: 24px;
+    cursor: pointer; padding: 0; line-height: 1; width: 28px; height: 28px;
+  }
+  .tt-panel-body { padding: 1rem 1.25rem; }
+  .tt-panel dl { display: grid; grid-template-columns: 90px 1fr; gap: .35rem .8rem; font-size: 13px; }
+  .tt-panel dt { font-weight: 600; color: var(--muted); }
+  .tt-panel dd { margin: 0; color: var(--text); }
+  .tt-panel dd.empty { color: #c0c0c0; font-style: italic; }
+  .tt-panel h4 { margin: 1.2rem 0 .4rem; font-size: 13px; color: var(--blau); text-transform: uppercase; letter-spacing: .5px; }
+  .tt-panel .tt-stoff-box {
+    background: #fffef0; border-left: 3px solid var(--gelb); border-radius: 0 4px 4px 0;
+    padding: .6rem .8rem; font-size: 13px; line-height: 1.5; white-space: pre-wrap;
+  }
+  .tt-panel details { margin-top: 1rem; }
+  .tt-panel details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+  .tt-panel pre {
+    background: #fafafa; padding: .6rem; border-radius: 4px; font-size: 11px;
+    overflow: auto; max-height: 220px; margin-top: .5rem;
+  }
+  .tt-backdrop {
+    position: fixed; inset: 0; background: transparent; z-index: 999; display: none;
+  }
+  .tt-backdrop.open { display: block; }
 </style>
 
 <div class="card">
@@ -40,6 +83,7 @@
     <p class="muted" style="margin-bottom:1rem">
       Woche vom <strong>{{ grid.monday.strftime('%d.%m.%Y') }}</strong>
       bis <strong>{{ grid.friday.strftime('%d.%m.%Y') }}</strong>
+      &nbsp;·&nbsp; <span class="muted" style="font-size:12px">Klick auf eine Stunde → Details rechts</span>
     </p>
     {% if grid.slots %}
     <table class="tt-grid">
@@ -55,7 +99,7 @@
         {% for sl in grid.slots %}
         <tr>
           <th class="slot">
-            <div class="slot-name">{{ sl.name }}.</div>
+            <div class="slot-name">{{ sl.name }}</div>
             <div class="slot-time">{{ sl.start }}–{{ sl.end }}</div>
           </th>
           {% for d_idx in range(grid.days|length) %}
@@ -63,15 +107,13 @@
             <td class="tt-cell {% if not lessons %}empty{% endif %}">
               {% for l in lessons %}
                 {% set cls = (l.klassen|join(' / ')) or '—' %}
-                {% set fach = l.subjects|join(', ') %}
                 {% set raum = l.rooms|join(', ') %}
                 {% set state = '' %}
                 {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
                 {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
-                <div class="tt-lesson {{ state }}" title="{{ fach }}{% if l.lstext %} · {{ l.lstext }}{% endif %}{% if l.info %} · {{ l.info }}{% endif %}">
+                <div class="tt-lesson {{ state }}" data-lesson='{{ l|tojson|forceescape }}' data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}" data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}">
                   <div class="tt-klasse">{{ cls }}</div>
                   {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
-                  {% if l.lstext %}<div class="tt-stoff">{{ l.lstext }}</div>{% endif %}
                 </div>
               {% endfor %}
             </td>
@@ -81,13 +123,105 @@
       </tbody>
     </table>
     <p class="muted" style="font-size:11px;margin-top:.8rem">
-      Mehrere Klassen pro Slot mit „ / " getrennt · Fach erscheint im Tooltip (Mouseover) ·
       <span style="color:var(--gelb)">■</span> Vertretung ·
-      <span style="color:#aaa">■</span> entfällt
+      <span style="color:#aaa">■</span> entfällt ·
+      Mehrere Klassen mit „ / "
     </p>
     {% else %}
       <p class="muted">Keine Stundenblöcke gefunden.</p>
     {% endif %}
   {% endif %}
 </div>
+
+<!-- Detail-Panel -->
+<div class="tt-backdrop" id="tt-backdrop"></div>
+<aside class="tt-panel" id="tt-panel" aria-hidden="true">
+  <div class="tt-panel-head">
+    <h3 id="tt-panel-title">Stunde</h3>
+    <button class="tt-panel-close" id="tt-panel-close" aria-label="Schließen">×</button>
+  </div>
+  <div class="tt-panel-body" id="tt-panel-body"></div>
+</aside>
+
+<script>
+const _panel = document.getElementById('tt-panel');
+const _backdrop = document.getElementById('tt-backdrop');
+const _title = document.getElementById('tt-panel-title');
+const _body = document.getElementById('tt-panel-body');
+
+function _row(label, value) {
+  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+    return '<dt>' + label + '</dt><dd class="empty">—</dd>';
+  }
+  if (Array.isArray(value)) value = value.join(', ');
+  return '<dt>' + label + '</dt><dd>' + String(value).replace(/</g, '&lt;') + '</dd>';
+}
+
+function openPanel(l, day, slot) {
+  _title.textContent = day + ' · ' + slot;
+  const stoff = l.lstext || '';
+  const subst = l.subst_text || '';
+  const bkText = l.bk_text || '';
+  const bkRemark = l.bk_remark || '';
+  const info = l.info || '';
+
+  let html = '<dl>'
+    + _row('Klasse', (l.klassen || []).join(' / '))
+    + _row('Fach', (l.subjects || []).join(', '))
+    + _row('Fach (lang)', (l.subjects_long || []).filter(x => x && !(l.subjects || []).includes(x)).join(', '))
+    + _row('Raum', (l.rooms || []).join(', '))
+    + _row('Status', l.code || 'regulär')
+    + (l.student_group ? _row('Gruppe', l.student_group) : '')
+    + (l.activity_type ? _row('Aktivität', l.activity_type) : '')
+    + (l.ls_number ? _row('Untis-Nr.', l.ls_number) : '')
+    + '</dl>';
+
+  if (stoff) {
+    html += '<h4>Lernstoff</h4><div class="tt-stoff-box">' + String(stoff).replace(/</g, '&lt;') + '</div>';
+  }
+  if (subst) {
+    html += '<h4>Vertretungstext</h4><div class="tt-stoff-box">' + String(subst).replace(/</g, '&lt;') + '</div>';
+  }
+  if (bkText || bkRemark || info) {
+    html += '<h4>Weitere Hinweise</h4><dl>'
+      + (info ? _row('Info', info) : '')
+      + (bkText ? _row('BK-Text', bkText) : '')
+      + (bkRemark ? _row('BK-Bemerk.', bkRemark) : '')
+      + '</dl>';
+  }
+  if (!stoff && !subst && !bkText && !bkRemark && !info) {
+    html += '<p class="muted" style="font-size:12px;margin-top:1rem">'
+      + 'Kein Lernstoff oder Vertretungstext in WebUntis hinterlegt.</p>';
+  }
+
+  if (l._raw && Object.keys(l._raw).length) {
+    html += '<details><summary>Rohdaten (WebUntis-Antwort)</summary>'
+      + '<pre>' + JSON.stringify(l._raw, null, 2).replace(/</g, '&lt;') + '</pre></details>';
+  }
+
+  _body.innerHTML = html;
+  _panel.classList.add('open');
+  _backdrop.classList.add('open');
+  _panel.setAttribute('aria-hidden', 'false');
+}
+
+function closePanel() {
+  _panel.classList.remove('open');
+  _backdrop.classList.remove('open');
+  _panel.setAttribute('aria-hidden', 'true');
+}
+
+document.getElementById('tt-panel-close').addEventListener('click', closePanel);
+_backdrop.addEventListener('click', closePanel);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+document.querySelectorAll('.tt-lesson').forEach(el => {
+  el.addEventListener('click', () => {
+    try {
+      const l = JSON.parse(el.dataset.lesson);
+      openPanel(l, el.dataset.day, el.dataset.slot);
+    } catch (e) { console.error(e); }
+  });
+});
+</script>
 {% endblock %}
