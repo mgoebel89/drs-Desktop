@@ -122,7 +122,9 @@ def _warmup(s) -> None:
     """python-webuntis schlägt manchmal mit NotLoggedInError fehl, wenn man direkt
     nach dem Login zu my_timetable() springt. Wir wärmen die Session, indem wir
     alle Stammdaten-Endpoints einmal aufrufen (Fehler ignorieren)."""
-    for name in ("statusdata", "klassen", "teachers", "subjects", "rooms"):
+    # teachers() bewusst NICHT abrufen — die meisten Lehrer-Accounts haben dafür
+    # keine Berechtigung und es ist für my_timetable auch nicht nötig.
+    for name in ("statusdata", "klassen", "subjects", "rooms"):
         try:
             v = getattr(s, name)()
             # iter() forciert die HTTP-Anfrage bei lazy Result-Objects
@@ -182,8 +184,7 @@ def diagnose(user: User) -> list[dict]:
             results.append({"step": "login", "ok": True, "info": "Session etabliert"})
             step("schoolyears", lambda: f"{len(list(s.schoolyears()))} Jahre")
             step("statusdata", lambda: f"{type(s.statusdata()).__name__}")
-            klassen = step("klassen", lambda: f"{len(list(s.klassen()))} Klassen")
-            teachers = step("teachers", lambda: f"{len(list(s.teachers()))} Lehrer")
+            step("klassen", lambda: f"{len(list(s.klassen()))} Klassen")
             step("subjects", lambda: f"{len(list(s.subjects()))} Fächer")
             step("rooms", lambda: f"{len(list(s.rooms()))} Räume")
             # Stundenplan-Versuche
@@ -196,15 +197,6 @@ def diagnose(user: User) -> list[dict]:
             friday = monday + timedelta(days=4)
             step(f"my_timetable(Mo {monday.isoformat()} – Fr {friday.isoformat()})",
                  lambda: f"{len(list(s.my_timetable(start=monday, end=friday)))} Lessons")
-            # Falls Teachers ging: erste(n) probieren um zu sehen ob timetable allgemein geht
-            if teachers and "0 " not in (results[-2]["info"] or ""):
-                try:
-                    t_first = next(iter(s.teachers()))
-                    step(f"timetable(teacher={t_first.id})",
-                         lambda: f"{len(list(s.timetable(teacher=t_first, start=today, end=in_week)))} Lessons")
-                except Exception as e:
-                    results.append({"step": "timetable(teacher=...)", "ok": False,
-                                    "info": f"{type(e).__name__}: {e}"})
     except Exception as e:
         results.append({"step": "login", "ok": False,
                         "info": f"{type(e).__name__}: {e}"})
