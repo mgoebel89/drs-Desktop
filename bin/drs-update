@@ -19,8 +19,8 @@ echo "==> Dependencies"
 runuser -u drs -- "$VENV_DIR/bin/pip" install -q --upgrade -r "$APP_DIR/requirements.txt"
 
 echo "==> Datenbank-Migration"
-runuser -u drs -- env $(grep -v '^#' "$CFG" | xargs) \
-  "$VENV_DIR/bin/alembic" -c "$APP_DIR/alembic.ini" upgrade head
+( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG" | xargs) \
+    "$VENV_DIR/bin/alembic" -c alembic.ini upgrade head )
 
 echo "==> Helper-Skripte aktualisieren"
 install -m 0755 "$APP_DIR/bin/drs-update" /usr/local/sbin/drs-update

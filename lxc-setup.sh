@@ -104,14 +104,16 @@ chown root:drs "$CFG_DIR/config.env"
 ln -sfn "$DATA_DIR" "$APP_DIR/data"
 
 # ─── 8) DB migrieren ──────────────────────────────────────────────────────
+# CWD ins APP_DIR, damit Alembic 1.18+ pyproject.toml lesen kann.
 msg "Alembic migration"
-runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
-  "$VENV_DIR/bin/alembic" -c "$APP_DIR/alembic.ini" upgrade head
+( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
+    "$VENV_DIR/bin/alembic" -c alembic.ini upgrade head )
 
 # ─── 9) Admin-Account ─────────────────────────────────────────────────────
 msg "Lege Admin-Account '$DRS_ADMIN_USER' an"
-runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
-  bash -c "cd $APP_DIR && $VENV_DIR/bin/python -m app.cli create-admin -u '$DRS_ADMIN_USER' -n '$DRS_ADMIN_NAME' -p '$DRS_ADMIN_PW'" || \
+( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG_DIR/config.env" | xargs) \
+    "$VENV_DIR/bin/python" -m app.cli create-admin \
+      -u "$DRS_ADMIN_USER" -n "$DRS_ADMIN_NAME" -p "$DRS_ADMIN_PW" ) || \
   msg "Hinweis: Falls Admin schon existiert, wurde keine Aktion ausgeführt."
 
 # ─── 10) systemd-Unit + Caddyfile installieren ────────────────────────────
