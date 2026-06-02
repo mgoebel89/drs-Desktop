@@ -48,12 +48,24 @@ def create_admin(
 
 
 @app.command("reset-password")
-def reset_password(username: str):
+def reset_password(
+    username: str,
+    password: str = typer.Option(None, "--password", "-p",
+                                 help="Neues PW (nicht-interaktiv). Wenn leer, wird gefragt."),
+    no_force_change: bool = typer.Option(False, "--no-force-change",
+                                         help="must_change_pw nicht setzen (User behält das PW dauerhaft)."),
+):
     """Setzt das Passwort eines Nutzers (CLI-Notfall)."""
-    pw1 = getpass.getpass("Neues Passwort: ")
-    pw2 = getpass.getpass("Wiederholen: ")
-    if pw1 != pw2 or len(pw1) < 10:
-        typer.echo("Eingaben ungültig.", err=True)
+    if password:
+        pw1 = password
+    else:
+        pw1 = getpass.getpass("Neues Passwort: ")
+        pw2 = getpass.getpass("Wiederholen: ")
+        if pw1 != pw2:
+            typer.echo("Passwörter stimmen nicht überein.", err=True)
+            sys.exit(1)
+    if len(pw1) < 10:
+        typer.echo("Passwort muss mindestens 10 Zeichen haben.", err=True)
         sys.exit(1)
     db = SessionLocal()
     try:
@@ -62,11 +74,12 @@ def reset_password(username: str):
             typer.echo(f"Nutzer '{username}' nicht gefunden.", err=True)
             sys.exit(1)
         u.password_hash = hash_password(pw1)
-        u.must_change_pw = True
+        u.must_change_pw = not no_force_change
         u.failed_attempts = 0
         u.locked_until = None
         db.commit()
-        typer.echo(f"Passwort für '{u.username}' zurückgesetzt (must-change beim nächsten Login).")
+        flag = "" if no_force_change else " (must-change beim nächsten Login)"
+        typer.echo(f"Passwort für '{u.username}' zurückgesetzt{flag}.")
     finally:
         db.close()
 
