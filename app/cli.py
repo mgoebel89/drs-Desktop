@@ -95,8 +95,8 @@ def list_users():
 
 
 _SAMPLE_META = {
-    "fach": "Elektrotechnik · Klasse ET2B",
-    "lernfeld": "Lernfeld 3 · Einheit 02 — Stromkreise analysieren",
+    "headerLabel": "lernfeld",
+    "headerValue": "Lernfeld 3 · Einheit 02 — Stromkreise analysieren",
     "lernsituationTitel": "Auftrag aus dem Betrieb",
     "lernsituationText": (
         "In deinem Ausbildungsbetrieb wird eine neue Maschinensteuerung installiert. "

@@ -85,3 +85,14 @@ class WorksheetRevision(Base):
     aufgaben_json: Mapped[str] = mapped_column(Text, default="[]")
 
     worksheet: Mapped[Worksheet] = relationship(back_populates="revisions")
+
+
+class Setting(Base):
+    """Globale Schlüssel/Wert-Einstellungen (Branding etc.)."""
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    mime: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

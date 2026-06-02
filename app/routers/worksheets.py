@@ -1,23 +1,21 @@
 """Konfigurationstool: Aufgabenblätter erstellen, speichern, exportieren."""
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
+from app.branding import get_school_name, logo_data_url
 from app.db import get_db
 from app.models import User, Worksheet, WorksheetRevision
 from app.services.playwright_pdf import render_pdf
+from app.templating import templates
 
 router = APIRouter(prefix="/worksheets")
-BASE_DIR = Path(__file__).resolve().parent.parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 def _owned(db: Session, ws_id: int, user: User) -> Worksheet:
@@ -172,7 +170,31 @@ def delete_worksheet(
     return RedirectResponse("/worksheets", status_code=303)
 
 
-# ── Export ────────────────────────────────────────────────────────────────
+# ── Export / Preview ──────────────────────────────────────────────────────
+def _render_export_html(db: Session, ws: Worksheet, rev: WorksheetRevision) -> str:
+    payload = {
+        "meta": json.loads(rev.meta_json),
+        "aufgaben": json.loads(rev.aufgaben_json),
+    }
+    return templates.get_template("worksheets/export.html").render({
+        "ws_title": ws.title,
+        "config_json": json.dumps(payload, ensure_ascii=False),
+        "school_name_value": get_school_name(db),
+        "logo_data_url": logo_data_url(db),
+    })
+
+
+def _safe_filename(title: str, ws_id: int) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in title) or f"aufgabenblatt-{ws_id}"
+
+
+def _require_rev(db: Session, ws: Worksheet) -> WorksheetRevision:
+    rev = _latest_rev(db, ws)
+    if not rev:
+        raise HTTPException(400, "Noch keine Revision vorhanden — bitte erst speichern.")
+    return rev
+
+
 @router.get("/{ws_id}/export.html")
 def export_html(
     ws_id: int,
@@ -181,22 +203,21 @@ def export_html(
     db: Annotated[Session, Depends(get_db)],
 ):
     ws = _owned(db, ws_id, user)
-    rev = _latest_rev(db, ws)
-    if not rev:
-        raise HTTPException(400, "Noch keine Revision vorhanden — bitte erst speichern.")
-    payload = {
-        "meta": json.loads(rev.meta_json),
-        "aufgaben": json.loads(rev.aufgaben_json),
-    }
-    rendered = templates.get_template("worksheets/export.html").render({
-        "ws_title": ws.title,
-        "config_json": json.dumps(payload, ensure_ascii=False),
-    })
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in ws.title) or f"aufgabenblatt-{ws.id}"
-    return Response(
-        content=rendered, media_type="text/html; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{safe}.html"'},
-    )
+    rendered = _render_export_html(db, ws, _require_rev(db, ws))
+    safe = _safe_filename(ws.title, ws.id)
+    return Response(content=rendered, media_type="text/html; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}.html"'})
+
+
+@router.get("/{ws_id}/preview.html", response_class=HTMLResponse)
+def preview_html(
+    ws_id: int,
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ws = _owned(db, ws_id, user)
+    return HTMLResponse(content=_render_export_html(db, ws, _require_rev(db, ws)))
 
 
 @router.get("/{ws_id}/export.pdf")
@@ -207,22 +228,25 @@ async def export_pdf(
     db: Annotated[Session, Depends(get_db)],
 ):
     ws = _owned(db, ws_id, user)
-    rev = _latest_rev(db, ws)
-    if not rev:
-        raise HTTPException(400, "Noch keine Revision vorhanden — bitte erst speichern.")
-    payload = {
-        "meta": json.loads(rev.meta_json),
-        "aufgaben": json.loads(rev.aufgaben_json),
-    }
-    rendered = templates.get_template("worksheets/export.html").render({
-        "ws_title": ws.title,
-        "config_json": json.dumps(payload, ensure_ascii=False),
-    })
+    rendered = _render_export_html(db, ws, _require_rev(db, ws))
     pdf_bytes = await render_pdf(rendered)
     audit(db, "worksheet_exported_pdf", actor=user, target=str(ws.id), request=request)
     db.commit()
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in ws.title) or f"aufgabenblatt-{ws.id}"
-    return Response(
-        content=pdf_bytes, media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'},
-    )
+    safe = _safe_filename(ws.title, ws.id)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
+
+
+@router.get("/{ws_id}/preview.pdf")
+async def preview_pdf(
+    ws_id: int,
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ws = _owned(db, ws_id, user)
+    rendered = _render_export_html(db, ws, _require_rev(db, ws))
+    pdf_bytes = await render_pdf(rendered)
+    safe = _safe_filename(ws.title, ws.id)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{safe}.pdf"'})

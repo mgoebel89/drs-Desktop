@@ -4,11 +4,13 @@
 <div class="card">
   <div class="row-spread">
     <h1 id="ws-title-display">{{ title }}</h1>
-    <div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap">
       {% if ws_id %}
         <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/revisions">Verlauf</a>
-        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.html">HTML</a>
-        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.pdf">PDF</a>
+        <button class="btn-sec btn" type="button" id="btn-preview-html">Vorschau HTML</button>
+        <button class="btn-sec btn" type="button" id="btn-preview-pdf">Vorschau PDF</button>
+        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.html">HTML ↓</a>
+        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.pdf">PDF ↓</a>
       {% endif %}
       <button class="btn" type="button" id="btn-save">Speichern</button>
     </div>
@@ -20,14 +22,17 @@
   <input id="f-title" value="{{ title }}">
 
   <h2>Allgemein</h2>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem 1rem">
+  <div style="display:grid;grid-template-columns:160px 1fr;gap:.6rem 1rem;align-items:end">
     <div>
-      <label>Fach</label>
-      <input id="m-fach" placeholder="z.B. Elektrotechnik · Klasse ET2B">
+      <label>Anzeige als</label>
+      <select id="m-header-label">
+        <option value="lernfeld">Lernfeld</option>
+        <option value="fach">Fach</option>
+      </select>
     </div>
     <div>
-      <label>Lernfeld</label>
-      <input id="m-lernfeld" placeholder="z.B. Lernfeld 3 · Einheit 02">
+      <label>Inhalt (erscheint im Header des Arbeitsblatts)</label>
+      <input id="m-header-value" placeholder="z.B. Lernfeld 3 · Einheit 02 — Stromkreise analysieren">
     </div>
   </div>
 
@@ -187,11 +192,15 @@ function renumber() {
 }
 
 function loadInitial() {
-  $('#m-fach').value = INITIAL.meta.fach || '';
-  $('#m-lernfeld').value = INITIAL.meta.lernfeld || '';
-  $('#m-ls-titel').value = INITIAL.meta.lernsituationTitel || '';
-  $('#m-ls-text').value = INITIAL.meta.lernsituationText || '';
-  $('#m-ls-bild').value = INITIAL.meta.lernsituationBild || '';
+  // Rückwärtskompatibel: alte Worksheets haben fach/lernfeld als zwei Felder.
+  var m = INITIAL.meta || {};
+  var label = m.headerLabel || (m.lernfeld ? 'lernfeld' : (m.fach ? 'fach' : 'lernfeld'));
+  var value = m.headerValue || m.lernfeld || m.fach || '';
+  $('#m-header-label').value = label;
+  $('#m-header-value').value = value;
+  $('#m-ls-titel').value = m.lernsituationTitel || '';
+  $('#m-ls-text').value = m.lernsituationText || '';
+  $('#m-ls-bild').value = m.lernsituationBild || '';
 
   const lsWrap = document.querySelector('[data-target="m-ls-bild"]');
   lsWrap.dataset.value = INITIAL.meta.lernsituationBild || '';
@@ -209,8 +218,8 @@ $('#btn-add').addEventListener('click', () => {
 
 function collect() {
   const meta = {
-    fach: $('#m-fach').value.trim(),
-    lernfeld: $('#m-lernfeld').value.trim(),
+    headerLabel: $('#m-header-label').value,
+    headerValue: $('#m-header-value').value.trim(),
     lernsituationTitel: $('#m-ls-titel').value.trim(),
     lernsituationText: $('#m-ls-text').value,
     lernsituationBild: document.querySelector('[data-target="m-ls-bild"]').dataset.value || '',
@@ -263,6 +272,29 @@ $('#btn-save').addEventListener('click', async () => {
     btn.textContent = 'Speichern';
   }
 });
+
+async function saveThenOpen(suffix) {
+  if (!WS_ID) { alert('Bitte zuerst speichern.'); return; }
+  // Aktuellen Stand speichern, dann Vorschau-Tab öffnen.
+  const payload = collect();
+  payload.worksheet_id = WS_ID;
+  try {
+    const res = await fetch('/worksheets/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    window.open('/worksheets/' + WS_ID + suffix, '_blank');
+  } catch (e) {
+    flash('Vorschau fehlgeschlagen: ' + e.message, 'err');
+  }
+}
+
+const _previewHtmlBtn = document.getElementById('btn-preview-html');
+if (_previewHtmlBtn) _previewHtmlBtn.addEventListener('click', () => saveThenOpen('/preview.html'));
+const _previewPdfBtn = document.getElementById('btn-preview-pdf');
+if (_previewPdfBtn) _previewPdfBtn.addEventListener('click', () => saveThenOpen('/preview.pdf'));
 
 loadInitial();
 </script>

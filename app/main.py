@@ -4,7 +4,6 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -14,11 +13,12 @@ from app.routers import setup as setup_router
 from app.routers import users as users_router
 from app.routers import profile as profile_router
 from app.routers import worksheets as worksheets_router
+from app.routers import settings as settings_router
+from app.routers import help as help_router
 from app.models import User
-
+from app.templating import templates
 
 BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app = FastAPI(title="DRS Unterrichtsmaterial")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -28,6 +28,8 @@ app.include_router(auth_router.router)
 app.include_router(users_router.router)
 app.include_router(profile_router.router)
 app.include_router(worksheets_router.router)
+app.include_router(settings_router.router)
+app.include_router(help_router.router)
 
 
 @app.get("/")

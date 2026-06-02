@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen · DRS{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Globale Einstellungen</h1>
+  <p class="muted">Schul-Branding für Web-Oberfläche und exportierte Arbeitsblätter.</p>
+
+  <h2>Schulname</h2>
+  <form method="post" action="/admin/settings/school-name">
+    <label>Anzeigename</label>
+    <input name="school_name" value="{{ school_name() }}" maxlength="200" required>
+    <p class="muted" style="font-size:12px">Erscheint links neben dem Logo in der Navigation und im Header der Arbeitsblätter.</p>
+    <div style="margin-top:.8rem"><button class="btn" type="submit">Speichern</button></div>
+  </form>
+
+  <h2>Schullogo</h2>
+  <p>Aktuell hinterlegt:</p>
+  <div style="background:#fafafa;border:1px solid var(--border);border-radius:6px;padding:1rem;text-align:center;margin-bottom:.8rem">
+    <img src="/branding/logo" alt="Schullogo" style="max-height:80px;max-width:380px">
+  </div>
+
+  <form method="post" action="/admin/settings/logo" enctype="multipart/form-data">
+    <label>Neues Logo hochladen (JPEG/PNG/SVG/WebP, max. 2 MB)</label>
+    <input type="file" name="logo" accept="image/jpeg,image/png,image/svg+xml,image/webp" required
+           style="padding:8px 0;font-family:inherit">
+    <div style="margin-top:.6rem;display:flex;gap:.6rem">
+      <button class="btn" type="submit">Hochladen</button>
+    </div>
+  </form>
+
+  <form method="post" action="/admin/settings/logo/reset" style="margin-top:.8rem"
+        onsubmit="return confirm('Auf Default-Logo zurücksetzen?');">
+    <button class="btn btn-sec" type="submit">Auf Default-Logo zurücksetzen</button>
+  </form>
+</div>
+{% endblock %}

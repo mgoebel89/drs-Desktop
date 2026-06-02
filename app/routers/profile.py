@@ -1,20 +1,18 @@
 """Profil: eigenes PW + eigene API-/WebUntis-Credentials."""
 import json
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.crypto import decrypt_secret, encrypt_secret, mask_key
 from app.db import get_db
 from app.models import User
+from app.templating import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 
 def _view_ctx(user: User, flash: str | None = None, flash_kind: str = "ok") -> dict:

@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Hilfe · LaTeX-Referenz{% endblock %}
+{% block content %}
+
+{% raw %}
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$','$']],
+    displayMath: [['$$','$$']],
+    packages: {'[+]': ['physics']},
+    tags: 'none',
+    macros: {
+      V:'{\\,\\mathrm{V}}', A:'{\\,\\mathrm{A}}', W:'{\\,\\mathrm{W}}',
+      Hz:'{\\,\\mathrm{Hz}}', Ohm:'{\\,\\Omega}', kohm:'{\\,\\mathrm{k\\Omega}}',
+      mohm:'{\\,\\mathrm{M\\Omega}}', mA:'{\\,\\mathrm{mA}}', kV:'{\\,\\mathrm{kV}}',
+      mV:'{\\,\\mathrm{mV}}', kW:'{\\,\\mathrm{kW}}', kHz:'{\\,\\mathrm{kHz}}',
+      MHz:'{\\,\\mathrm{MHz}}', F:'{\\,\\mathrm{F}}', uF:'{\\,\\mu\\mathrm{F}}',
+      nF:'{\\,\\mathrm{nF}}', H:'{\\,\\mathrm{H}}', mH:'{\\,\\mathrm{mH}}',
+      m:'{\\,\\mathrm{m}}', km:'{\\,\\mathrm{km}}', cm:'{\\,\\mathrm{cm}}',
+      mm:'{\\,\\mathrm{mm}}', kg:'{\\,\\mathrm{kg}}', g:'{\\,\\mathrm{g}}',
+      s:'{\\,\\mathrm{s}}', ms:'{\\,\\mathrm{ms}}', N:'{\\,\\mathrm{N}}',
+      Pa:'{\\,\\mathrm{Pa}}', J:'{\\,\\mathrm{J}}', C:'{\\,\\mathrm{C}}',
+      K:'{\\,\\mathrm{K}}', ges:'{_{\\mathrm{ges}}}',
+      celsius: ['{#1\\,°\\mathrm{C}}', 1],
+      subscr: ['{_{\\mathrm{#1}}}', 1]
+    }
+  },
+  options: { skipHtmlTags: ['script','noscript','style','textarea'] }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+{% endraw %}
+
+<style>
+  .ref-tbl { width: 100%; font-size: 13px; }
+  .ref-tbl th { text-align: left; }
+  .ref-tbl td { vertical-align: top; padding: 8px 11px; }
+  .ref-tbl code { background: #f4f5f6; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .ref-tbl .rendered { font-size: 15px; min-width: 100px; }
+  .ref-section { margin-top: 2rem; }
+  .lead { font-size: 14px; color: var(--muted); margin-bottom: 1rem; line-height: 1.6; }
+</style>
+
+<div class="card">
+  <h1>Hilfe: LaTeX-Schreibweise in Aufgabenblättern</h1>
+  <p class="lead">
+    Alle Eingabefelder im Editor (Aufgabentexte, Musterlösungen, Lernsituation)
+    unterstützen LaTeX-Mathematik. Inline-Formeln werden in <code>$…$</code>
+    eingeschlossen, abgesetzte (zentrierte) Formeln in <code>$$…$$</code>.
+    Für gängige SI-Einheiten und Indizes gibt es zusätzlich die DRS-eigenen
+    Makros aus der nachstehenden Tabelle.
+  </p>
+
+  <h2 class="ref-section">Grundlagen</h2>
+  <table class="ref-tbl">
+    <thead><tr><th style="width:40%">Schreibweise</th><th style="width:25%">Ergebnis</th><th>Beschreibung</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>$U = R \cdot I$</code></td>
+        <td class="rendered">$U = R \cdot I$</td>
+        <td>Inline-Formel im Textfluss.</td>
+      </tr>
+      <tr>
+        <td><code>$$R\ges = R_1 + R_2 + R_3$$</code></td>
+        <td class="rendered">$$R\ges = R_1 + R_2 + R_3$$</td>
+        <td>Abgesetzte (zentrierte) Formel.</td>
+      </tr>
+      <tr>
+        <td><code>$\frac{U}{R}$</code></td>
+        <td class="rendered">$\frac{U}{R}$</td>
+        <td>Bruch.</td>
+      </tr>
+      <tr>
+        <td><code>$x^2$, $a_1$</code></td>
+        <td class="rendered">$x^2$, $a_1$</td>
+        <td>Exponent, Index. Für längere Indizes: <code>R_{ges}</code>.</td>
+      </tr>
+      <tr>
+        <td><code>$\sqrt{2}$</code></td>
+        <td class="rendered">$\sqrt{2}$</td>
+        <td>Quadratwurzel.</td>
+      </tr>
+      <tr>
+        <td><code>$\alpha, \beta, \pi, \Omega$</code></td>
+        <td class="rendered">$\alpha, \beta, \pi, \Omega$</td>
+        <td>Griechische Buchstaben (klein und groß).</td>
+      </tr>
+      <tr>
+        <td><code>$\approx, \neq, \leq, \geq$</code></td>
+        <td class="rendered">$\approx, \neq, \leq, \geq$</td>
+        <td>Relationen.</td>
+      </tr>
+      <tr>
+        <td><code>$\cdot, \times, \pm$</code></td>
+        <td class="rendered">$\cdot, \times, \pm$</td>
+        <td>Multiplikations- und Plus/Minus-Zeichen.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 class="ref-section">SI-Einheiten (DRS-Makros)</h2>
+  <p class="lead">Diese Makros setzen die Einheit korrekt aufrecht und mit einem schmalen Abstand zur Zahl.</p>
+  <table class="ref-tbl">
+    <thead><tr><th style="width:40%">Schreibweise</th><th style="width:25%">Ergebnis</th><th>Beschreibung</th></tr></thead>
+    <tbody>
+      <tr><td><code>5\V</code></td>     <td class="rendered">$5\V$</td>     <td>Volt</td></tr>
+      <tr><td><code>12\mV</code></td>   <td class="rendered">$12\mV$</td>   <td>Millivolt</td></tr>
+      <tr><td><code>230\kV</code></td>  <td class="rendered">$230\kV$</td>  <td>Kilovolt</td></tr>
+      <tr><td><code>2\A</code></td>     <td class="rendered">$2\A$</td>     <td>Ampere</td></tr>
+      <tr><td><code>500\mA</code></td>  <td class="rendered">$500\mA$</td>  <td>Milliampere</td></tr>
+      <tr><td><code>100\Ohm</code></td> <td class="rendered">$100\Ohm$</td> <td>Ohm</td></tr>
+      <tr><td><code>1\kohm</code></td>  <td class="rendered">$1\kohm$</td>  <td>Kiloohm</td></tr>
+      <tr><td><code>2{,}2\mohm</code></td><td class="rendered">$2{,}2\mohm$</td><td>Megaohm</td></tr>
+      <tr><td><code>60\W</code></td>    <td class="rendered">$60\W$</td>    <td>Watt</td></tr>
+      <tr><td><code>3\kW</code></td>    <td class="rendered">$3\kW$</td>    <td>Kilowatt</td></tr>
+      <tr><td><code>50\Hz</code></td>   <td class="rendered">$50\Hz$</td>   <td>Hertz</td></tr>
+      <tr><td><code>10\kHz</code></td>  <td class="rendered">$10\kHz$</td>  <td>Kilohertz</td></tr>
+      <tr><td><code>1\MHz</code></td>   <td class="rendered">$1\MHz$</td>   <td>Megahertz</td></tr>
+      <tr><td><code>1\F</code></td>     <td class="rendered">$1\F$</td>     <td>Farad</td></tr>
+      <tr><td><code>10\uF</code></td>   <td class="rendered">$10\uF$</td>   <td>Mikrofarad</td></tr>
+      <tr><td><code>47\nF</code></td>   <td class="rendered">$47\nF$</td>   <td>Nanofarad</td></tr>
+      <tr><td><code>1\H</code></td>     <td class="rendered">$1\H$</td>     <td>Henry</td></tr>
+      <tr><td><code>10\mH</code></td>   <td class="rendered">$10\mH$</td>   <td>Millihenry</td></tr>
+      <tr><td><code>1\m</code></td>     <td class="rendered">$1\m$</td>     <td>Meter</td></tr>
+      <tr><td><code>10\cm</code></td>   <td class="rendered">$10\cm$</td>   <td>Zentimeter</td></tr>
+      <tr><td><code>5\mm</code></td>    <td class="rendered">$5\mm$</td>    <td>Millimeter</td></tr>
+      <tr><td><code>1\km</code></td>    <td class="rendered">$1\km$</td>    <td>Kilometer</td></tr>
+      <tr><td><code>1\kg</code></td>    <td class="rendered">$1\kg$</td>    <td>Kilogramm</td></tr>
+      <tr><td><code>500\g</code></td>   <td class="rendered">$500\g$</td>   <td>Gramm</td></tr>
+      <tr><td><code>2\s</code></td>     <td class="rendered">$2\s$</td>     <td>Sekunde</td></tr>
+      <tr><td><code>20\ms</code></td>   <td class="rendered">$20\ms$</td>   <td>Millisekunde</td></tr>
+      <tr><td><code>10\N</code></td>    <td class="rendered">$10\N$</td>    <td>Newton</td></tr>
+      <tr><td><code>1\Pa</code></td>    <td class="rendered">$1\Pa$</td>    <td>Pascal</td></tr>
+      <tr><td><code>5\J</code></td>     <td class="rendered">$5\J$</td>     <td>Joule</td></tr>
+      <tr><td><code>1\C</code></td>     <td class="rendered">$1\C$</td>     <td>Coulomb</td></tr>
+      <tr><td><code>273\K</code></td>   <td class="rendered">$273\K$</td>   <td>Kelvin</td></tr>
+      <tr><td><code>\celsius{20}</code></td><td class="rendered">$\celsius{20}$</td><td>Grad Celsius</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="ref-section">Indizes</h2>
+  <table class="ref-tbl">
+    <thead><tr><th style="width:40%">Schreibweise</th><th style="width:25%">Ergebnis</th><th>Beschreibung</th></tr></thead>
+    <tbody>
+      <tr><td><code>R\ges</code></td><td class="rendered">$R\ges$</td><td>Index „ges" (aufrecht, gängige Berufsschul-Notation).</td></tr>
+      <tr><td><code>U\subscr{eff}</code></td><td class="rendered">$U\subscr{eff}$</td><td>Beliebiger aufrechter Index (hier: eff).</td></tr>
+      <tr><td><code>I_{max}</code></td><td class="rendered">$I_{max}$</td><td>Klassischer kursiver Index.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="ref-section">Komplettes Beispiel</h2>
+  <p class="lead">So sieht eine typische Aufgabenstellung mit Werten und Lösungsformel aus:</p>
+  <table class="ref-tbl">
+    <tr>
+      <td style="width:60%">
+<pre style="background:#fafafa;padding:.8rem;border-radius:6px;font-size:12px;white-space:pre-wrap">An einer Parallelschaltung liegt $U = 12\V$ an.
+Die Teilwiderstände betragen $R_1 = 60\Ohm$ und $R_2 = 40\Ohm$.
+Berechne $I\ges$.
+
+$$I\ges = \frac{U}{R_1} + \frac{U}{R_2} = 0{,}2\A + 0{,}3\A = 0{,}5\A$$
+</pre>
+      </td>
+      <td>
+        <p>An einer Parallelschaltung liegt $U = 12\V$ an. Die Teilwiderstände betragen $R_1 = 60\Ohm$ und $R_2 = 40\Ohm$. Berechne $I\ges$.</p>
+        <p>$$I\ges = \frac{U}{R_1} + \frac{U}{R_2} = 0{,}2\A + 0{,}3\A = 0{,}5\A$$</p>
+      </td>
+    </tr>
+  </table>
+
+  <h2 class="ref-section">Hinweise</h2>
+  <ul style="line-height:1.7;font-size:13px;padding-left:1.4rem">
+    <li>Deutsche Dezimaltrennung mit Komma: schreibe <code>0{,}5</code> (das <code>{,}</code> erzeugt das Komma ohne Zwischenraum).</li>
+    <li>Backslashes nicht doppelt setzen — der Editor speichert sie automatisch korrekt.</li>
+    <li>In der Vorschau (Knopf „Vorschau HTML" im Editor) siehst du sofort wie alles gerendert wird.</li>
+  </ul>
+</div>
+{% endblock %}

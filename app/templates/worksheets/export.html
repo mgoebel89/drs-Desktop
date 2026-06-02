@@ -92,9 +92,11 @@ input[type=file]{display:none;}
   body { background: #fff; }
   .wrapper { max-width: none; padding: 0; }
   .drs-page { border: none; padding: 0; }
-  .upload-row, .aktions-row { display: none !important; }
-  textarea.antwort { background: #fff; border: 1px solid #ccc; min-height: 100px; }
-  .aufgabe { page-break-inside: avoid; }
+  /* Im PDF: keine Antwort-Textarea, keine Upload-Buttons, keine Aktions-Zeile.
+     Stattdessen Leerraum zum handschriftlichen Beantworten. */
+  textarea.antwort, .upload-row, .preview-area, .aktions-row { display: none !important; }
+  .aufgabe { page-break-inside: avoid; padding-bottom: 38mm; }
+  .aufg-text { margin-bottom: 0; }
 }
 </style>
 </head>
@@ -103,10 +105,12 @@ input[type=file]{display:none;}
 <div class="drs-page">
 
   <div class="drs-header">
-    <div class="brand">David-Roentgen-Schule · Neuwied</div>
+    <div class="brand" style="display:flex;align-items:center;gap:.7rem">
+      {% if logo_data_url %}<img src="{{ logo_data_url }}" alt="" style="height:38px;width:auto">{% endif %}
+      <span>{{ school_name_value }}</span>
+    </div>
     <div class="meta">
-      <strong id="m-fach"></strong><br>
-      <span id="m-lf"></span><br>
+      <strong id="m-header"></strong><br>
       Datum: <span id="m-datum"></span>
     </div>
   </div>
@@ -153,8 +157,16 @@ function paragraphs(text) {
   return String(text || '').split(/\n\s*\n/).filter(Boolean).map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('');
 }
 
-document.getElementById('m-fach').textContent = CFG.meta.fach || '';
-document.getElementById('m-lf').textContent = CFG.meta.lernfeld || '';
+// Header zeigt nur eine Zeile basierend auf headerLabel + headerValue.
+// Rückwärtskompatibel: wenn alte Worksheets noch fach+lernfeld haben.
+(function() {
+  var m = CFG.meta || {};
+  var label = m.headerLabel || (m.lernfeld ? 'Lernfeld' : (m.fach ? 'Fach' : ''));
+  var value = m.headerValue || m.lernfeld || m.fach || '';
+  var prefix = label ? (label === 'fach' ? 'Fach' : (label === 'lernfeld' ? 'Lernfeld' : label)) : '';
+  var text = prefix && value ? (prefix + ': ' + value) : (value || prefix);
+  document.getElementById('m-header').textContent = text;
+})();
 document.getElementById('m-datum').textContent = new Date().toLocaleDateString('de-DE');
 document.getElementById('ls-titel').textContent = CFG.meta.lernsituationTitel || '';
 document.getElementById('ls-text').innerHTML = paragraphs(CFG.meta.lernsituationText);

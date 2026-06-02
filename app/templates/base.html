@@ -9,11 +9,15 @@
 <body>
 {% if user %}
 <nav class="nav">
-  <div>
+  <div style="display:flex;align-items:center;gap:.9rem">
+    <img src="/branding/logo" alt="" style="height:28px;width:auto" onerror="this.style.display='none'">
+    <span style="font-weight:700;color:var(--blau);font-size:13px">{{ school_name() }}</span>
+    <span class="muted" style="margin:0 .4rem">·</span>
     <a href="/">Start</a>
     <a href="/worksheets">Aufgabenblätter</a>
+    <a href="/help">Hilfe</a>
     <a href="/profile">Profil</a>
-    {% if user.role == 'admin' %}<a href="/admin/users">Nutzer</a>{% endif %}
+    {% if user.role == 'admin' %}<a href="/admin/users">Nutzer</a><a href="/admin/settings">Einstellungen</a>{% endif %}
   </div>
   <div class="right">
     {{ user.full_name or user.username }}
@@ -24,6 +28,13 @@
     </form>
   </div>
 </nav>
+{% else %}
+<div class="nav" style="justify-content:center">
+  <div style="display:flex;align-items:center;gap:.9rem">
+    <img src="/branding/logo" alt="" style="height:28px;width:auto" onerror="this.style.display='none'">
+    <span style="font-weight:700;color:var(--blau);font-size:13px">{{ school_name() }}</span>
+  </div>
+</div>
 {% endif %}
 <div class="wrapper">
   {% block content %}{% endblock %}
