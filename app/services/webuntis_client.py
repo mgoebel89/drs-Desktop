@@ -98,12 +98,19 @@ def test_connection(user: User) -> tuple[bool, str]:
 
 
 def _period_to_dict(p) -> dict:
-    """Period-Objekt in serialisierbares Dict umformen."""
+    """Period-Objekt in serialisierbares Dict umformen.
+
+    Wichtig: NICHT auf p.teachers zugreifen — die Lazy-Resolution triggert
+    intern getTeachers(), wofür viele Lehrer-Accounts keine Berechtigung haben.
+    """
     def _names(items):
         out = []
-        for it in (items or []):
-            n = getattr(it, "name", None) or getattr(it, "long_name", None) or str(it)
-            out.append(n)
+        try:
+            for it in (items or []):
+                n = getattr(it, "name", None) or getattr(it, "long_name", None) or str(it)
+                out.append(n)
+        except Exception:
+            log.debug("Auflösung fehlgeschlagen", exc_info=True)
         return out
     return {
         "id": getattr(p, "id", None),
@@ -112,8 +119,7 @@ def _period_to_dict(p) -> dict:
         "klassen": _names(p.klassen),
         "subjects": _names(p.subjects),
         "rooms": _names(p.rooms),
-        "teachers": _names(p.teachers),
-        "code": getattr(p, "code", None),  # "cancelled", "irregular" etc.
+        "code": getattr(p, "code", None),
         "info": getattr(p, "info", "") or "",
     }
 
