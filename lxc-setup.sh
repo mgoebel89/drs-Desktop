@@ -23,6 +23,7 @@ msg "apt update + Pakete"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
+  sudo \
   python3 python3-venv python3-dev \
   build-essential pkg-config libffi-dev libssl-dev \
   git curl ca-certificates \
