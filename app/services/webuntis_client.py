@@ -118,9 +118,24 @@ def _period_to_dict(p) -> dict:
     }
 
 
+def _warmup(s) -> None:
+    """python-webuntis schlägt manchmal mit NotLoggedInError fehl, wenn man direkt
+    nach dem Login zu my_timetable() springt. Ein paar Vor-Calls cachen die
+    nötigen Stammdaten und stabilisieren die Session."""
+    try:
+        s.statusdata()
+    except Exception:
+        log.debug("warmup: statusdata fehlgeschlagen", exc_info=True)
+    try:
+        list(s.klassen())
+    except Exception:
+        log.debug("warmup: klassen fehlgeschlagen", exc_info=True)
+
+
 def get_my_timetable(user: User, start: date, end: date) -> list[dict]:
     """Eigene Stundenplan-Lessons zwischen start und end (inkl.)."""
     with session_for(user) as s:
+        _warmup(s)
         periods = list(s.my_timetable(start=start, end=end))
     return sorted([_period_to_dict(p) for p in periods],
                   key=lambda d: d["start"] or "")
