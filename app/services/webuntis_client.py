@@ -120,16 +120,16 @@ def _period_to_dict(p) -> dict:
 
 def _warmup(s) -> None:
     """python-webuntis schlägt manchmal mit NotLoggedInError fehl, wenn man direkt
-    nach dem Login zu my_timetable() springt. Ein paar Vor-Calls cachen die
-    nötigen Stammdaten und stabilisieren die Session."""
-    try:
-        s.statusdata()
-    except Exception:
-        log.debug("warmup: statusdata fehlgeschlagen", exc_info=True)
-    try:
-        list(s.klassen())
-    except Exception:
-        log.debug("warmup: klassen fehlgeschlagen", exc_info=True)
+    nach dem Login zu my_timetable() springt. Wir wärmen die Session, indem wir
+    alle Stammdaten-Endpoints einmal aufrufen (Fehler ignorieren)."""
+    for name in ("statusdata", "klassen", "teachers", "subjects", "rooms"):
+        try:
+            v = getattr(s, name)()
+            # iter() forciert die HTTP-Anfrage bei lazy Result-Objects
+            if hasattr(v, "__iter__"):
+                list(v)
+        except Exception:
+            log.debug("warmup %s fehlgeschlagen", name, exc_info=True)
 
 
 def get_my_timetable(user: User, start: date, end: date) -> list[dict]:
@@ -191,6 +191,11 @@ def diagnose(user: User) -> list[dict]:
             in_week = today + timedelta(days=6)
             step("my_timetable(heute…+6 Tage)",
                  lambda: f"{len(list(s.my_timetable(start=today, end=in_week)))} Lessons")
+            # Aktuelle Woche Mo-Fr (so wie die /timetable-Seite es macht)
+            monday = today - timedelta(days=today.weekday())
+            friday = monday + timedelta(days=4)
+            step(f"my_timetable(Mo {monday.isoformat()} – Fr {friday.isoformat()})",
+                 lambda: f"{len(list(s.my_timetable(start=monday, end=friday)))} Lessons")
             # Falls Teachers ging: erste(n) probieren um zu sehen ob timetable allgemein geht
             if teachers and "0 " not in (results[-2]["info"] or ""):
                 try:
