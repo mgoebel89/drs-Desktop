@@ -87,6 +87,21 @@ class WorksheetRevision(Base):
     worksheet: Mapped[Worksheet] = relationship(back_populates="revisions")
 
 
+class IcalCalendar(Base):
+    """Pro Nutzer hinterlegte externe Kalender via iCal-URL."""
+    __tablename__ = "ical_calendars"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(80), default="Kalender")
+    color: Mapped[str] = mapped_column(String(16), default="#7B61FF")  # hex
+    url_enc: Mapped[bytes] = mapped_column(LargeBinary)  # AES-GCM verschlüsselt
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Setting(Base):
     """Globale Schlüssel/Wert-Einstellungen (Branding etc.)."""
     __tablename__ = "settings"

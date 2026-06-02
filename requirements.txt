@@ -12,5 +12,6 @@ itsdangerous>=2.2
 typer>=0.15
 anthropic>=0.40
 webuntis>=0.1.21
+icalendar>=5.0
 httpx>=0.28
 playwright>=1.49

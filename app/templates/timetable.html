@@ -9,7 +9,12 @@
   .tt-grid .slot-name { font-weight: 700; color: var(--blau); }
   .tt-grid .slot-time { color: var(--muted); font-size: 11px; }
   .tt-grid td.empty { background: #fafafa; }
-  .tt-cell { min-height: 50px; }
+  /* Einheitliche Zeilenhöhe — Platz für zwei Lesson-Boxen übereinander */
+  .tt-grid tbody tr { height: 88px; }
+  .tt-grid td.tt-cell { height: 88px; vertical-align: top; }
+  .tt-grid td.tt-cell[rowspan="2"] { height: 176px; }
+  .tt-grid td.tt-cell[rowspan="3"] { height: 264px; }
+  .tt-grid td.tt-cell[rowspan="4"] { height: 352px; }
   .tt-lesson {
     padding: 5px 7px; border-radius: 4px; background: var(--blau-hell);
     border-left: 3px solid var(--blau); margin-bottom: 3px; cursor: pointer;
@@ -21,6 +26,16 @@
   .tt-room { color: var(--muted); font-size: 11px; margin-top: 1px; }
   .tt-lesson.cancelled { opacity: .55; text-decoration: line-through; background: #f5f5f5; border-left-color: #aaa; }
   .tt-lesson.irregular { background: #fff3e0; border-left-color: var(--gelb); }
+
+  .tt-event {
+    padding: 5px 7px; border-radius: 4px; margin-bottom: 3px; cursor: pointer;
+    border-left: 3px solid var(--blau); background: var(--blau-hell);
+    transition: filter .12s;
+  }
+  .tt-event:hover { filter: brightness(.95); }
+  .tt-event-title { font-weight: 700; font-size: 12px; line-height: 1.25; color: var(--text); }
+  .tt-event-meta  { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .tt-event-label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .8; margin-top: 2px; }
 
   /* Side-Panel */
   .tt-panel {
@@ -103,20 +118,41 @@
             <div class="slot-time">{{ sl.start }}–{{ sl.end }}</div>
           </th>
           {% for d_idx in range(grid.days|length) %}
-            {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
-            <td class="tt-cell {% if not lessons %}empty{% endif %}">
-              {% for l in lessons %}
-                {% set cls = (l.klassen|join(' / ')) or '—' %}
-                {% set raum = l.rooms|join(', ') %}
-                {% set state = '' %}
-                {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
-                {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
-                <div class="tt-lesson {{ state }}" data-lesson='{{ l|tojson|forceescape }}' data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}" data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}">
-                  <div class="tt-klasse">{{ cls }}</div>
-                  {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
-                </div>
-              {% endfor %}
-            </td>
+            {% if (sl.start, d_idx) in grid.skip_cells %}
+              {# Zelle wird von einem mehrzeiligen Event von oben überdeckt – nicht rendern #}
+            {% else %}
+              {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
+              {% set events = grid.events.get((sl.start, d_idx), []) %}
+              {% set rs = events|map(attribute='rowspan')|list|max if events else 1 %}
+              <td class="tt-cell {% if not lessons and not events %}empty{% endif %}"
+                  {% if rs and rs > 1 %}rowspan="{{ rs }}"{% endif %}>
+                {% for ev in events %}
+                  <div class="tt-event" data-event='{{ ev|tojson|forceescape }}'
+                       data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
+                       data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
+                       style="background: {{ ev.calendar_color }}22; border-left-color: {{ ev.calendar_color }};">
+                    <div class="tt-event-title">{{ ev.summary or '(ohne Titel)' }}</div>
+                    <div class="tt-event-meta">
+                      {{ ev.start_time }}–{{ ev.end_time }}{% if ev.location %} · {{ ev.location }}{% endif %}
+                    </div>
+                    <div class="tt-event-label" style="color: {{ ev.calendar_color }}">{{ ev.calendar_label }}</div>
+                  </div>
+                {% endfor %}
+                {% for l in lessons %}
+                  {% set cls = (l.klassen|join(' / ')) or '—' %}
+                  {% set raum = l.rooms|join(', ') %}
+                  {% set state = '' %}
+                  {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
+                  {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
+                  <div class="tt-lesson {{ state }}" data-lesson='{{ l|tojson|forceescape }}'
+                       data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
+                       data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}">
+                    <div class="tt-klasse">{{ cls }}</div>
+                    {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
+                  </div>
+                {% endfor %}
+              </td>
+            {% endif %}
           {% endfor %}
         </tr>
         {% endfor %}
@@ -220,6 +256,34 @@ document.querySelectorAll('.tt-lesson').forEach(el => {
     try {
       const l = JSON.parse(el.dataset.lesson);
       openPanel(l, el.dataset.day, el.dataset.slot);
+    } catch (e) { console.error(e); }
+  });
+});
+
+function openEventPanel(ev, day, slot) {
+  _title.textContent = day + ' · ' + slot;
+  let html = '<dl>'
+    + _row('Titel', ev.summary || '(ohne Titel)')
+    + _row('Kalender', ev.calendar_label || '')
+    + _row('Zeit', (ev.start_time || '') + '–' + (ev.end_time || ''))
+    + (ev.location ? _row('Ort', ev.location) : '')
+    + '</dl>';
+  if (ev.description) {
+    html += '<h4>Beschreibung</h4><div class="tt-stoff-box" style="border-left-color:'
+      + (ev.calendar_color || '#7B61FF') + '">'
+      + String(ev.description).replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</div>';
+  }
+  _body.innerHTML = html;
+  _panel.classList.add('open');
+  _backdrop.classList.add('open');
+  _panel.setAttribute('aria-hidden', 'false');
+}
+
+document.querySelectorAll('.tt-event').forEach(el => {
+  el.addEventListener('click', () => {
+    try {
+      const ev = JSON.parse(el.dataset.event);
+      openEventPanel(ev, el.dataset.day, el.dataset.slot);
     } catch (e) { console.error(e); }
   });
 });

@@ -72,5 +72,82 @@
     }
   });
   </script>
+
+  <h2>Externe Kalender (iCal)</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:.6rem">
+    Termine aus externen Kalendern (z.B. Outlook, Google, Nextcloud) im Stundenplan einblenden.
+    Die URL bekommst du aus deinem Kalender als „iCal-Feed" oder „Abonnieren"-Link.
+    URLs werden verschlüsselt gespeichert.
+  </p>
+
+  {% if ical_calendars %}
+  <table style="margin-bottom:1rem">
+    <thead><tr>
+      <th>Farbe</th><th>Bezeichnung</th><th>URL</th><th>Status</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for c in ical_calendars %}
+    <tr>
+      <td><span style="display:inline-block;width:24px;height:14px;background:{{ c.color }};border-radius:3px;border:1px solid #ccc"></span></td>
+      <td><strong>{{ c.label }}</strong></td>
+      <td><code style="font-size:11px;background:#fafafa;padding:1px 4px;border-radius:3px">{{ c.url_masked }}</code></td>
+      <td>
+        {% if c.enabled %}<span class="badge b-teacher">aktiv</span>{% else %}<span class="badge b-inactive">inaktiv</span>{% endif %}
+        {% if c.last_error %}<br><span style="color:#c62828;font-size:11px">{{ c.last_error }}</span>{% endif %}
+      </td>
+      <td style="white-space:nowrap">
+        <button class="btn-sec" data-ical-test="{{ c.id }}" style="padding:4px 9px;font-size:11px" type="button">Testen</button>
+        <form method="post" action="/profile/ical/{{ c.id }}/toggle" style="display:inline">
+          <button class="btn-sec" style="padding:4px 9px;font-size:11px">{% if c.enabled %}Pausieren{% else %}Aktivieren{% endif %}</button>
+        </form>
+        <form method="post" action="/profile/ical/{{ c.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Kalender wirklich entfernen?');">
+          <button class="btn-sec" style="padding:4px 9px;font-size:11px;color:var(--pink);border-color:var(--pink)">Löschen</button>
+        </form>
+        <span class="ical-test-status" data-for="{{ c.id }}" style="margin-left:.5rem;font-size:11px"></span>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-bottom:.6rem">Noch kein Kalender hinterlegt.</p>
+  {% endif %}
+
+  <h3 style="font-size:14px;margin-top:.6rem">Kalender hinzufügen</h3>
+  <form method="post" action="/profile/ical/add" style="display:grid;grid-template-columns:1fr 100px 2fr auto;gap:.6rem;align-items:end">
+    <div>
+      <label>Bezeichnung</label>
+      <input name="label" required placeholder="z.B. Outlook" maxlength="80">
+    </div>
+    <div>
+      <label>Farbe</label>
+      <input name="color" type="color" value="#7B61FF" style="width:100%;height:36px;padding:2px">
+    </div>
+    <div>
+      <label>iCal-URL</label>
+      <input name="url" required placeholder="https://outlook.office365.com/.../calendar.ics" type="url">
+    </div>
+    <div><button class="btn" type="submit">Hinzufügen</button></div>
+  </form>
+
+  <script>
+  document.querySelectorAll('[data-ical-test]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.icalTest;
+      const status = document.querySelector('.ical-test-status[data-for="' + id + '"]');
+      btn.disabled = true; status.textContent = 'Teste…'; status.style.color = '#666';
+      try {
+        const res = await fetch('/profile/ical/' + id + '/test', {method: 'POST'});
+        const data = await res.json();
+        status.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
+        status.style.color = data.ok ? '#2e7d32' : '#c62828';
+      } catch (e) {
+        status.textContent = '✗ ' + e.message;
+        status.style.color = '#c62828';
+      } finally { btn.disabled = false; }
+    });
+  });
+  </script>
 </div>
 {% endblock %}

@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_user
 from app.db import get_db
-from app.models import User
-from app.services import webuntis_client
+from app.models import IcalCalendar, User
+from app.services import ical_client, webuntis_client
 from app.templating import templates
 
 router = APIRouter()
@@ -38,12 +38,30 @@ def timetable_view(
         })
 
     ref = _parse_iso_date(week)
+    # iCal-Events aller aktiven Kalender vorab einsammeln
+    ical_events: list[dict] = []
+    ical_errors: list[str] = []
+    monday = ref - timedelta(days=ref.weekday())
+    friday = monday + timedelta(days=4)
+    for cal in db.query(IcalCalendar).filter(
+        IcalCalendar.user_id == user.id, IcalCalendar.enabled == True).all():  # noqa: E712
+        evs, err_msg = ical_client.get_events_for_calendar(cal, monday, friday)
+        if err_msg:
+            ical_errors.append(f"{cal.label}: {err_msg}")
+            cal.last_error = err_msg
+        else:
+            cal.last_error = ""
+            ical_events.extend(evs)
+    db.commit()
+
     try:
-        grid = webuntis_client.get_week_grid(user, ref)
+        grid = webuntis_client.get_week_grid(user, ref, ical_events=ical_events)
         err = None
     except Exception as e:
         grid = None
         err = f"{type(e).__name__}: {e}"
+    if ical_errors and not err:
+        err = " · ".join(ical_errors)
 
     return templates.TemplateResponse(request, "timetable.html", {
         "user": user, "error": err, "grid": grid,
