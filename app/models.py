@@ -87,6 +87,25 @@ class WorksheetRevision(Base):
     worksheet: Mapped[Worksheet] = relationship(back_populates="revisions")
 
 
+class LessonNote(Base):
+    """Datumsspezifische Lehrer-Notizen zu einer Untis-Stunde.
+    Key: user + Datum + Klassen-Kombi + Fach-Kombi.
+    Mehrere Stunden mit identischer Klasse/Fach am selben Tag teilen sich eine Notiz."""
+    __tablename__ = "lesson_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    lesson_date: Mapped[str] = mapped_column(String(10), index=True)   # 'YYYY-MM-DD'
+    klassen_key: Mapped[str] = mapped_column(String(255), index=True)  # z.B. 'BSMT 23 a'
+    subjects_key: Mapped[str] = mapped_column(String(255), index=True) # z.B. 'BBU_Mt2'
+    theme: Mapped[str] = mapped_column(String(500), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    material: Mapped[str] = mapped_column(Text, default="")
+    remarks: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class IcalCalendar(Base):
     """Pro Nutzer hinterlegte externe Kalender via iCal-URL."""
     __tablename__ = "ical_calendars"

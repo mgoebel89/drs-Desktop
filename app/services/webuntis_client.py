@@ -280,69 +280,106 @@ def _merge_block_lessons(lessons: list[dict]) -> list[dict]:
 
 
 def _attach_events(grid: dict, ical_events: list[dict]) -> None:
-    """Hängt iCal-Events an das Grid an: setzt rowspan + skip_cells und
-    integriert Lessons aus überspannten Slots in die Anker-Zelle."""
+    """Hängt iCal-Events an das Grid an.
+
+    Liefert im grid-dict:
+    - all_day_row:        dict[day_idx] -> list[event mit colspan]
+    - all_day_skip:       set[day_idx] (Tage, die von Multi-Day-Balken überdeckt sind)
+    - events (timed):     dict[(slot_start, day_idx)] -> list[event mit rowspan]
+    - skip_cells:         set[(slot_start, day_idx)] (Zellen, die von Event-rowspan überdeckt)
+    """
     slots = grid["slots"]
     monday: date = grid["monday"]
     cells: dict[tuple[str, int], list[dict]] = grid["cells"]
+
+    all_day_row: dict[int, list[dict]] = {}
+    all_day_skip: set[int] = set()
     events_index: dict[tuple[str, int], list[dict]] = {}
     skip_cells: set[tuple[str, int]] = set()
-
-    if not slots:
-        grid["events"] = events_index
-        grid["skip_cells"] = skip_cells
-        return
 
     def _slot_dt(d: date, s_: str) -> datetime:
         h, m = s_.split(":")
         return datetime(d.year, d.month, d.day, int(h), int(m))
 
+    # 1) Ganztägige Events einsortieren
     for ev in ical_events:
+        if not ev.get("all_day"):
+            continue
         try:
-            ev_start = datetime.fromisoformat(ev["start"])
-            ev_end = datetime.fromisoformat(ev["end"])
+            ev_start = datetime.fromisoformat(ev["start"]).date()
+            ev_end = datetime.fromisoformat(ev["end"]).date()  # exklusiv
         except Exception:
             continue
-        ev_date = ev_start.date()
-        day_idx = (ev_date - monday).days
-        if not (0 <= day_idx <= 4):
+        # Welche Wochentage fallen in das Event-Intervall?
+        days_in_range = []
+        for i in range(5):
+            d = monday + timedelta(days=i)
+            if ev_start <= d < ev_end:
+                days_in_range.append(i)
+        if not days_in_range:
             continue
-
-        overlapping_indices = []
-        for i, sl in enumerate(slots):
-            slot_start = _slot_dt(ev_date, sl["start"])
-            slot_end = _slot_dt(ev_date, sl["end"])
-            if ev_start < slot_end and ev_end > slot_start:
-                overlapping_indices.append(i)
-        if not overlapping_indices:
-            continue  # außerhalb des Schulrasters → nicht zeigen
-
-        # nur zusammenhängende Slots zählen
-        first_idx = overlapping_indices[0]
+        first_idx = days_in_range[0]
+        # Nur zusammenhängende Tage zählen
         span = 1
-        for j in range(1, len(overlapping_indices)):
-            if overlapping_indices[j] == overlapping_indices[j-1] + 1:
+        for j in range(1, len(days_in_range)):
+            if days_in_range[j] == days_in_range[j-1] + 1:
                 span += 1
             else:
                 break
+        all_day_row.setdefault(first_idx, []).append({**ev, "colspan": span})
+        for k in range(1, span):
+            all_day_skip.add(first_idx + k)
 
-        anchor_key = (slots[first_idx]["start"], day_idx)
-        events_index.setdefault(anchor_key, []).append({
-            **ev, "rowspan": span,
-            "start_time": ev_start.strftime("%H:%M"),
-            "end_time": ev_end.strftime("%H:%M"),
-        })
+    # 2) Zeitabhängige Events einsortieren (rowspan über Untis-Blöcke)
+    if slots:
+        for ev in ical_events:
+            if ev.get("all_day"):
+                continue
+            try:
+                ev_start_dt = datetime.fromisoformat(ev["start"])
+                ev_end_dt = datetime.fromisoformat(ev["end"])
+            except Exception:
+                continue
+            ev_date = ev_start_dt.date()
+            day_idx = (ev_date - monday).days
+            if not (0 <= day_idx <= 4):
+                continue
 
-        if span > 1:
-            # Lessons aus überspannten Slots in die Anker-Zelle übernehmen,
-            # damit sie nicht verloren gehen.
-            for k in range(1, span):
-                covered_key = (slots[first_idx + k]["start"], day_idx)
-                skip_cells.add(covered_key)
-                if covered_key in cells:
-                    cells.setdefault(anchor_key, []).extend(cells[covered_key])
-                    del cells[covered_key]
+            overlapping_indices = []
+            for i, sl in enumerate(slots):
+                slot_start = _slot_dt(ev_date, sl["start"])
+                slot_end = _slot_dt(ev_date, sl["end"])
+                if ev_start_dt < slot_end and ev_end_dt > slot_start:
+                    overlapping_indices.append(i)
+            if not overlapping_indices:
+                continue  # außerhalb des Schulrasters → nicht zeigen
 
+            first_idx = overlapping_indices[0]
+            span = 1
+            for j in range(1, len(overlapping_indices)):
+                if overlapping_indices[j] == overlapping_indices[j-1] + 1:
+                    span += 1
+                else:
+                    break
+
+            anchor_key = (slots[first_idx]["start"], day_idx)
+            events_index.setdefault(anchor_key, []).append({
+                **ev, "rowspan": span,
+                "start_time": ev_start_dt.strftime("%H:%M"),
+                "end_time": ev_end_dt.strftime("%H:%M"),
+            })
+
+            if span > 1:
+                # Lessons aus überspannten Slots in die Anker-Zelle übernehmen
+                for k in range(1, span):
+                    covered_key = (slots[first_idx + k]["start"], day_idx)
+                    skip_cells.add(covered_key)
+                    if covered_key in cells:
+                        cells.setdefault(anchor_key, []).extend(cells[covered_key])
+                        del cells[covered_key]
+
+    grid["all_day_row"] = all_day_row
+    grid["all_day_skip"] = all_day_skip
     grid["events"] = events_index
     grid["skip_cells"] = skip_cells
 
@@ -409,10 +446,18 @@ def get_week_grid(user: User, ref: date | None = None,
         "monday": monday, "friday": friday,
         "days": days, "slots": blocks, "cells": cells,
         "events": {}, "skip_cells": set(),
+        "all_day_row": {}, "all_day_skip": set(),
     }
     if ical_events:
         _attach_events(result, ical_events)
     return result
+
+
+def lesson_key_parts(lesson: dict) -> tuple[str, str]:
+    """Liefert (klassen_key, subjects_key) für die Notiz-Zuordnung."""
+    klassen = "|".join(sorted(lesson.get("klassen") or []))
+    subjects = "|".join(sorted(lesson.get("subjects") or []))
+    return klassen, subjects
 
 
 def diagnose(user: User) -> list[dict]:

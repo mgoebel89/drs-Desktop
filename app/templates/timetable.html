@@ -1,45 +1,110 @@
 {% extends "base.html" %}
 {% block title %}Stundenplan · DRS{% endblock %}
 {% block content %}
+
+{% raw %}
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$','$']], displayMath: [['$$','$$']],
+    packages: {'[+]': ['physics']}, tags: 'none',
+    macros: {
+      V:'{\\,\\mathrm{V}}', A:'{\\,\\mathrm{A}}', W:'{\\,\\mathrm{W}}',
+      Hz:'{\\,\\mathrm{Hz}}', Ohm:'{\\,\\Omega}', kohm:'{\\,\\mathrm{k\\Omega}}',
+      mohm:'{\\,\\mathrm{M\\Omega}}', mA:'{\\,\\mathrm{mA}}', kV:'{\\,\\mathrm{kV}}',
+      mV:'{\\,\\mathrm{mV}}', kW:'{\\,\\mathrm{kW}}', kHz:'{\\,\\mathrm{kHz}}',
+      MHz:'{\\,\\mathrm{MHz}}', F:'{\\,\\mathrm{F}}', uF:'{\\,\\mu\\mathrm{F}}',
+      nF:'{\\,\\mathrm{nF}}', H:'{\\,\\mathrm{H}}', mH:'{\\,\\mathrm{mH}}',
+      m:'{\\,\\mathrm{m}}', km:'{\\,\\mathrm{km}}', cm:'{\\,\\mathrm{cm}}',
+      mm:'{\\,\\mathrm{mm}}', kg:'{\\,\\mathrm{kg}}', g:'{\\,\\mathrm{g}}',
+      s:'{\\,\\mathrm{s}}', ms:'{\\,\\mathrm{ms}}', N:'{\\,\\mathrm{N}}',
+      Pa:'{\\,\\mathrm{Pa}}', J:'{\\,\\mathrm{J}}', C:'{\\,\\mathrm{C}}',
+      K:'{\\,\\mathrm{K}}', ges:'{_{\\mathrm{ges}}}'
+    }
+  },
+  options: { skipHtmlTags: ['script','noscript','style','textarea'] }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
+{% endraw %}
+
 <style>
   .tt-grid { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-  .tt-grid th, .tt-grid td { border: 1px solid #e2e2e2; padding: 4px 6px; vertical-align: top; }
-  .tt-grid thead th { background: var(--blau-hell); color: var(--blau); font-weight: 700; text-align: center; }
-  .tt-grid th.slot { background: #f4f5f6; width: 95px; text-align: left; }
+  .tt-grid th, .tt-grid td { border: 1px solid #e2e2e2; padding: 0; vertical-align: top; }
+  .tt-grid thead th { background: var(--blau-hell); color: var(--blau); font-weight: 700; text-align: center; padding: 6px 4px; }
+  .tt-grid th.slot { background: #f4f5f6; width: 95px; text-align: left; padding: 4px 6px; }
   .tt-grid .slot-name { font-weight: 700; color: var(--blau); }
   .tt-grid .slot-time { color: var(--muted); font-size: 11px; }
-  .tt-grid td.empty { background: #fafafa; }
-  /* Einheitliche Zeilenhöhe — Platz für zwei Lesson-Boxen übereinander */
-  .tt-grid tbody tr { height: 88px; }
-  .tt-grid td.tt-cell { height: 88px; vertical-align: top; }
+
+  /* Einheitliche Block-Zeilenhöhe */
+  .tt-grid tbody tr.slot-row { height: 88px; }
+  .tt-grid td.tt-cell { height: 88px; }
   .tt-grid td.tt-cell[rowspan="2"] { height: 176px; }
   .tt-grid td.tt-cell[rowspan="3"] { height: 264px; }
   .tt-grid td.tt-cell[rowspan="4"] { height: 352px; }
+
+  /* Day-Cell mit zwei Spuren */
+  .day-cell {
+    display: grid; grid-template-columns: 2fr 1fr; gap: 4px;
+    height: 100%; padding: 4px 5px;
+  }
+  .day-cell.no-events { grid-template-columns: 1fr; }
+  .day-cell.no-lessons { grid-template-columns: 1fr; }
+  .lessons-lane, .events-lane { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+  /* All-day Zeile (halbe Höhe) */
+  .tt-grid tbody tr.allday-row { height: 44px; }
+  .tt-grid tr.allday-row td.allday-cell {
+    height: 44px; padding: 3px 5px;
+    background: #fafafa;
+  }
+  .tt-grid tr.allday-row th.slot {
+    background: #f4f5f6; font-size: 10px; color: var(--muted);
+    font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+  }
+  .allday-event {
+    padding: 4px 8px; border-radius: 4px; font-size: 11px; line-height: 1.3;
+    font-weight: 600; cursor: pointer; border-left: 3px solid;
+    margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .allday-event:hover { filter: brightness(.95); }
+
+  /* Lessons */
   .tt-lesson {
     padding: 5px 7px; border-radius: 4px; background: var(--blau-hell);
-    border-left: 3px solid var(--blau); margin-bottom: 3px; cursor: pointer;
-    transition: background .12s;
+    border-left: 3px solid var(--blau); cursor: pointer;
+    transition: background .12s; min-width: 0;
   }
   .tt-lesson:hover { background: #d8ebf8; }
-  .tt-lesson:last-child { margin-bottom: 0; }
-  .tt-klasse { font-weight: 700; color: var(--text); font-size: 12px; line-height: 1.25; }
-  .tt-room { color: var(--muted); font-size: 11px; margin-top: 1px; }
+  .tt-klasse {
+    font-weight: 700; color: var(--text); font-size: 12px; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .tt-room { color: var(--muted); font-size: 11px; margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tt-lesson.cancelled { opacity: .55; text-decoration: line-through; background: #f5f5f5; border-left-color: #aaa; }
   .tt-lesson.irregular { background: #fff3e0; border-left-color: var(--gelb); }
+  .note-icon {
+    font-size: 10px; color: var(--blau); flex-shrink: 0;
+  }
 
+  /* Events (right lane) */
   .tt-event {
-    padding: 5px 7px; border-radius: 4px; margin-bottom: 3px; cursor: pointer;
+    padding: 4px 6px; border-radius: 4px; cursor: pointer; min-width: 0;
     border-left: 3px solid var(--blau); background: var(--blau-hell);
     transition: filter .12s;
   }
   .tt-event:hover { filter: brightness(.95); }
-  .tt-event-title { font-weight: 700; font-size: 12px; line-height: 1.25; color: var(--text); }
-  .tt-event-meta  { font-size: 11px; color: var(--muted); margin-top: 1px; }
-  .tt-event-label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .8; margin-top: 2px; }
+  .tt-event-title { font-weight: 700; font-size: 11px; line-height: 1.2; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tt-event-meta  { font-size: 10px; color: var(--muted); margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Side-Panel */
   .tt-panel {
-    position: fixed; top: 0; right: -440px; width: 420px; height: 100vh;
+    position: fixed; top: 0; right: -480px; width: 460px; height: 100vh;
     background: #fff; border-left: 1px solid var(--border);
     box-shadow: -4px 0 16px rgba(0,0,0,.08);
     transition: right .25s ease; overflow-y: auto; z-index: 1000;
@@ -50,7 +115,7 @@
     padding: 1rem 1.25rem; border-bottom: 1px solid #eee;
     background: var(--blau); color: #fff;
   }
-  .tt-panel-head h3 { margin: 0; color: #fff; font-size: 16px; }
+  .tt-panel-head h3 { margin: 0; color: #fff; font-size: 15px; }
   .tt-panel-close {
     background: transparent; border: none; color: #fff; font-size: 24px;
     cursor: pointer; padding: 0; line-height: 1; width: 28px; height: 28px;
@@ -60,8 +125,8 @@
   .tt-panel dt { font-weight: 600; color: var(--muted); }
   .tt-panel dd { margin: 0; color: var(--text); }
   .tt-panel dd.empty { color: #c0c0c0; font-style: italic; }
-  .tt-panel h4 { margin: 1.2rem 0 .4rem; font-size: 13px; color: var(--blau); text-transform: uppercase; letter-spacing: .5px; }
-  .tt-panel .tt-stoff-box {
+  .tt-panel h4 { margin: 1.2rem 0 .4rem; font-size: 12px; color: var(--blau); text-transform: uppercase; letter-spacing: .5px; }
+  .tt-panel .stoff-box {
     background: #fffef0; border-left: 3px solid var(--gelb); border-radius: 0 4px 4px 0;
     padding: .6rem .8rem; font-size: 13px; line-height: 1.5; white-space: pre-wrap;
   }
@@ -71,10 +136,34 @@
     background: #fafafa; padding: .6rem; border-radius: 4px; font-size: 11px;
     overflow: auto; max-height: 220px; margin-top: .5rem;
   }
-  .tt-backdrop {
-    position: fixed; inset: 0; background: transparent; z-index: 999; display: none;
-  }
+  .tt-backdrop { position: fixed; inset: 0; background: transparent; z-index: 999; display: none; }
   .tt-backdrop.open { display: block; }
+
+  /* Notes panel form */
+  .note-form label {
+    display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--blau); margin: 1rem 0 .3rem;
+  }
+  .note-form input[type=text], .note-form textarea {
+    width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fafafa; line-height: 1.45;
+  }
+  .note-form input[type=text]:focus, .note-form textarea:focus {
+    outline: none; border-color: var(--blau); background: #fff;
+    box-shadow: 0 0 0 2px rgba(0,99,156,.1);
+  }
+  .note-form textarea { resize: vertical; min-height: 70px; }
+  .note-status {
+    font-size: 11px; color: var(--muted); margin-top: .3rem; font-style: italic;
+  }
+  .prev-note-box {
+    background: var(--blau-hell); border-radius: 6px; padding: .7rem .9rem;
+    font-size: 12px; margin-bottom: 1rem;
+  }
+  .prev-note-box .prev-note-date { color: var(--blau); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .prev-note-box .prev-note-content { margin-top: .3rem; line-height: 1.5; }
+  .prev-note-box .prev-note-content :first-child { margin-top: 0; }
+  .prev-note-box .prev-note-content :last-child { margin-bottom: 0; }
 </style>
 
 <div class="card">
@@ -98,7 +187,7 @@
     <p class="muted" style="margin-bottom:1rem">
       Woche vom <strong>{{ grid.monday.strftime('%d.%m.%Y') }}</strong>
       bis <strong>{{ grid.friday.strftime('%d.%m.%Y') }}</strong>
-      &nbsp;·&nbsp; <span class="muted" style="font-size:12px">Klick auf eine Stunde → Details rechts</span>
+      &nbsp;·&nbsp; <span class="muted" style="font-size:12px">Klick auf eine Stunde → Notizen rechts</span>
     </p>
     {% if grid.slots %}
     <table class="tt-grid">
@@ -111,46 +200,87 @@
         </tr>
       </thead>
       <tbody>
+        {# All-day Zeile, nur wenn überhaupt Events vorhanden #}
+        {% if grid.all_day_row %}
+        <tr class="allday-row">
+          <th class="slot">Ganztägig</th>
+          {% for d_idx in range(grid.days|length) %}
+            {% if d_idx in grid.all_day_skip %}
+              {# überdeckt von einem Multi-Day-Balken von links #}
+            {% else %}
+              {% set adevs = grid.all_day_row.get(d_idx, []) %}
+              {% set cs = adevs|map(attribute='colspan')|list|max if adevs else 1 %}
+              <td class="allday-cell" {% if cs and cs > 1 %}colspan="{{ cs }}"{% endif %}>
+                {% for ev in adevs %}
+                  <div class="allday-event" data-event='{{ ev|tojson|forceescape }}'
+                       data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
+                       data-slot="Ganztägig"
+                       style="background: {{ ev.calendar_color }}22; border-left-color: {{ ev.calendar_color }};">
+                    {{ ev.summary or '(ohne Titel)' }}
+                  </div>
+                {% endfor %}
+              </td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% endif %}
+
         {% for sl in grid.slots %}
-        <tr>
+        <tr class="slot-row">
           <th class="slot">
             <div class="slot-name">{{ sl.name }}</div>
             <div class="slot-time">{{ sl.start }}–{{ sl.end }}</div>
           </th>
           {% for d_idx in range(grid.days|length) %}
             {% if (sl.start, d_idx) in grid.skip_cells %}
-              {# Zelle wird von einem mehrzeiligen Event von oben überdeckt – nicht rendern #}
+              {# überdeckt durch Event mit rowspan #}
             {% else %}
               {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
               {% set events = grid.events.get((sl.start, d_idx), []) %}
               {% set rs = events|map(attribute='rowspan')|list|max if events else 1 %}
-              <td class="tt-cell {% if not lessons and not events %}empty{% endif %}"
-                  {% if rs and rs > 1 %}rowspan="{{ rs }}"{% endif %}>
-                {% for ev in events %}
-                  <div class="tt-event" data-event='{{ ev|tojson|forceescape }}'
-                       data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
-                       data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
-                       style="background: {{ ev.calendar_color }}22; border-left-color: {{ ev.calendar_color }};">
-                    <div class="tt-event-title">{{ ev.summary or '(ohne Titel)' }}</div>
-                    <div class="tt-event-meta">
-                      {{ ev.start_time }}–{{ ev.end_time }}{% if ev.location %} · {{ ev.location }}{% endif %}
+              <td class="tt-cell" {% if rs and rs > 1 %}rowspan="{{ rs }}"{% endif %}>
+                <div class="day-cell{% if not events %} no-events{% endif %}{% if not lessons %} no-lessons{% endif %}">
+                  {% if lessons %}
+                  <div class="lessons-lane">
+                  {% for l in lessons %}
+                    {% set cls = (l.klassen|join(' / ')) or '—' %}
+                    {% set raum = l.rooms|join(', ') %}
+                    {% set state = '' %}
+                    {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
+                    {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
+                    {% set kk = (l.klassen|sort|join('|')) %}
+                    {% set sk = (l.subjects|sort|join('|')) %}
+                    {% set d_iso = grid.days[d_idx].date.isoformat() %}
+                    {% set has_note = (d_iso, kk, sk) in grid.notes_present %}
+                    <div class="tt-lesson {{ state }}" data-lesson='{{ l|tojson|forceescape }}'
+                         data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
+                         data-date="{{ d_iso }}"
+                         data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
+                         data-klassen-key="{{ kk }}"
+                         data-subjects-key="{{ sk }}">
+                      <div class="tt-klasse">
+                        {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
+                        <span>{{ cls }}</span>
+                      </div>
+                      {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
                     </div>
-                    <div class="tt-event-label" style="color: {{ ev.calendar_color }}">{{ ev.calendar_label }}</div>
+                  {% endfor %}
                   </div>
-                {% endfor %}
-                {% for l in lessons %}
-                  {% set cls = (l.klassen|join(' / ')) or '—' %}
-                  {% set raum = l.rooms|join(', ') %}
-                  {% set state = '' %}
-                  {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
-                  {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
-                  <div class="tt-lesson {{ state }}" data-lesson='{{ l|tojson|forceescape }}'
-                       data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
-                       data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}">
-                    <div class="tt-klasse">{{ cls }}</div>
-                    {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
+                  {% endif %}
+                  {% if events %}
+                  <div class="events-lane">
+                  {% for ev in events %}
+                    <div class="tt-event" data-event='{{ ev|tojson|forceescape }}'
+                         data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
+                         data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
+                         style="background: {{ ev.calendar_color }}22; border-left-color: {{ ev.calendar_color }};">
+                      <div class="tt-event-title">{{ ev.summary or '(ohne Titel)' }}</div>
+                      <div class="tt-event-meta">{{ ev.start_time }}–{{ ev.end_time }}{% if ev.location %} · {{ ev.location }}{% endif %}</div>
+                    </div>
+                  {% endfor %}
                   </div>
-                {% endfor %}
+                  {% endif %}
+                </div>
               </td>
             {% endif %}
           {% endfor %}
@@ -161,7 +291,8 @@
     <p class="muted" style="font-size:11px;margin-top:.8rem">
       <span style="color:var(--gelb)">■</span> Vertretung ·
       <span style="color:#aaa">■</span> entfällt ·
-      Mehrere Klassen mit „ / "
+      📝 Notizen vorhanden ·
+      Klick öffnet Detail-Panel rechts
     </p>
     {% else %}
       <p class="muted">Keine Stundenblöcke gefunden.</p>
@@ -185,91 +316,167 @@ const _backdrop = document.getElementById('tt-backdrop');
 const _title = document.getElementById('tt-panel-title');
 const _body = document.getElementById('tt-panel-body');
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function _row(label, value) {
-  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
-    return '<dt>' + label + '</dt><dd class="empty">—</dd>';
-  }
+  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return '<dt>'+label+'</dt><dd class="empty">—</dd>';
   if (Array.isArray(value)) value = value.join(', ');
-  return '<dt>' + label + '</dt><dd>' + String(value).replace(/</g, '&lt;') + '</dd>';
+  return '<dt>'+label+'</dt><dd>'+esc(value)+'</dd>';
+}
+function renderMarkdown(txt) {
+  if (!txt) return '';
+  try { return marked.parse(txt, { breaks: true }); }
+  catch (e) { return '<pre>' + esc(txt) + '</pre>'; }
+}
+function retypesetMath() {
+  if (window.MathJax && MathJax.typesetPromise) {
+    MathJax.typesetPromise([_body]).catch(()=>{});
+  }
 }
 
-function openPanel(l, day, slot) {
-  _title.textContent = day + ' · ' + slot;
-  const stoff = l.lstext || '';
-  const subst = l.subst_text || '';
-  const bkText = l.bk_text || '';
-  const bkRemark = l.bk_remark || '';
-  const info = l.info || '';
+function closePanel() {
+  // letzten Save flushen falls Timer offen
+  if (_pendingSave) {
+    clearTimeout(_pendingSave);
+    _pendingSave = null;
+    _doSave();
+  }
+  _panel.classList.remove('open');
+  _backdrop.classList.remove('open');
+  _panel.setAttribute('aria-hidden', 'true');
+  _currentLessonKey = null;
+}
+document.getElementById('tt-panel-close').addEventListener('click', closePanel);
+_backdrop.addEventListener('click', closePanel);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+// ── Notes: state + auto-save ──────────────────────────────────────────────
+let _currentLessonKey = null;  // {date, klassen, subjects}
+let _pendingSave = null;
+
+function _doSave() {
+  if (!_currentLessonKey) return;
+  const payload = {
+    ...(_currentLessonKey),
+    theme: document.getElementById('note-theme')?.value || '',
+    notes: document.getElementById('note-notes')?.value || '',
+    material: document.getElementById('note-material')?.value || '',
+    remarks: document.getElementById('note-remarks')?.value || '',
+  };
+  const status = document.getElementById('note-status');
+  if (status) { status.textContent = 'speichere…'; status.style.color = '#666'; }
+  fetch('/api/lesson-note', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  })
+  .then(r => r.json())
+  .then(d => { if (status) { status.textContent = d.deleted ? 'leer – verworfen' : 'gespeichert'; status.style.color = '#2e7d32'; } })
+  .catch(e => { if (status) { status.textContent = 'Fehler: ' + e.message; status.style.color = '#c62828'; } });
+}
+
+function scheduleNoteSave() {
+  if (_pendingSave) clearTimeout(_pendingSave);
+  const status = document.getElementById('note-status');
+  if (status) { status.textContent = 'tippe…'; status.style.color = '#999'; }
+  _pendingSave = setTimeout(() => { _pendingSave = null; _doSave(); }, 1500);
+}
+
+// ── Lesson-Panel öffnen ───────────────────────────────────────────────────
+async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsKey) {
+  _title.textContent = dayHuman + ' · ' + slot;
+  _currentLessonKey = { date: dateIso, klassen: klassenKey, subjects: subjectsKey };
+
+  const fach = (l.subjects || []).join(', ');
+  const klassen = (l.klassen || []).join(' / ');
+  const raum = (l.rooms || []).join(', ');
 
   let html = '<dl>'
-    + _row('Klasse', (l.klassen || []).join(' / '))
-    + _row('Fach', (l.subjects || []).join(', '))
-    + _row('Fach (lang)', (l.subjects_long || []).filter(x => x && !(l.subjects || []).includes(x)).join(', '))
-    + _row('Raum', (l.rooms || []).join(', '))
-    + _row('Status', l.code || 'regulär')
-    + (l.student_group ? _row('Gruppe', l.student_group) : '')
-    + (l.activity_type ? _row('Aktivität', l.activity_type) : '')
-    + (l.ls_number ? _row('Untis-Nr.', l.ls_number) : '')
+    + _row('Klasse', klassen)
+    + _row('Fach', fach)
+    + _row('Raum', raum)
+    + (l.code ? _row('Status', l.code) : '')
     + '</dl>';
 
-  if (stoff) {
-    html += '<h4>Lernstoff</h4><div class="tt-stoff-box">' + String(stoff).replace(/</g, '&lt;') + '</div>';
-  }
-  if (subst) {
-    html += '<h4>Vertretungstext</h4><div class="tt-stoff-box">' + String(subst).replace(/</g, '&lt;') + '</div>';
-  }
-  if (bkText || bkRemark || info) {
-    html += '<h4>Weitere Hinweise</h4><dl>'
-      + (info ? _row('Info', info) : '')
-      + (bkText ? _row('BK-Text', bkText) : '')
-      + (bkRemark ? _row('BK-Bemerk.', bkRemark) : '')
-      + '</dl>';
-  }
-  if (!stoff && !subst && !bkText && !bkRemark && !info) {
-    html += '<p class="muted" style="font-size:12px;margin-top:1rem">'
-      + 'Kein Lernstoff oder Vertretungstext in WebUntis hinterlegt.</p>';
-  }
+  // Vorheriges Mal — wird async geladen
+  html += '<div id="prev-note-slot"></div>';
 
-  if (l._raw && Object.keys(l._raw).length) {
-    html += '<details><summary>Rohdaten (WebUntis-Antwort)</summary>'
-      + '<pre>' + JSON.stringify(l._raw, null, 2).replace(/</g, '&lt;') + '</pre></details>';
-  }
+  // Notes Form
+  html += '<form class="note-form" autocomplete="off" onsubmit="return false;">'
+    + '<label for="note-theme">Geplantes Thema</label>'
+    + '<input id="note-theme" name="theme" type="text" maxlength="500">'
+    + '<label for="note-notes">Notizen (Markdown + LaTeX)</label>'
+    + '<textarea id="note-notes" name="notes" rows="4"></textarea>'
+    + '<label for="note-material">Material</label>'
+    + '<textarea id="note-material" name="material" rows="3"></textarea>'
+    + '<label for="note-remarks">Bemerkungen</label>'
+    + '<textarea id="note-remarks" name="remarks" rows="3"></textarea>'
+    + '<div class="note-status" id="note-status">—</div>'
+    + '</form>';
 
   _body.innerHTML = html;
   _panel.classList.add('open');
   _backdrop.classList.add('open');
   _panel.setAttribute('aria-hidden', 'false');
-}
 
-function closePanel() {
-  _panel.classList.remove('open');
-  _backdrop.classList.remove('open');
-  _panel.setAttribute('aria-hidden', 'true');
-}
+  // Aktuelle Notiz laden
+  try {
+    const r = await fetch('/api/lesson-note?date=' + encodeURIComponent(dateIso)
+      + '&klassen=' + encodeURIComponent(klassenKey)
+      + '&subjects=' + encodeURIComponent(subjectsKey));
+    const d = await r.json();
+    const n = d.note || {};
+    document.getElementById('note-theme').value = n.theme || '';
+    document.getElementById('note-notes').value = n.notes || '';
+    document.getElementById('note-material').value = n.material || '';
+    document.getElementById('note-remarks').value = n.remarks || '';
+    document.getElementById('note-status').textContent =
+      (n.theme || n.notes || n.material || n.remarks) ? 'geladen' : '—';
+  } catch (e) {
+    document.getElementById('note-status').textContent = 'Konnte Notizen nicht laden.';
+  }
 
-document.getElementById('tt-panel-close').addEventListener('click', closePanel);
-_backdrop.addEventListener('click', closePanel);
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
-
-document.querySelectorAll('.tt-lesson').forEach(el => {
-  el.addEventListener('click', () => {
-    try {
-      const l = JSON.parse(el.dataset.lesson);
-      openPanel(l, el.dataset.day, el.dataset.slot);
-    } catch (e) { console.error(e); }
+  // Auto-Save Listener
+  ['note-theme', 'note-notes', 'note-material', 'note-remarks'].forEach(id => {
+    document.getElementById(id).addEventListener('input', scheduleNoteSave);
+    document.getElementById(id).addEventListener('blur', () => {
+      if (_pendingSave) { clearTimeout(_pendingSave); _pendingSave = null; _doSave(); }
+    });
   });
-});
 
+  // Vorherige Notiz laden
+  try {
+    const r2 = await fetch('/api/lesson-note/previous?before=' + encodeURIComponent(dateIso)
+      + '&klassen=' + encodeURIComponent(klassenKey)
+      + '&subjects=' + encodeURIComponent(subjectsKey));
+    const d2 = await r2.json();
+    const slot = document.getElementById('prev-note-slot');
+    if (d2.note) {
+      const p = d2.note;
+      const summary = [
+        p.theme ? '<strong>Thema:</strong> ' + esc(p.theme) : '',
+        p.notes ? '<div style="margin-top:.3rem">' + renderMarkdown(p.notes) + '</div>' : '',
+      ].filter(Boolean).join('');
+      slot.innerHTML = '<h4>Letzte Stunde</h4><div class="prev-note-box">'
+        + '<div class="prev-note-date">' + esc(p.date) + '</div>'
+        + '<div class="prev-note-content">' + (summary || '<span class="empty">leer</span>') + '</div>'
+        + '</div>';
+      retypesetMath();
+    }
+  } catch (e) {}
+}
+
+// ── Event-Panel öffnen ────────────────────────────────────────────────────
 function openEventPanel(ev, day, slot) {
   _title.textContent = day + ' · ' + slot;
   let html = '<dl>'
     + _row('Titel', ev.summary || '(ohne Titel)')
     + _row('Kalender', ev.calendar_label || '')
-    + _row('Zeit', (ev.start_time || '') + '–' + (ev.end_time || ''))
+    + _row('Zeit', ev.all_day ? 'Ganztägig' : ((ev.start_time||'') + '–' + (ev.end_time||'')))
     + (ev.location ? _row('Ort', ev.location) : '')
     + '</dl>';
   if (ev.description) {
-    html += '<h4>Beschreibung</h4><div class="tt-stoff-box" style="border-left-color:'
+    html += '<h4>Beschreibung</h4><div class="stoff-box" style="border-left-color:'
       + (ev.calendar_color || '#7B61FF') + '">'
       + String(ev.description).replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</div>';
   }
@@ -279,7 +486,17 @@ function openEventPanel(ev, day, slot) {
   _panel.setAttribute('aria-hidden', 'false');
 }
 
-document.querySelectorAll('.tt-event').forEach(el => {
+// ── Click-Handler ─────────────────────────────────────────────────────────
+document.querySelectorAll('.tt-lesson').forEach(el => {
+  el.addEventListener('click', () => {
+    try {
+      const l = JSON.parse(el.dataset.lesson);
+      openLessonPanel(l, el.dataset.day, el.dataset.date, el.dataset.slot,
+                      el.dataset.klassenKey || '', el.dataset.subjectsKey || '');
+    } catch (e) { console.error(e); }
+  });
+});
+document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   el.addEventListener('click', () => {
     try {
       const ev = JSON.parse(el.dataset.event);

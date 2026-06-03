@@ -3,15 +3,15 @@
 - Verschlüsselte URL aus DB entschlüsseln
 - httpx GET (mit User-Agent, follow_redirects)
 - icalendar parse, RRULE-Expansion für Wochenrange
+- Zeitzonen: alle Werte werden auf Europe/Berlin normalisiert (naive Anzeige)
 - In-Memory-Cache 15 Min pro URL
 """
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Iterable
+from zoneinfo import ZoneInfo
 
 import httpx
 from icalendar import Calendar
@@ -24,31 +24,31 @@ _USER_AGENT = "DRS Unterrichtsmaterial/1.0"
 _CACHE_TTL = 15 * 60  # Sekunden
 _cache: dict[str, tuple[float, list[dict]]] = {}
 
-
-@dataclass
-class EventDict:
-    summary: str
-    location: str
-    description: str
-    start: datetime
-    end: datetime
-    all_day: bool
+BERLIN = ZoneInfo("Europe/Berlin")
 
 
-def _to_dt(v) -> datetime:
-    """date oder datetime → datetime (naive, lokale Zeit, ohne TZ)."""
+def _to_berlin_naive(v) -> datetime:
+    """date oder datetime → naiver datetime in Europe/Berlin-Lokalzeit.
+
+    - datetime mit TZ → in Berlin umrechnen, dann tzinfo entfernen
+    - datetime ohne TZ (floating) → als bereits-Berlin interpretieren
+    - date (all-day) → 00:00 Berlin
+    """
     if isinstance(v, datetime):
         if v.tzinfo:
-            v = v.astimezone().replace(tzinfo=None)
+            return v.astimezone(BERLIN).replace(tzinfo=None)
         return v
     if isinstance(v, date):
         return datetime(v.year, v.month, v.day)
-    return datetime.now()
+    return datetime.now(BERLIN).replace(tzinfo=None)
 
 
 def _parse_ics(text: str, start: date, end: date) -> list[dict]:
-    """Parse iCal-Text, liefert Liste der Events im Bereich [start, end]."""
+    """Parse iCal-Text, liefert Liste der Events im Bereich [start, end] in
+    Europe/Berlin-Zeit (alle Felder als ISO-String ohne TZ-Suffix)."""
     end_incl = end + timedelta(days=1)
+    window_start_naive = datetime(start.year, start.month, start.day)
+    window_end_naive = datetime(end_incl.year, end_incl.month, end_incl.day)
     out: list[dict] = []
     try:
         cal = Calendar.from_ical(text)
@@ -58,43 +58,52 @@ def _parse_ics(text: str, start: date, end: date) -> list[dict]:
 
     for comp in cal.walk("VEVENT"):
         try:
-            dt_start = comp.decoded("dtstart")
-            dt_end_v = comp.get("dtend")
-            dt_end = comp.decoded("dtend") if dt_end_v else None
+            dt_start_raw = comp.decoded("dtstart")
+            dt_end_raw = comp.decoded("dtend") if comp.get("dtend") else None
         except Exception:
             continue
 
-        s = _to_dt(dt_start)
-        e = _to_dt(dt_end) if dt_end is not None else (s + timedelta(hours=1))
-        all_day = not isinstance(dt_start, datetime)
+        all_day = not isinstance(dt_start_raw, datetime)
+        s = _to_berlin_naive(dt_start_raw)
+        if dt_end_raw is not None:
+            e = _to_berlin_naive(dt_end_raw)
+        else:
+            e = s + (timedelta(days=1) if all_day else timedelta(hours=1))
 
-        # RRULE → simple expansion mit dateutil.rrule wenn vorhanden
         rrule_obj = comp.get("rrule")
-        starts: list[datetime] = []
         if rrule_obj:
             try:
                 from dateutil.rrule import rrulestr
                 rrule_str = "RRULE:" + rrule_obj.to_ical().decode("utf-8")
-                rule = rrulestr(rrule_str, dtstart=s)
+                # RRULE auf TZ-bewusstem dtstart aufbauen
+                if isinstance(dt_start_raw, datetime) and dt_start_raw.tzinfo:
+                    rule_dtstart = dt_start_raw
+                elif isinstance(dt_start_raw, datetime):
+                    rule_dtstart = dt_start_raw.replace(tzinfo=BERLIN)
+                else:  # date
+                    rule_dtstart = datetime(dt_start_raw.year, dt_start_raw.month,
+                                            dt_start_raw.day, tzinfo=BERLIN)
+                rule = rrulestr(rrule_str, dtstart=rule_dtstart)
                 duration = e - s
-                window_start = datetime(start.year, start.month, start.day) - timedelta(days=1)
-                window_end = datetime(end_incl.year, end_incl.month, end_incl.day)
-                for occ in rule.between(window_start, window_end, inc=True):
-                    starts.append(occ if not occ.tzinfo else occ.astimezone().replace(tzinfo=None))
-                # EXDATE berücksichtigen
+                win_start_tz = window_start_naive.replace(tzinfo=BERLIN) - timedelta(days=1)
+                win_end_tz = window_end_naive.replace(tzinfo=BERLIN) + timedelta(days=1)
+                occurrences = rule.between(win_start_tz, win_end_tz, inc=True)
+
+                # EXDATE einsammeln
+                excluded: set[datetime] = set()
                 ex = comp.get("exdate")
                 if ex:
                     exes = ex if isinstance(ex, list) else [ex]
-                    excluded = set()
                     for x in exes:
                         for v in x.dts:
-                            excluded.add(_to_dt(v.dt))
-                    starts = [d for d in starts if d not in excluded]
-                # Events bauen
-                for sd in starts:
+                            excluded.add(_to_berlin_naive(v.dt))
+
+                for occ in occurrences:
+                    sd = occ.astimezone(BERLIN).replace(tzinfo=None) if occ.tzinfo else occ
+                    if sd in excluded:
+                        continue
                     ed = sd + duration
-                    if ed > datetime(start.year, start.month, start.day) and \
-                       sd < datetime(end_incl.year, end_incl.month, end_incl.day):
+                    if ed > window_start_naive and sd < window_end_naive:
                         out.append({
                             "summary": str(comp.get("summary", "")),
                             "location": str(comp.get("location", "")),
@@ -108,8 +117,7 @@ def _parse_ics(text: str, start: date, end: date) -> list[dict]:
                 log.debug("RRULE-Expansion fehlgeschlagen: %s", ex)
 
         # Einfaches Event ohne RRULE
-        if e > datetime(start.year, start.month, start.day) and \
-           s < datetime(end_incl.year, end_incl.month, end_incl.day):
+        if e > window_start_naive and s < window_end_naive:
             out.append({
                 "summary": str(comp.get("summary", "")),
                 "location": str(comp.get("location", "")),
