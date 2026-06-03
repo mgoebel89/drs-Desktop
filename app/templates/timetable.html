@@ -37,22 +37,22 @@ window.MathJax = {
   .tt-grid .slot-name { font-weight: 700; color: var(--blau); }
   .tt-grid .slot-time { color: var(--muted); font-size: 11px; }
 
+  /* Pro Tag zwei Sub-Spalten: Lessons (links) + Events (rechts) */
+  .tt-grid colgroup col.col-slot { width: 95px; }
+  .tt-grid colgroup col.col-lessons { width: 12%; }
+  .tt-grid colgroup col.col-events { width: 6%; }
+
   /* Einheitliche Block-Zeilenhöhe */
   .tt-grid tbody tr.slot-row { height: 88px; }
-  .tt-grid td.tt-cell { height: 88px; }
-  /* Events werden jetzt pro Block wiederholt — kein rowspan mehr nötig. */
+  .tt-grid td.lessons-td, .tt-grid td.events-td { height: 88px; padding: 4px 5px; }
+  .tt-grid td.events-td[rowspan="2"] { height: 176px; }
+  .tt-grid td.events-td[rowspan="3"] { height: 264px; }
+  .tt-grid td.events-td[rowspan="4"] { height: 352px; }
+  /* Trennung Tagespalten: rechte Sub-Spalte trägt die starke Außenkante */
+  .tt-grid td.lessons-td { border-right: none; }
+  .tt-grid td.events-td.empty { background: #fcfcfc; }
 
-  /* Folge-Anzeige eines Events das im vorigen Block schon zu sehen war */
-  .tt-event.continuation { opacity: .55; }
-
-  /* Day-Cell mit zwei Spuren */
-  .day-cell {
-    display: grid; grid-template-columns: 2fr 1fr; gap: 4px;
-    height: 100%; padding: 4px 5px;
-  }
-  .day-cell.no-events { grid-template-columns: 1fr; }
-  .day-cell.no-lessons { grid-template-columns: 1fr; }
-  .lessons-lane, .events-lane { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .lessons-lane, .events-lane { display: flex; flex-direction: column; gap: 3px; min-width: 0; height: 100%; }
 
   /* All-day Zeile (halbe Höhe) */
   .tt-grid tbody tr.allday-row { height: 44px; }
@@ -205,11 +205,18 @@ window.MathJax = {
     </p>
     {% if grid.slots %}
     <table class="tt-grid">
+      <colgroup>
+        <col class="col-slot">
+        {% for d in grid.days %}
+          <col class="col-lessons">
+          <col class="col-events">
+        {% endfor %}
+      </colgroup>
       <thead>
         <tr>
           <th class="slot">Stunde</th>
           {% for d in grid.days %}
-            <th>{{ d.weekday_name }}<br><span style="font-weight:normal;font-size:11px">{{ d.date.strftime('%d.%m.') }}</span></th>
+            <th colspan="2">{{ d.weekday_name }}<br><span style="font-weight:normal;font-size:11px">{{ d.date.strftime('%d.%m.') }}</span></th>
           {% endfor %}
         </tr>
       </thead>
@@ -223,8 +230,9 @@ window.MathJax = {
               {# überdeckt von einem Multi-Day-Balken von links #}
             {% else %}
               {% set adevs = grid.all_day_row.get(d_idx, []) %}
-              {% set cs = adevs|map(attribute='colspan')|list|max if adevs else 1 %}
-              <td class="allday-cell" {% if cs and cs > 1 %}colspan="{{ cs }}"{% endif %}>
+              {% set cs_days = adevs|map(attribute='colspan')|list|max if adevs else 1 %}
+              {# Jeder Tag belegt 2 Sub-Spalten → colspan verdoppeln #}
+              <td class="allday-cell" colspan="{{ (cs_days or 1) * 2 }}">
                 {% for ev in adevs %}
                   <div class="allday-event" data-event='{{ ev|tojson|forceescape }}'
                        data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
@@ -246,15 +254,13 @@ window.MathJax = {
             <div class="slot-time">{{ sl.start }}–{{ sl.end }}</div>
           </th>
           {% for d_idx in range(grid.days|length) %}
-            {% if False %}
-              {# Platzhalter: skip_cells nicht mehr genutzt #}
-            {% else %}
-              {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
-              {% set events = grid.events.get((sl.start, d_idx), []) %}
-              <td class="tt-cell">
-                <div class="day-cell{% if not events %} no-events{% endif %}{% if not lessons %} no-lessons{% endif %}">
-                  {% if lessons %}
-                  <div class="lessons-lane">
+            {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
+            {% set events_here = grid.events.get((sl.start, d_idx), []) %}
+            {% set events_skipped = (sl.start, d_idx) in grid.skip_cells %}
+            {# Linke Sub-Spalte: Lessons (immer rendern) #}
+            <td class="lessons-td">
+              {% if lessons %}
+                <div class="lessons-lane">
                   {% for l in lessons %}
                     {% set cls = (l.klassen|join(' / ')) or '—' %}
                     {% set raum = l.rooms|join(', ') %}
@@ -286,12 +292,18 @@ window.MathJax = {
                       {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
                     </div>
                   {% endfor %}
-                  </div>
-                  {% endif %}
-                  {% if events %}
+                </div>
+              {% endif %}
+            </td>
+            {# Rechte Sub-Spalte: Events (rowspan möglich; bei Skip überspringen) #}
+            {% if not events_skipped %}
+              {% set rs = events_here|map(attribute='rowspan')|list|max if events_here else 1 %}
+              <td class="events-td {% if not events_here %}empty{% endif %}"
+                  {% if rs and rs > 1 %}rowspan="{{ rs }}"{% endif %}>
+                {% if events_here %}
                   <div class="events-lane">
-                  {% for ev in events %}
-                    <div class="tt-event{% if ev.is_continuation %} continuation{% endif %}"
+                  {% for ev in events_here %}
+                    <div class="tt-event"
                          data-event='{{ ev|tojson|forceescape }}'
                          data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
                          data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
@@ -301,8 +313,7 @@ window.MathJax = {
                     </div>
                   {% endfor %}
                   </div>
-                  {% endif %}
-                </div>
+                {% endif %}
               </td>
             {% endif %}
           {% endfor %}

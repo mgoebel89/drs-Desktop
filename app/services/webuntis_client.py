@@ -330,9 +330,8 @@ def _attach_events(grid: dict, ical_events: list[dict]) -> None:
         for k in range(1, span):
             all_day_skip.add(first_idx + k)
 
-    # 2) Zeitabhängige Events einsortieren.
-    # Jedes Event wird in JEDEM überschnittenen Block in der rechten Spur
-    # angezeigt. So bleiben Untis-Lessons in ihren tatsächlichen Slots stehen.
+    # 2) Zeitabhängige Events: rowspan in der Event-Spur (rechte Sub-Spalte).
+    # Lessons in der Lesson-Spur (linke Sub-Spalte) bleiben unverändert.
     if slots:
         for ev in ical_events:
             if ev.get("all_day"):
@@ -356,17 +355,23 @@ def _attach_events(grid: dict, ical_events: list[dict]) -> None:
             if not overlapping_indices:
                 continue  # außerhalb des Schulrasters → nicht zeigen
 
-            # Event-Kopie in jeden überschnittenen Block setzen.
-            # is_continuation = True ab dem 2. Slot (für eventuelles dezenteres Styling).
-            for pos, idx in enumerate(overlapping_indices):
-                key = (slots[idx]["start"], day_idx)
-                events_index.setdefault(key, []).append({
-                    **ev,
-                    "rowspan": 1,
-                    "start_time": ev_start_dt.strftime("%H:%M"),
-                    "end_time": ev_end_dt.strftime("%H:%M"),
-                    "is_continuation": pos > 0,
-                })
+            first_idx = overlapping_indices[0]
+            span = 1
+            for j in range(1, len(overlapping_indices)):
+                if overlapping_indices[j] == overlapping_indices[j-1] + 1:
+                    span += 1
+                else:
+                    break
+
+            anchor_key = (slots[first_idx]["start"], day_idx)
+            events_index.setdefault(anchor_key, []).append({
+                **ev, "rowspan": span,
+                "start_time": ev_start_dt.strftime("%H:%M"),
+                "end_time": ev_end_dt.strftime("%H:%M"),
+            })
+            # Event-Spur in den folgenden Slots ist überdeckt
+            for k in range(1, span):
+                skip_cells.add((slots[first_idx + k]["start"], day_idx))
 
     grid["all_day_row"] = all_day_row
     grid["all_day_skip"] = all_day_skip
