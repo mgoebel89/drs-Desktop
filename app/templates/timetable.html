@@ -109,6 +109,9 @@ window.MathJax = {
     padding: 4px 6px; border-radius: 4px; cursor: pointer; min-width: 0;
     border-left: 3px solid var(--blau); background: var(--blau-hell);
     transition: filter .12s;
+    /* Event-Card füllt seine Event-Zelle vertikal aus — bei rowspan über
+       mehrere Blöcke ergibt das einen durchgehenden Balken. */
+    flex: 1 1 auto;
   }
   .tt-event:hover { filter: brightness(.95); }
   .tt-event-title { font-weight: 700; font-size: 11px; line-height: 1.2; color: var(--text);
