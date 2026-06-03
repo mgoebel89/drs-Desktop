@@ -264,9 +264,9 @@ window.MathJax = {
                     {% set kk = (l.klassen|sort|join('|')) %}
                     {% set sk = (l.subjects|sort|join('|')) %}
                     {% set d_iso = grid.days[d_idx].date.isoformat() %}
-                    {% set has_note = (d_iso, kk, sk) in grid.notes_present %}
-                    {% set is_exam = (d_iso, kk, sk) in (grid.exams or []) %}
-                    {% set sess_ov = grid.session_override.get((d_iso, kk, sk)) if grid.session_override else None %}
+                    {% set has_note = (d_iso, kk, sk, sl.start) in grid.notes_present %}
+                    {% set is_exam = (d_iso, kk, sk, sl.start) in (grid.exams or []) %}
+                    {% set sess_ov = grid.session_override.get((d_iso, kk, sk, sl.start)) if grid.session_override else None %}
                     {% set series_ov = grid.series_override.get((kk, sk)) if grid.series_override else None %}
                     {% set fach_display = sess_ov or series_ov %}
                     <div class="tt-lesson {{ state }}{% if is_exam %} exam{% endif %}"
@@ -275,7 +275,8 @@ window.MathJax = {
                          data-date="{{ d_iso }}"
                          data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
                          data-klassen-key="{{ kk }}"
-                         data-subjects-key="{{ sk }}">
+                         data-subjects-key="{{ sk }}"
+                         data-block-start="{{ sl.start }}">
                       <div class="tt-klasse">
                         {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
                         {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
@@ -377,12 +378,12 @@ let _currentLessonKey = null;  // {date, klassen, subjects}
 let _pendingSave = null;
 
 function _updateLessonCardClasses(key, isExam, hasNote) {
-  // Findet alle Grid-Cards die zur aktuellen (date, klassen, subjects)-Kombi
-  // gehören und passt Klassen / Icons live an, ohne Seiten-Reload.
+  // Findet die Grid-Card für genau diesen Block und passt Klassen/Icons live an
   if (!key) return;
   const sel = '.tt-lesson[data-date="' + key.date + '"]'
     + '[data-klassen-key="' + (key.klassen || '').replace(/"/g, '\\"') + '"]'
-    + '[data-subjects-key="' + (key.subjects || '').replace(/"/g, '\\"') + '"]';
+    + '[data-subjects-key="' + (key.subjects || '').replace(/"/g, '\\"') + '"]'
+    + '[data-block-start="' + (key.block_start || '') + '"]';
   document.querySelectorAll(sel).forEach(card => {
     card.classList.toggle('exam', !!isExam);
     const klasseLine = card.querySelector('.tt-klasse');
@@ -481,9 +482,12 @@ function scheduleSeriesSave() {
 }
 
 // ── Lesson-Panel öffnen ───────────────────────────────────────────────────
-async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsKey) {
+async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsKey, blockStart) {
   _title.textContent = dayHuman + ' · ' + slot;
-  _currentLessonKey = { date: dateIso, klassen: klassenKey, subjects: subjectsKey };
+  _currentLessonKey = {
+    date: dateIso, klassen: klassenKey, subjects: subjectsKey,
+    block_start: blockStart || '',
+  };
 
   const fach = (l.subjects || []).join(', ');
   const klassen = (l.klassen || []).join(' / ');
@@ -534,7 +538,8 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
   try {
     const r = await fetch('/api/lesson-note?date=' + encodeURIComponent(dateIso)
       + '&klassen=' + encodeURIComponent(klassenKey)
-      + '&subjects=' + encodeURIComponent(subjectsKey));
+      + '&subjects=' + encodeURIComponent(subjectsKey)
+      + '&block_start=' + encodeURIComponent(blockStart || ''));
     const d = await r.json();
     const n = d.note || {};
     document.getElementById('note-theme').value = n.theme || '';
@@ -569,11 +574,12 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     if (_pendingSeriesSave) { clearTimeout(_pendingSeriesSave); _pendingSeriesSave = null; _doSeriesSave(); }
   });
 
-  // Vorherige Notiz laden
+  // Vorherige Notiz laden (bevorzugt gleicher Block)
   try {
     const r2 = await fetch('/api/lesson-note/previous?before=' + encodeURIComponent(dateIso)
       + '&klassen=' + encodeURIComponent(klassenKey)
-      + '&subjects=' + encodeURIComponent(subjectsKey));
+      + '&subjects=' + encodeURIComponent(subjectsKey)
+      + '&block_start=' + encodeURIComponent(blockStart || ''));
     const d2 = await r2.json();
     const slot = document.getElementById('prev-note-slot');
     if (d2.note) {
@@ -617,7 +623,8 @@ document.querySelectorAll('.tt-lesson').forEach(el => {
     try {
       const l = JSON.parse(el.dataset.lesson);
       openLessonPanel(l, el.dataset.day, el.dataset.date, el.dataset.slot,
-                      el.dataset.klassenKey || '', el.dataset.subjectsKey || '');
+                      el.dataset.klassenKey || '', el.dataset.subjectsKey || '',
+                      el.dataset.blockStart || '');
     } catch (e) { console.error(e); }
   });
 });

@@ -66,13 +66,13 @@ def timetable_view(
         err = " · ".join(ical_errors)
 
     # Notiz-Status + Subject-Override für die Stunden dieser Woche aufbauen
-    notes_present: set[tuple[str, str, str]] = set()
-    exams: set[tuple[str, str, str]] = set()
-    session_override: dict[tuple[str, str, str], str] = {}
+    # Key nun mit block_start: (date, klassen_key, subjects_key, block_start)
+    notes_present: set[tuple[str, str, str, str]] = set()
+    exams: set[tuple[str, str, str, str]] = set()
+    session_override: dict[tuple[str, str, str, str], str] = {}
     series_override: dict[tuple[str, str], str] = {}
 
     if grid:
-        # Series-Overrides für die in dieser Woche vorkommenden (klassen, subjects)
         keys_series = set()
         for (slot_start, day_idx), lessons in grid["cells"].items():
             for l in lessons:
@@ -86,18 +86,18 @@ def timetable_view(
                 if (so.klassen_key, so.subjects_key) in keys_series and so.display_name.strip():
                     series_override[(so.klassen_key, so.subjects_key)] = so.display_name
 
-        # LessonNotes der Woche
         rows = db.query(
             LessonNote.lesson_date, LessonNote.klassen_key, LessonNote.subjects_key,
-            LessonNote.theme, LessonNote.notes, LessonNote.material,
-            LessonNote.remarks, LessonNote.subject_override, LessonNote.is_exam,
+            LessonNote.block_start, LessonNote.theme, LessonNote.notes,
+            LessonNote.material, LessonNote.remarks, LessonNote.subject_override,
+            LessonNote.is_exam,
         ).filter(
             LessonNote.user_id == user.id,
             LessonNote.lesson_date >= monday.isoformat(),
             LessonNote.lesson_date <= friday.isoformat(),
         ).all()
-        for d, kk, sk, theme, notes, material, remarks, sov, ex in rows:
-            key = (d, kk or "", sk or "")
+        for d, kk, sk, bs, theme, notes, material, remarks, sov, ex in rows:
+            key = (d, kk or "", sk or "", bs or "")
             if any([theme, notes, material, remarks, sov]):
                 notes_present.add(key)
             if ex:
@@ -160,12 +160,14 @@ def api_get_note(
     date: str,
     klassen: str = "",
     subjects: str = "",
+    block_start: str = "",
 ):
     n = db.query(LessonNote).filter(
         LessonNote.user_id == user.id,
         LessonNote.lesson_date == date,
         LessonNote.klassen_key == klassen,
         LessonNote.subjects_key == subjects,
+        LessonNote.block_start == block_start,
     ).first()
     return JSONResponse({
         "ok": True,
@@ -185,6 +187,7 @@ def api_save_note(
         raise HTTPException(400, "Ungültiges Datum (YYYY-MM-DD).")
     kk = (body.get("klassen") or "")[:255]
     sk = (body.get("subjects") or "")[:255]
+    bs = (body.get("block_start") or "")[:5]
     theme = (body.get("theme") or "")[:500]
     notes = body.get("notes") or ""
     material = body.get("material") or ""
@@ -195,9 +198,9 @@ def api_save_note(
     n = db.query(LessonNote).filter(
         LessonNote.user_id == user.id, LessonNote.lesson_date == d,
         LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+        LessonNote.block_start == bs,
     ).first()
 
-    # Wenn alle Felder leer + kein Prüfungs-Flag → existierenden Datensatz löschen
     is_blank = not any([theme.strip(), notes.strip(), material.strip(),
                         remarks.strip(), subject_override.strip(), is_exam])
     if is_blank:
@@ -208,7 +211,8 @@ def api_save_note(
 
     if not n:
         n = LessonNote(
-            user_id=user.id, lesson_date=d, klassen_key=kk, subjects_key=sk,
+            user_id=user.id, lesson_date=d, klassen_key=kk,
+            subjects_key=sk, block_start=bs,
         )
         db.add(n)
     n.theme = theme
@@ -277,18 +281,27 @@ def api_previous_note(
     before: str,
     klassen: str = "",
     subjects: str = "",
+    block_start: str = "",
 ):
-    """Letzte Notiz zur selben Klassen+Fach-Kombi vor dem 'before'-Datum."""
-    n = db.query(LessonNote).filter(
+    """Letzte Notiz zur selben Klassen+Fach-Kombi vor dem 'before'-Datum.
+    Bevorzugt denselben Block; wenn dort nichts gefunden wird, fällt zurück
+    auf irgendeinen Block derselben Klassen+Fach-Kombi."""
+    base_q = db.query(LessonNote).filter(
         LessonNote.user_id == user.id,
         LessonNote.klassen_key == klassen,
         LessonNote.subjects_key == subjects,
         LessonNote.lesson_date < before,
-    ).order_by(LessonNote.lesson_date.desc()).first()
+    )
+    n = None
+    if block_start:
+        n = base_q.filter(LessonNote.block_start == block_start)\
+            .order_by(LessonNote.lesson_date.desc()).first()
+    if not n:
+        n = base_q.order_by(LessonNote.lesson_date.desc()).first()
     if not n:
         return JSONResponse({"ok": True, "note": None})
     return JSONResponse({"ok": True, "note": {
-        "date": n.lesson_date, **_note_dict(n),
+        "date": n.lesson_date, "block_start": n.block_start, **_note_dict(n),
     }})
 
 

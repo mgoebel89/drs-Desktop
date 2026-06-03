@@ -98,6 +98,7 @@ class LessonNote(Base):
     lesson_date: Mapped[str] = mapped_column(String(10), index=True)   # 'YYYY-MM-DD'
     klassen_key: Mapped[str] = mapped_column(String(255), index=True)  # z.B. 'BSMT 23 a'
     subjects_key: Mapped[str] = mapped_column(String(255), index=True) # z.B. 'BBU_Mt2'
+    block_start: Mapped[str] = mapped_column(String(5), default="", index=True)  # 'HH:MM'
     theme: Mapped[str] = mapped_column(String(500), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
     material: Mapped[str] = mapped_column(Text, default="")
