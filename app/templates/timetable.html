@@ -86,11 +86,10 @@ window.MathJax = {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tt-lesson.cancelled { opacity: .55; text-decoration: line-through; background: #f5f5f5; border-left-color: #aaa; }
   .tt-lesson.irregular { background: #fff3e0; border-left-color: var(--gelb); }
+  /* Prüfung: nur roter Rahmen, Hintergrund bleibt wie regulär */
   .tt-lesson.exam {
     border: 2px solid #c62828; border-left-width: 4px; border-left-color: #c62828;
-    background: #fff5f5;
   }
-  .tt-lesson.exam:hover { background: #ffeaea; }
   .tt-fach {
     color: var(--text); font-size: 11px; margin-top: 2px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -377,16 +376,58 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel()
 let _currentLessonKey = null;  // {date, klassen, subjects}
 let _pendingSave = null;
 
+function _updateLessonCardClasses(key, isExam, hasNote) {
+  // Findet alle Grid-Cards die zur aktuellen (date, klassen, subjects)-Kombi
+  // gehören und passt Klassen / Icons live an, ohne Seiten-Reload.
+  if (!key) return;
+  const sel = '.tt-lesson[data-date="' + key.date + '"]'
+    + '[data-klassen-key="' + (key.klassen || '').replace(/"/g, '\\"') + '"]'
+    + '[data-subjects-key="' + (key.subjects || '').replace(/"/g, '\\"') + '"]';
+  document.querySelectorAll(sel).forEach(card => {
+    card.classList.toggle('exam', !!isExam);
+    const klasseLine = card.querySelector('.tt-klasse');
+    if (klasseLine) {
+      // Exam-Icon synchron halten
+      let examIcon = klasseLine.querySelector('.exam-icon');
+      if (isExam && !examIcon) {
+        examIcon = document.createElement('span');
+        examIcon.className = 'exam-icon';
+        examIcon.title = 'Prüfung';
+        examIcon.textContent = '!';
+        klasseLine.insertBefore(examIcon, klasseLine.firstChild);
+      } else if (!isExam && examIcon) {
+        examIcon.remove();
+      }
+      // Notiz-Icon synchron halten
+      let noteIcon = klasseLine.querySelector('.note-icon');
+      if (hasNote && !noteIcon) {
+        noteIcon = document.createElement('span');
+        noteIcon.className = 'note-icon';
+        noteIcon.title = 'Notizen vorhanden';
+        noteIcon.textContent = '📝';
+        // direkt hinter dem Exam-Icon einsortieren, sonst an den Anfang
+        const ref = klasseLine.querySelector('.exam-icon')?.nextSibling || klasseLine.firstChild;
+        klasseLine.insertBefore(noteIcon, ref);
+      } else if (!hasNote && noteIcon) {
+        noteIcon.remove();
+      }
+    }
+  });
+}
+
 function _doSave() {
   if (!_currentLessonKey) return;
+  const isExam = document.getElementById('note-is-exam')?.checked || false;
+  const theme = document.getElementById('note-theme')?.value || '';
+  const notes = document.getElementById('note-notes')?.value || '';
+  const material = document.getElementById('note-material')?.value || '';
+  const remarks = document.getElementById('note-remarks')?.value || '';
+  const sov = document.getElementById('note-subject-override')?.value || '';
   const payload = {
     ...(_currentLessonKey),
-    theme: document.getElementById('note-theme')?.value || '',
-    notes: document.getElementById('note-notes')?.value || '',
-    material: document.getElementById('note-material')?.value || '',
-    remarks: document.getElementById('note-remarks')?.value || '',
-    subject_override: document.getElementById('note-subject-override')?.value || '',
-    is_exam: document.getElementById('note-is-exam')?.checked || false,
+    theme, notes, material, remarks,
+    subject_override: sov,
+    is_exam: isExam,
   };
   const status = document.getElementById('note-status');
   if (status) { status.textContent = 'speichere…'; status.style.color = '#666'; }
@@ -396,7 +437,12 @@ function _doSave() {
     body: JSON.stringify(payload),
   })
   .then(r => r.json())
-  .then(d => { if (status) { status.textContent = d.deleted ? 'leer – verworfen' : 'gespeichert'; status.style.color = '#2e7d32'; } })
+  .then(d => {
+    if (status) { status.textContent = d.deleted ? 'leer – verworfen' : 'gespeichert'; status.style.color = '#2e7d32'; }
+    // Live-Update der Grid-Karte: Exam-Rahmen + Notiz-Icon sofort sichtbar
+    const hasNote = !!(theme.trim() || notes.trim() || material.trim() || remarks.trim() || sov.trim());
+    _updateLessonCardClasses(_currentLessonKey, isExam, hasNote);
+  })
   .catch(e => { if (status) { status.textContent = 'Fehler: ' + e.message; status.style.color = '#c62828'; } });
 }
 
