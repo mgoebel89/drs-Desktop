@@ -40,9 +40,10 @@ window.MathJax = {
   /* Einheitliche Block-Zeilenhöhe */
   .tt-grid tbody tr.slot-row { height: 88px; }
   .tt-grid td.tt-cell { height: 88px; }
-  .tt-grid td.tt-cell[rowspan="2"] { height: 176px; }
-  .tt-grid td.tt-cell[rowspan="3"] { height: 264px; }
-  .tt-grid td.tt-cell[rowspan="4"] { height: 352px; }
+  /* Events werden jetzt pro Block wiederholt — kein rowspan mehr nötig. */
+
+  /* Folge-Anzeige eines Events das im vorigen Block schon zu sehen war */
+  .tt-event.continuation { opacity: .55; }
 
   /* Day-Cell mit zwei Spuren */
   .day-cell {
@@ -245,13 +246,12 @@ window.MathJax = {
             <div class="slot-time">{{ sl.start }}–{{ sl.end }}</div>
           </th>
           {% for d_idx in range(grid.days|length) %}
-            {% if (sl.start, d_idx) in grid.skip_cells %}
-              {# überdeckt durch Event mit rowspan #}
+            {% if False %}
+              {# Platzhalter: skip_cells nicht mehr genutzt #}
             {% else %}
               {% set lessons = grid.cells.get((sl.start, d_idx), []) %}
               {% set events = grid.events.get((sl.start, d_idx), []) %}
-              {% set rs = events|map(attribute='rowspan')|list|max if events else 1 %}
-              <td class="tt-cell" {% if rs and rs > 1 %}rowspan="{{ rs }}"{% endif %}>
+              <td class="tt-cell">
                 <div class="day-cell{% if not events %} no-events{% endif %}{% if not lessons %} no-lessons{% endif %}">
                   {% if lessons %}
                   <div class="lessons-lane">
@@ -291,7 +291,8 @@ window.MathJax = {
                   {% if events %}
                   <div class="events-lane">
                   {% for ev in events %}
-                    <div class="tt-event" data-event='{{ ev|tojson|forceescape }}'
+                    <div class="tt-event{% if ev.is_continuation %} continuation{% endif %}"
+                         data-event='{{ ev|tojson|forceescape }}'
                          data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
                          data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
                          style="background: {{ ev.calendar_color }}22; border-left-color: {{ ev.calendar_color }};">
