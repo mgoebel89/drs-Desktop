@@ -102,6 +102,24 @@ class LessonNote(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     material: Mapped[str] = mapped_column(Text, default="")
     remarks: Mapped[str] = mapped_column(Text, default="")
+    # Sitzungs-spezifische Fach-Anzeige (überschreibt Untis-Kürzel und Reihen-Default)
+    subject_override: Mapped[str] = mapped_column(String(200), default="")
+    # Stunde als Prüfung markieren (roter Rahmen im Grid)
+    is_exam: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LessonSeriesOverride(Base):
+    """Reihen-weite Fach-Bezeichnung pro (Klassen, Fach)-Kombi.
+    Beispiel: 'BBU_Mt2' → 'Elektrotechnik LF3 Stromkreise analysieren'."""
+    __tablename__ = "lesson_series_overrides"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    klassen_key: Mapped[str] = mapped_column(String(255), index=True)
+    subjects_key: Mapped[str] = mapped_column(String(255), index=True)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

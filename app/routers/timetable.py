@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_user
 from app.db import get_db
-from app.models import IcalCalendar, LessonNote, User
+from app.models import IcalCalendar, LessonNote, LessonSeriesOverride, User
 from app.services import ical_client, webuntis_client
 from app.templating import templates
 
@@ -65,31 +65,50 @@ def timetable_view(
     if ical_errors and not err:
         err = " · ".join(ical_errors)
 
-    # Notiz-Indikator: existieren Notizen für die Stunden dieser Woche?
+    # Notiz-Status + Subject-Override für die Stunden dieser Woche aufbauen
     notes_present: set[tuple[str, str, str]] = set()
+    exams: set[tuple[str, str, str]] = set()
+    session_override: dict[tuple[str, str, str], str] = {}
+    series_override: dict[tuple[str, str], str] = {}
+
     if grid:
-        keys_to_check = set()
+        # Series-Overrides für die in dieser Woche vorkommenden (klassen, subjects)
+        keys_series = set()
         for (slot_start, day_idx), lessons in grid["cells"].items():
-            d = grid["days"][day_idx]["date"].isoformat()
             for l in lessons:
                 kk, sk = webuntis_client.lesson_key_parts(l)
                 if kk or sk:
-                    keys_to_check.add((d, kk, sk))
-        if keys_to_check:
-            rows = db.query(LessonNote.lesson_date, LessonNote.klassen_key,
-                            LessonNote.subjects_key).filter(
-                LessonNote.user_id == user.id,
-                LessonNote.lesson_date >= monday.isoformat(),
-                LessonNote.lesson_date <= friday.isoformat(),
-            ).all()
-            for d, kk, sk in rows:
-                key = (d, kk or "", sk or "")
-                # nur wenn überhaupt Inhalt vorhanden? Wir markieren wenn der
-                # Datensatz existiert; leere Notizen löschen wir spätestens beim
-                # Speichern wenn alle Felder leer sind.
-                if key in keys_to_check:
-                    notes_present.add(key)
+                    keys_series.add((kk, sk))
+        if keys_series:
+            for so in db.query(LessonSeriesOverride).filter(
+                LessonSeriesOverride.user_id == user.id,
+            ).all():
+                if (so.klassen_key, so.subjects_key) in keys_series and so.display_name.strip():
+                    series_override[(so.klassen_key, so.subjects_key)] = so.display_name
+
+        # LessonNotes der Woche
+        rows = db.query(
+            LessonNote.lesson_date, LessonNote.klassen_key, LessonNote.subjects_key,
+            LessonNote.theme, LessonNote.notes, LessonNote.material,
+            LessonNote.remarks, LessonNote.subject_override, LessonNote.is_exam,
+        ).filter(
+            LessonNote.user_id == user.id,
+            LessonNote.lesson_date >= monday.isoformat(),
+            LessonNote.lesson_date <= friday.isoformat(),
+        ).all()
+        for d, kk, sk, theme, notes, material, remarks, sov, ex in rows:
+            key = (d, kk or "", sk or "")
+            if any([theme, notes, material, remarks, sov]):
+                notes_present.add(key)
+            if ex:
+                exams.add(key)
+            if (sov or "").strip():
+                session_override[key] = sov
+
         grid["notes_present"] = notes_present
+        grid["exams"] = exams
+        grid["session_override"] = session_override
+        grid["series_override"] = series_override
 
     return templates.TemplateResponse(request, "timetable.html", {
         "user": user, "error": err, "grid": grid,
@@ -112,14 +131,26 @@ def timetable_diagnose(
 # ── Lehrer-Notizen pro Stunde ──────────────────────────────────────────────
 def _note_dict(n: LessonNote | None) -> dict:
     if not n:
-        return {"theme": "", "notes": "", "material": "", "remarks": ""}
+        return {"theme": "", "notes": "", "material": "", "remarks": "",
+                "subject_override": "", "is_exam": False}
     return {
         "theme": n.theme or "",
         "notes": n.notes or "",
         "material": n.material or "",
         "remarks": n.remarks or "",
+        "subject_override": n.subject_override or "",
+        "is_exam": bool(n.is_exam),
         "updated_at": n.updated_at.isoformat() if n.updated_at else None,
     }
+
+
+def _series_default(db: Session, user_id: int, kk: str, sk: str) -> str:
+    so = db.query(LessonSeriesOverride).filter(
+        LessonSeriesOverride.user_id == user_id,
+        LessonSeriesOverride.klassen_key == kk,
+        LessonSeriesOverride.subjects_key == sk,
+    ).first()
+    return (so.display_name or "") if so else ""
 
 
 @router.get("/api/lesson-note")
@@ -136,7 +167,11 @@ def api_get_note(
         LessonNote.klassen_key == klassen,
         LessonNote.subjects_key == subjects,
     ).first()
-    return JSONResponse({"ok": True, "note": _note_dict(n)})
+    return JSONResponse({
+        "ok": True,
+        "note": _note_dict(n),
+        "series_default": _series_default(db, user.id, klassen, subjects),
+    })
 
 
 @router.post("/api/lesson-note")
@@ -154,14 +189,18 @@ def api_save_note(
     notes = body.get("notes") or ""
     material = body.get("material") or ""
     remarks = body.get("remarks") or ""
+    subject_override = (body.get("subject_override") or "")[:200]
+    is_exam = bool(body.get("is_exam"))
 
     n = db.query(LessonNote).filter(
         LessonNote.user_id == user.id, LessonNote.lesson_date == d,
         LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
     ).first()
 
-    # Wenn alle Felder leer → existierenden Datensatz löschen
-    if not any([theme.strip(), notes.strip(), material.strip(), remarks.strip()]):
+    # Wenn alle Felder leer + kein Prüfungs-Flag → existierenden Datensatz löschen
+    is_blank = not any([theme.strip(), notes.strip(), material.strip(),
+                        remarks.strip(), subject_override.strip(), is_exam])
+    if is_blank:
         if n:
             db.delete(n)
             db.commit()
@@ -176,9 +215,59 @@ def api_save_note(
     n.notes = notes
     n.material = material
     n.remarks = remarks
+    n.subject_override = subject_override
+    n.is_exam = is_exam
     n.updated_at = datetime.utcnow()
     db.commit()
     return JSONResponse({"ok": True, "saved_at": n.updated_at.isoformat()})
+
+
+# ── Reihen-Override (Fach-Bezeichnung pro Klassen+Fach-Kombi) ─────────────
+@router.get("/api/lesson-series-override")
+def api_get_series(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    klassen: str = "",
+    subjects: str = "",
+):
+    return JSONResponse({
+        "ok": True,
+        "display_name": _series_default(db, user.id, klassen, subjects),
+    })
+
+
+@router.post("/api/lesson-series-override")
+def api_save_series(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    kk = (body.get("klassen") or "")[:255]
+    sk = (body.get("subjects") or "")[:255]
+    dn = (body.get("display_name") or "").strip()[:200]
+
+    so = db.query(LessonSeriesOverride).filter(
+        LessonSeriesOverride.user_id == user.id,
+        LessonSeriesOverride.klassen_key == kk,
+        LessonSeriesOverride.subjects_key == sk,
+    ).first()
+
+    if not dn:
+        if so:
+            db.delete(so)
+            db.commit()
+        return JSONResponse({"ok": True, "deleted": True})
+
+    if not so:
+        so = LessonSeriesOverride(
+            user_id=user.id, klassen_key=kk, subjects_key=sk, display_name=dn,
+        )
+        db.add(so)
+    else:
+        so.display_name = dn
+        so.updated_at = datetime.utcnow()
+    db.commit()
+    return JSONResponse({"ok": True, "display_name": dn})
 
 
 @router.get("/api/lesson-note/previous")

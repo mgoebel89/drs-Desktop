@@ -86,9 +86,23 @@ window.MathJax = {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tt-lesson.cancelled { opacity: .55; text-decoration: line-through; background: #f5f5f5; border-left-color: #aaa; }
   .tt-lesson.irregular { background: #fff3e0; border-left-color: var(--gelb); }
-  .note-icon {
-    font-size: 10px; color: var(--blau); flex-shrink: 0;
+  .tt-lesson.exam {
+    border: 2px solid #c62828; border-left-width: 4px; border-left-color: #c62828;
+    background: #fff5f5;
   }
+  .tt-lesson.exam:hover { background: #ffeaea; }
+  .tt-fach {
+    color: var(--text); font-size: 11px; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 500;
+  }
+  .note-icon, .exam-icon { font-size: 10px; flex-shrink: 0; }
+  .note-icon { color: var(--blau); }
+  .exam-icon { color: #c62828; font-weight: 700; }
+
+  /* Single-Lesson nimmt volle Zellhoehe */
+  .lessons-lane { height: 100%; }
+  .lessons-lane > .tt-lesson:only-child { flex: 1 1 auto; min-height: 100%; }
 
   /* Events (right lane) */
   .tt-event {
@@ -252,16 +266,23 @@ window.MathJax = {
                     {% set sk = (l.subjects|sort|join('|')) %}
                     {% set d_iso = grid.days[d_idx].date.isoformat() %}
                     {% set has_note = (d_iso, kk, sk) in grid.notes_present %}
-                    <div class="tt-lesson {{ state }}" data-lesson='{{ l|tojson|forceescape }}'
+                    {% set is_exam = (d_iso, kk, sk) in (grid.exams or []) %}
+                    {% set sess_ov = grid.session_override.get((d_iso, kk, sk)) if grid.session_override else None %}
+                    {% set series_ov = grid.series_override.get((kk, sk)) if grid.series_override else None %}
+                    {% set fach_display = sess_ov or series_ov %}
+                    <div class="tt-lesson {{ state }}{% if is_exam %} exam{% endif %}"
+                         data-lesson='{{ l|tojson|forceescape }}'
                          data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
                          data-date="{{ d_iso }}"
                          data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
                          data-klassen-key="{{ kk }}"
                          data-subjects-key="{{ sk }}">
                       <div class="tt-klasse">
+                        {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
                         {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
                         <span>{{ cls }}</span>
                       </div>
+                      {% if fach_display %}<div class="tt-fach">{{ fach_display }}</div>{% endif %}
                       {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
                     </div>
                   {% endfor %}
@@ -291,6 +312,7 @@ window.MathJax = {
     <p class="muted" style="font-size:11px;margin-top:.8rem">
       <span style="color:var(--gelb)">■</span> Vertretung ·
       <span style="color:#aaa">■</span> entfällt ·
+      <span style="color:#c62828">!</span> Prüfung ·
       📝 Notizen vorhanden ·
       Klick öffnet Detail-Panel rechts
     </p>
@@ -335,11 +357,12 @@ function retypesetMath() {
 }
 
 function closePanel() {
-  // letzten Save flushen falls Timer offen
+  // letzte Saves flushen falls Timer offen
   if (_pendingSave) {
-    clearTimeout(_pendingSave);
-    _pendingSave = null;
-    _doSave();
+    clearTimeout(_pendingSave); _pendingSave = null; _doSave();
+  }
+  if (_pendingSeriesSave) {
+    clearTimeout(_pendingSeriesSave); _pendingSeriesSave = null; _doSeriesSave();
   }
   _panel.classList.remove('open');
   _backdrop.classList.remove('open');
@@ -362,6 +385,8 @@ function _doSave() {
     notes: document.getElementById('note-notes')?.value || '',
     material: document.getElementById('note-material')?.value || '',
     remarks: document.getElementById('note-remarks')?.value || '',
+    subject_override: document.getElementById('note-subject-override')?.value || '',
+    is_exam: document.getElementById('note-is-exam')?.checked || false,
   };
   const status = document.getElementById('note-status');
   if (status) { status.textContent = 'speichere…'; status.style.color = '#666'; }
@@ -380,6 +405,33 @@ function scheduleNoteSave() {
   const status = document.getElementById('note-status');
   if (status) { status.textContent = 'tippe…'; status.style.color = '#999'; }
   _pendingSave = setTimeout(() => { _pendingSave = null; _doSave(); }, 1500);
+}
+
+// ── Series-Override Save (separat, weil eigener Endpoint) ─────────────────
+let _pendingSeriesSave = null;
+function _doSeriesSave() {
+  if (!_currentLessonKey) return;
+  const payload = {
+    klassen: _currentLessonKey.klassen,
+    subjects: _currentLessonKey.subjects,
+    display_name: document.getElementById('series-display')?.value || '',
+  };
+  const status = document.getElementById('series-status');
+  if (status) { status.textContent = 'speichere…'; status.style.color = '#666'; }
+  fetch('/api/lesson-series-override', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  })
+  .then(r => r.json())
+  .then(d => { if (status) { status.textContent = d.deleted ? 'leer – Standard wiederhergestellt' : 'gespeichert'; status.style.color = '#2e7d32'; } })
+  .catch(e => { if (status) { status.textContent = 'Fehler: ' + e.message; status.style.color = '#c62828'; } });
+}
+function scheduleSeriesSave() {
+  if (_pendingSeriesSave) clearTimeout(_pendingSeriesSave);
+  const status = document.getElementById('series-status');
+  if (status) { status.textContent = 'tippe…'; status.style.color = '#999'; }
+  _pendingSeriesSave = setTimeout(() => { _pendingSeriesSave = null; _doSeriesSave(); }, 1500);
 }
 
 // ── Lesson-Panel öffnen ───────────────────────────────────────────────────
@@ -403,6 +455,11 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
 
   // Notes Form
   html += '<form class="note-form" autocomplete="off" onsubmit="return false;">'
+    + '<div style="margin:1rem 0 .8rem;padding:.6rem .8rem;background:#fff5f5;border:1px solid #ffcdd2;border-radius:6px">'
+    + '<label style="margin:0;color:#c62828;text-transform:none;letter-spacing:0;font-size:12px">'
+    + '<input id="note-is-exam" type="checkbox" style="margin-right:.4rem"> Diese Stunde ist eine Prüfung'
+    + '</label>'
+    + '</div>'
     + '<label for="note-theme">Geplantes Thema</label>'
     + '<input id="note-theme" name="theme" type="text" maxlength="500">'
     + '<label for="note-notes">Notizen (Markdown + LaTeX)</label>'
@@ -412,6 +469,14 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + '<label for="note-remarks">Bemerkungen</label>'
     + '<textarea id="note-remarks" name="remarks" rows="3"></textarea>'
     + '<div class="note-status" id="note-status">—</div>'
+    + '<h4 style="margin-top:1.4rem">Fach-Anzeige</h4>'
+    + '<div class="muted" style="font-size:11px;margin-bottom:.4rem">'
+    + 'Untis-Kürzel: <code style="background:#fafafa;padding:1px 5px;border-radius:3px">' + esc(fach || '—') + '</code></div>'
+    + '<label for="series-display" style="margin-top:.4rem">Für alle Stunden dieser Reihe</label>'
+    + '<input id="series-display" type="text" maxlength="200" placeholder="z.B. Elektrotechnik LF3">'
+    + '<div class="note-status" id="series-status">—</div>'
+    + '<label for="note-subject-override" style="margin-top:.6rem">Nur für diese Stunde (überschreibt Reihe)</label>'
+    + '<input id="note-subject-override" type="text" maxlength="200" placeholder="leer = Reihen-Standard verwenden">'
     + '</form>';
 
   _body.innerHTML = html;
@@ -419,7 +484,7 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
   _backdrop.classList.add('open');
   _panel.setAttribute('aria-hidden', 'false');
 
-  // Aktuelle Notiz laden
+  // Aktuelle Notiz + Reihen-Override laden
   try {
     const r = await fetch('/api/lesson-note?date=' + encodeURIComponent(dateIso)
       + '&klassen=' + encodeURIComponent(klassenKey)
@@ -430,18 +495,32 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     document.getElementById('note-notes').value = n.notes || '';
     document.getElementById('note-material').value = n.material || '';
     document.getElementById('note-remarks').value = n.remarks || '';
+    document.getElementById('note-subject-override').value = n.subject_override || '';
+    document.getElementById('note-is-exam').checked = !!n.is_exam;
+    document.getElementById('series-display').value = d.series_default || '';
     document.getElementById('note-status').textContent =
-      (n.theme || n.notes || n.material || n.remarks) ? 'geladen' : '—';
+      (n.theme || n.notes || n.material || n.remarks || n.subject_override || n.is_exam) ? 'geladen' : '—';
+    document.getElementById('series-status').textContent = d.series_default ? 'geladen' : '—';
   } catch (e) {
     document.getElementById('note-status').textContent = 'Konnte Notizen nicht laden.';
   }
 
-  // Auto-Save Listener
-  ['note-theme', 'note-notes', 'note-material', 'note-remarks'].forEach(id => {
+  // Auto-Save Listener für Note-Felder
+  ['note-theme', 'note-notes', 'note-material', 'note-remarks', 'note-subject-override'].forEach(id => {
     document.getElementById(id).addEventListener('input', scheduleNoteSave);
     document.getElementById(id).addEventListener('blur', () => {
       if (_pendingSave) { clearTimeout(_pendingSave); _pendingSave = null; _doSave(); }
     });
+  });
+  // Prüfungs-Checkbox: sofort speichern (kein Tippen-Delay)
+  document.getElementById('note-is-exam').addEventListener('change', () => {
+    if (_pendingSave) { clearTimeout(_pendingSave); _pendingSave = null; }
+    _doSave();
+  });
+  // Reihen-Override: eigener Auto-Save
+  document.getElementById('series-display').addEventListener('input', scheduleSeriesSave);
+  document.getElementById('series-display').addEventListener('blur', () => {
+    if (_pendingSeriesSave) { clearTimeout(_pendingSeriesSave); _pendingSeriesSave = null; _doSeriesSave(); }
   });
 
   // Vorherige Notiz laden
