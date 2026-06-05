@@ -1,0 +1,38 @@
+{# Wizard-Basis-Layout: extends base.html und rendert den Schritt-Indikator.
+   Step-Templates blocken {% block step %} und füllen den Inhaltsbereich. #}
+{% extends "base.html" %}
+{% block title %}Wizard · {{ ls.display_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.4rem">
+    <a class="muted" href="/wizard" style="text-decoration:none;font-size:13px">← Übersicht</a>
+    <div style="flex:1"></div>
+    <a class="muted" href="/ls/{{ ls.id }}" style="text-decoration:none;font-size:13px">Lernsituation öffnen</a>
+  </div>
+  <h1 style="margin-top:.2rem">{{ ls.display_name }}</h1>
+  <p class="muted" style="margin-top:-.4rem">
+    {{ ls.klassen_key or '—' }} · {{ ls.lernfeld or '—' }}
+  </p>
+
+  {# Step-Indikator #}
+  <ol style="list-style:none;padding:0;margin:1.2rem 0;display:flex;gap:.4rem">
+    {% set labels = ['Kontext','Ziele','Prompt','Output','Material'] %}
+    {% for i in range(1, total + 1) %}
+      {% set active = (i == step) %}
+      {% set done = (i < step) %}
+      <li style="flex:1">
+        <a href="/wizard/{{ ls.id }}/step/{{ i }}"
+           style="display:block;text-align:center;padding:.55rem .3rem;border-radius:6px;
+                  text-decoration:none;font-size:13px;
+                  background:{{ '#7B61FF' if active else ('#e8f5e9' if done else '#f4f4f4') }};
+                  color:{{ '#fff' if active else ('#2e7d32' if done else '#666') }};
+                  font-weight:{{ '600' if active else '400' }}">
+          <strong>{{ i }}</strong> · {{ labels[i-1] }}
+        </a>
+      </li>
+    {% endfor %}
+  </ol>
+
+  {% block step %}{% endblock %}
+</div>
+{% endblock %}

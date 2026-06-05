@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ filename }} · Vorschau{% endblock %}
+{% block content %}
+<div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 120px);min-height:500px">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem">
+    <h2 style="margin:0;flex:1">{{ filename }}</h2>
+    <a class="btn btn-sec" href="{{ file_url }}" download>Herunterladen</a>
+    <a class="btn btn-sec" href="/ls/{{ ls.id }}">Zurück</a>
+  </div>
+
+  {% if mode == "inline" %}
+    {% if ext == "pdf" %}
+      <iframe src="{{ file_url }}" style="flex:1;width:100%;border:1px solid #ddd;border-radius:6px"></iframe>
+    {% elif ext in ("png","jpg","jpeg","gif","webp","svg") %}
+      <div style="flex:1;overflow:auto;text-align:center;background:#f5f5f5;border-radius:6px">
+        <img src="{{ file_url }}" alt="{{ filename }}" style="max-width:100%;height:auto">
+      </div>
+    {% else %}
+      <iframe src="{{ file_url }}" style="flex:1;width:100%;border:1px solid #ddd;border-radius:6px"></iframe>
+    {% endif %}
+  {% elif mode == "onlyoffice" %}
+    <div id="oo-placeholder" style="flex:1;width:100%;border:1px solid #ddd;border-radius:6px"></div>
+    <script src="{{ onlyoffice.server_url }}"></script>
+    <script>
+      window.docEditor = new DocsAPI.DocEditor("oo-placeholder",
+        {{ onlyoffice.config | tojson }});
+    </script>
+  {% else %}
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1rem">
+      <p class="muted">Vorschau für <code>.{{ ext }}</code> nicht verfügbar.</p>
+      <a class="btn" href="{{ file_url }}" download>Datei herunterladen</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

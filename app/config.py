@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
 
+    # OnlyOffice Document Server (im LXC CT 501).
+    # URL aus /etc/drs/onlyoffice.env (DRS_ONLYOFFICE_URL=http://192.168.x.y),
+    # JWT aus /etc/drs/onlyoffice.jwt (separat als Datei, sicherer).
+    onlyoffice_url: str = ""
+    onlyoffice_jwt_path: Path = Path("/etc/drs/onlyoffice.jwt")
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: Juni 2026 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-06-05 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -35,25 +35,51 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 | Notiz-Indikator + Prüfungs-Rahmen | ✓ | 📝-Icon + roter Rahmen live ohne Reload |
 | „Letzte Stunde"-Block im Panel | ✓ | Vorige Notiz mit Markdown/LaTeX-Rendering |
 | LXC-Installer + drs-update | ✓ | Proxmox-Helper-Script-Style, idempotent, alembic-Migrationen |
+| **Lernsituationen + Wizard** | ✓ | 5-stufiger Planungs-Wizard, Fobizz-Anbindung (kein API-Key), persistente LS-Entität |
+| **SMB-Material-Share** | ✓ | OMV-Share pro Nutzer, smbprotocol-Client, Upload + Vorschau |
+| **OnlyOffice Office-Vorschau** | ✓ | Separater LXC CT 501, JWT-gesichert, Iframe-Editor (View-Mode) |
+| **Obsidian-Vault-Schreiber** | ✓ | Pro LS eine .md im Vault, YAML-Frontmatter, App-Read-Only-Anzeige (KaTeX + Mermaid) |
 
-### Datenmodell (SQLite, Stand Migration 0007)
+### Datenmodell (SQLite, Stand Migration 0009)
 
-- `users`, `user_sessions`, `audit_log`
-- `worksheets`, `worksheet_revisions`
+- `users` — jetzt zusätzlich `smb_creds_enc` (AES-GCM)
+- `user_sessions`, `audit_log`
+- `worksheets` — jetzt `learning_situation_id` FK (nullable)
+- `worksheet_revisions`
 - `settings` (school_name, school_logo)
 - `ical_calendars` (verschlüsselte URL, Label, Farbe)
-- `lesson_notes` — Key: `user_id, lesson_date, klassen_key, subjects_key, block_start`
+- `lesson_notes` — Key: `user_id, lesson_date, klassen_key, subjects_key, block_start`; jetzt `learning_situation_id` FK
 - `lesson_series_overrides` — Reihen-Fachname pro `user_id, klassen_key, subjects_key`
+- **`learning_situations`** — `id, user_id, slug, display_name, klassen_key, lernfeld, smb_folder_name, obsidian_note_path, lernziele, vorwissen, last_fobizz_prompt, last_fobizz_output, created_at, updated_at`. Slug unique pro User, `smb_folder_name` stabil (`LS-{id:04d}_{slug}`)
 
 ---
 
 ## 2. Wichtige Architektur-Entscheidungen
 
-- **Sicherheit**: Anthropic-API-Key + WebUntis-Creds + iCal-URLs werden
-  AES-GCM verschlüsselt in der DB gespeichert. Master-Key in
+- **Sicherheit**: Anthropic-API-Key + WebUntis-Creds + iCal-URLs + **SMB-Creds**
+  werden AES-GCM verschlüsselt in der DB gespeichert. Master-Key in
   `/etc/drs/secret.key` (chmod 0640 root:drs).
 - **Kein KI-Feedback im Schüler-Export**: Aufgabenblätter enthalten keinen
   API-Key. KI-Funktionen laufen ausschließlich im Lehrer-Container.
+- **Keine Anthropic-API-Kosten im Wizard**: Die Material-Generierung läuft
+  über **Fobizz**. Wizard ist ein Prompt-Generator + Material-Manager, kein
+  API-Client. Der Fobizz-Agent wird einmalig mit dem Systemprompt aus
+  `docs/fobizz-agent-systemprompt.md` konfiguriert; der Wizard liefert pro
+  Lauf nur den Kontext-Prompt.
+- **SMB-Anbindung Python-nativ**: `smbprotocol` statt systemweitem
+  `mount.cifs`. Kein Root nötig, keine Mount-Lifecycle-Komplexität,
+  OnlyOffice bekommt Dateien über App-interne Token-URLs gestreamt.
+- **Lernsituation-Identität stabil**: `display_name` umbenennbar, aber
+  `slug` und `smb_folder_name` immutable nach Anlegen. Pattern
+  `LS-{id:04d}_{slug}`. So bleibt der Windows-Explorer-Pfad konsistent
+  und Obsidian-Wikilinks brechen nicht.
+- **OnlyOffice in eigenem LXC (CT 501)**: privileged Container (Docker
+  braucht `keyctl=1`), JWT-pflichtig, Caddy im DRS-LXC reverse-proxyt
+  `/onlyoffice/*`. Standard-RAM 4 GB. Document-Server läuft als
+  `onlyoffice/documentserver:latest` mit Restart-Policy.
+- **Obsidian-Vault im gleichen SMB-Share**: Unterpfad `/vault` (konfigurierbar
+  im Profil). App rendert die `.md` schreibgeschützt mit KaTeX + Mermaid.
+  Bearbeitet wird in Obsidian Desktop auf dem Lehrer-PC.
 - **Notizen pro Block**: Schlüssel inkl. `block_start` (`"HH:MM"`).
   3./4. und 5./6. desselben Tages haben separate Notizen.
 - **Events im Grid**: Tagesspalte intern zweigeteilt — Lessons-Subspalte links
@@ -67,21 +93,28 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 
 ## 3. Aktuell offene Punkte
 
-### Direkt aus letzter Session noch zu klären
+### Direkt aus letzter Session noch zu klären / zu testen
 
+- **Migration 0008 + 0009** im Container ausrollen (`drs-update`) und
+  Wizard-Flow Ende-zu-Ende durchspielen (LS anlegen → Schritt 5 abschließen,
+  SMB-Ordner und Vault-Notiz auf dem OMV verifizieren).
+- **OnlyOffice-LXC (CT 501)** über den neuen Installer-Pfad anlegen lassen
+  und DOCX/PPTX-Vorschau im Browser prüfen.
 - **Optik-Check** des durchgehenden Event-Balkens via rowspan
-  (Commit `3075461`, `flex: 1 1 auto` auf `.tt-event`). User hat den
-  Container noch nicht final getestet.
+  (Commit `3075461`, `flex: 1 1 auto` auf `.tt-event`) — vor der Wizard-Arbeit
+  noch nicht final getestet.
 - **Sub-Spalten-Breiten** im Grid evtl. fein-tunen (aktuell 12 % Lessons :
   6 % Events pro Tag).
 
 ### Geplant, noch nicht umgesetzt
 
-1. **Planungs-Skill-Wizard** mit Anthropic-Anbindung — größter offener Block.
-   Wizard soll u. a. `LessonNote.theme` und `LessonSeriesOverride.display_name`
-   programmatisch befüllen können (die Endpunkte stehen schon).
-2. **Worksheet-Anknüpfung im Stundenplan-Panel**: „verknüpfte Aufgabenblätter
+1. **Worksheet-Anknüpfung im Stundenplan-Panel**: „verknüpfte Aufgabenblätter
    zu Klasse+Fach" + „Neues Aufgabenblatt für diese Stunde" als Schnellaktion.
+   FK `worksheets.learning_situation_id` ist da, die UI fehlt noch.
+2. **Wizard ↔ Stundenplan-Block**: Button „Wizard für diesen Block öffnen"
+   im Block-Panel, der `lesson_notes.learning_situation_id` setzt und
+   `LessonNote.theme` aus dem Wizard-Output befüllt. Endpunkte und FK stehen
+   schon, nur die Panel-Aktion fehlt.
 3. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80; im Caddyfile
    als Kommentarblock vorbereitet).
 4. **Visual-Editor für Worksheet-Vorlagen** (GrapesJS) — niedrige Priorität.
@@ -100,29 +133,44 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 
 ```
 drs-lxc/
-├── install.sh                         # Proxmox-Host-Installer
+├── install.sh                         # Proxmox-Host-Installer (legt CT + opt. CT 501 für OO an)
 ├── lxc-setup.sh                       # Inneres Setup im LXC
+├── lxc-onlyoffice-setup.sh            # OnlyOffice-Setup im CT 501 (Docker + JWT)
 ├── bin/{drs-update, drs-admin}        # Helper-Skripte im Container
-├── systemd/drs-api.service
-├── caddy/Caddyfile
+├── systemd/drs-api.service            # liest /etc/drs/{config,onlyoffice}.env
+├── caddy/Caddyfile                    # inkl. /onlyoffice/* Reverse-Proxy
 ├── alembic.ini
-├── requirements.txt
+├── requirements.txt                   # + smbprotocol, markdown-it-py, python-slugify, PyYAML
+├── docs/
+│   └── fobizz-agent-systemprompt.md   # zum 1× Einfügen in den Fobizz-Agent
 └── app/
     ├── main.py
     ├── config.py, db.py, models.py, crypto.py, auth.py, branding.py, cli.py
     ├── templating.py                  # geteilte Jinja-Instanz mit school_name() Global
-    ├── alembic/versions/0001–0007_*.py
+    ├── alembic/versions/0001–0009_*.py
     ├── routers/
-    │   ├── auth.py, setup.py, users.py, profile.py
+    │   ├── auth.py, setup.py, users.py, profile.py     # profile.py: + SMB-Block
     │   ├── worksheets.py, settings.py, help.py, timetable.py
+    │   ├── learning_situations.py     # LS-CRUD, Upload, Datei-Löschen
+    │   ├── wizard.py                  # 5-Schritt-Flow + done
+    │   ├── preview.py                 # PDF/Bild inline, OnlyOffice-Iframe
+    │   └── obsidian.py                # MD-Rendering der Vault-Notiz
     ├── services/
     │   ├── playwright_pdf.py
-    │   ├── webuntis_client.py         # inkl. _attach_events, lesson_key_parts
-    │   └── ical_client.py             # Europe/Berlin, RRULE-Expansion, 15 min Cache
+    │   ├── webuntis_client.py
+    │   ├── ical_client.py
+    │   ├── smb_client.py              # smbprotocol-basiert, pro Nutzer
+    │   ├── onlyoffice_client.py       # JWT-Signer + In-Memory-Filetoken
+    │   ├── obsidian_writer.py         # YAML-Frontmatter + Wikilinks
+    │   └── wizard_helpers.py          # Slug, Folder-Name, Fobizz-Prompt-Builder
     ├── static/{drs.css, default_school_logo.jpg}
     └── templates/
-        ├── base.html, login.html, change_password.html, home.html, setup.html
+        ├── base.html                  # Nav-Einträge: Lernsituationen, Wizard
+        ├── login.html, change_password.html, home.html, setup.html
         ├── profile.html, help.html, timetable.html, timetable_diagnose.html
+        ├── preview.html, obsidian_note.html
+        ├── learning_situations/{list.html, detail.html}
+        ├── wizard/{_layout.html, start.html, step1..5_*.html, done.html}
         ├── admin/{users.html, settings.html}
         └── worksheets/{list.html, editor.html, revisions.html, export.html}
 ```
@@ -143,10 +191,16 @@ Login: **`mgoebel`** (Admin)
 
 ---
 
-## 6. Letzte unbestätigte Commits
+## 6. Letzte Commits
 
 | Commit | Was |
 |---|---|
+| _pending_ | Phase 6+7: Wizard-Flow + Fobizz-Agent-Systemprompt |
+| _pending_ | Phase 5: Obsidian-Writer + Read-Only-Anzeige |
+| _pending_ | Phase 4: Preview-Router (PDF/Bild/OnlyOffice-Iframe) |
+| _pending_ | Phase 3: OnlyOffice CT 501 + Installer-Automation |
+| _pending_ | Phase 2: SMB-Service + Profil-UI |
+| _pending_ | Phase 1: Migration 0008 + LearningSituation-Model |
 | `3075461` | Event-Card flex:1 für durchgehenden Balken |
 | `c1b2b89` | Tagesspalten zweigeteilt (Lessons + Events Subspalten) |
 | `6fefb5e` | Lange Events nicht mehr als rowspan-Lessons-Merge |
@@ -154,8 +208,9 @@ Login: **`mgoebel`** (Admin)
 | `ca75b08` | Prüfung/Notiz live im Grid, kein roter Hintergrund |
 | `0e08cf1` | Fach-Override (Reihe + Sitzung) + Prüfung |
 
-**Bitte vor neuer Session noch im Container `drs-update` ausführen und das
-Verhalten des durchgehenden Event-Balkens visuell bestätigen.**
+**Vor der nächsten Session:** Im Container `drs-update` ausführen (Migration
+0008 + 0009), Profil → SMB-Zugang eintragen, ggf. OnlyOffice-LXC anlegen
+(Installer-Pfad), Wizard testen.
 
 ---
 

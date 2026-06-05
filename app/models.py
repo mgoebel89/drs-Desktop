@@ -26,6 +26,9 @@ class User(Base):
     # Verschlüsselt (AES-GCM): nonce || ciphertext || tag
     anthropic_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     untis_creds_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # SMB-Anbindung an OMV-Share. JSON {host, share, username, password,
+    # vault_subpath, material_subpath}, AES-GCM verschlüsselt.
+    smb_creds_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -67,6 +70,11 @@ class Worksheet(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    # Optionale Verknüpfung zur Lernsituation
+    learning_situation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     revisions: Mapped[list["WorksheetRevision"]] = relationship(
         back_populates="worksheet", cascade="all, delete-orphan",
         order_by="WorksheetRevision.id.desc()",
@@ -107,6 +115,35 @@ class LessonNote(Base):
     subject_override: Mapped[str] = mapped_column(String(200), default="")
     # Stunde als Prüfung markieren (roter Rahmen im Grid)
     is_exam: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Verknüpfung zur Lernsituation (optional)
+    learning_situation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LearningSituation(Base):
+    """Didaktische Lernsituation. Spannt meist mehrere Blöcke über Wochen.
+    Verknüpft mit lesson_notes und worksheets. Hat einen stabilen SMB-Ordner und
+    eine Obsidian-Notiz im zentralen Vault."""
+    __tablename__ = "learning_situations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    slug: Mapped[str] = mapped_column(String(120), index=True)  # slugifiziert, immutable nach Anlegen
+    display_name: Mapped[str] = mapped_column(String(200))  # frei umbenennbar
+    klassen_key: Mapped[str] = mapped_column(String(255), default="", index=True)
+    lernfeld: Mapped[str] = mapped_column(String(64), default="")
+    # Stabiler Ordnername auf dem SMB-Share, Pattern "LS-{id:04d}_{slug}"
+    smb_folder_name: Mapped[str] = mapped_column(String(200), default="")
+    # Pfad zur Obsidian-Notiz, relativ zur Vault
+    obsidian_note_path: Mapped[str] = mapped_column(String(255), default="")
+    # Wizard-Persistenz
+    lernziele: Mapped[str] = mapped_column(Text, default="")
+    vorwissen: Mapped[str] = mapped_column(Text, default="")
+    last_fobizz_prompt: Mapped[str] = mapped_column(Text, default="")
+    last_fobizz_output: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

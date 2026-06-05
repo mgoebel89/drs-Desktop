@@ -11,6 +11,7 @@ from app.auth import audit, require_user
 from app.crypto import decrypt_secret, encrypt_secret, mask_key
 from app.db import get_db
 from app.models import IcalCalendar, User
+from app.services import smb_client
 from app.services.ical_client import test_url as ical_test_url
 from app.services.webuntis_client import test_connection as untis_test
 from app.templating import templates
@@ -30,6 +31,15 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
     anth = decrypt_secret(user.anthropic_key_enc) if user.anthropic_key_enc else ""
     untis_raw = decrypt_secret(user.untis_creds_enc) if user.untis_creds_enc else ""
     untis = json.loads(untis_raw) if untis_raw else {}
+    smb_cfg = smb_client.load_config(user)
+    smb_view = {
+        "host": smb_cfg.host if smb_cfg else "",
+        "share": smb_cfg.share if smb_cfg else "",
+        "username": smb_cfg.username if smb_cfg else "",
+        "vault_subpath": smb_cfg.vault_subpath if smb_cfg else "/vault",
+        "material_subpath": smb_cfg.material_subpath if smb_cfg else "/lernsituationen",
+        "pw_set": bool(smb_cfg and smb_cfg.password),
+    }
     cals = db.query(IcalCalendar).filter(IcalCalendar.user_id == user.id)\
         .order_by(IcalCalendar.id).all()
     cal_views = []
@@ -50,6 +60,7 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
         "anthropic_set": bool(anth),
         "untis": untis,
         "untis_pw_set": bool(untis.get("password")),
+        "smb": smb_view,
         "ical_calendars": cal_views,
         "flash": flash,
         "flash_kind": flash_kind,
@@ -113,6 +124,53 @@ def profile_untis(
         audit(db, "untis_creds_set", actor=user, request=request)
     db.commit()
     return RedirectResponse("/profile", status_code=303)
+
+
+@router.post("/profile/smb")
+def profile_smb(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    host: str = Form(""),
+    share: str = Form(""),
+    username: str = Form(""),
+    password: str = Form(""),
+    vault_subpath: str = Form("/vault"),
+    material_subpath: str = Form("/lernsituationen"),
+    clear: str = Form(""),
+):
+    if clear:
+        smb_client.clear_config(user)
+        audit(db, "smb_creds_cleared", actor=user, request=request)
+    else:
+        existing = smb_client.load_config(user)
+        cfg = smb_client.SmbConfig(
+            host=host.strip() or (existing.host if existing else ""),
+            share=share.strip() or (existing.share if existing else ""),
+            username=username.strip() or (existing.username if existing else ""),
+            password=password or (existing.password if existing else ""),
+            vault_subpath=vault_subpath.strip() or "/vault",
+            material_subpath=material_subpath.strip() or "/lernsituationen",
+        )
+        if not all([cfg.host, cfg.share, cfg.username, cfg.password]):
+            return RedirectResponse("/profile?smb_err=1", status_code=303)
+        smb_client.save_config(user, cfg)
+        audit(db, "smb_creds_set", actor=user, request=request)
+    db.commit()
+    return RedirectResponse("/profile", status_code=303)
+
+
+@router.post("/profile/smb/test")
+def profile_smb_test(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ok, msg = smb_client.test_connection(user)
+    audit(db, "smb_test", actor=user,
+          detail=("ok" if ok else "fail") + f": {msg}", request=request)
+    db.commit()
+    return JSONResponse({"ok": ok, "message": msg})
 
 
 @router.post("/profile/untis/test")

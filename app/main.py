@@ -16,6 +16,10 @@ from app.routers import worksheets as worksheets_router
 from app.routers import settings as settings_router
 from app.routers import help as help_router
 from app.routers import timetable as timetable_router
+from app.routers import preview as preview_router
+from app.routers import obsidian as obsidian_router
+from app.routers import learning_situations as ls_router
+from app.routers import wizard as wizard_router
 from app.models import User
 from app.templating import templates
 
@@ -32,6 +36,10 @@ app.include_router(worksheets_router.router)
 app.include_router(settings_router.router)
 app.include_router(help_router.router)
 app.include_router(timetable_router.router)
+app.include_router(preview_router.router)
+app.include_router(obsidian_router.router)
+app.include_router(ls_router.router)
+app.include_router(wizard_router.router)
 
 
 @app.get("/")

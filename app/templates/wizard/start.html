@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Planungs-Wizard{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Planungs-Wizard</h1>
+  <p class="muted">Eine Lernsituation neu anlegen oder eine bestehende fortsetzen.</p>
+
+  {% if not smb_configured %}
+  <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:.8rem 1rem;margin:1rem 0">
+    <strong>Hinweis:</strong> SMB-Share ist noch nicht eingerichtet —
+    <a href="/profile">im Profil eintragen</a>, sonst funktioniert weder
+    Material-Upload noch Vault-Schreiben.
+  </div>
+  {% endif %}
+
+  <h2 style="margin-top:1.4rem">Neue Lernsituation</h2>
+  <form method="post" action="/wizard/new" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:.7rem;align-items:end">
+    <div>
+      <label>Bezeichnung</label>
+      <input name="display_name" required placeholder="z.B. Hydraulik Grundlagen" maxlength="200">
+    </div>
+    <div>
+      <label>Klasse</label>
+      <input name="klassen_key" placeholder="MTA22">
+    </div>
+    <div>
+      <label>Lernfeld</label>
+      <input name="lernfeld" placeholder="LF07">
+    </div>
+    <div><button class="btn" type="submit">Anlegen</button></div>
+  </form>
+
+  <h2 style="margin-top:1.6rem">Vorhandene Lernsituationen</h2>
+  {% if items %}
+  <table>
+    <thead><tr>
+      <th>Bezeichnung</th><th>Klasse</th><th>Lernfeld</th><th>Aktualisiert</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for ls in items %}
+    <tr>
+      <td><a href="/ls/{{ ls.id }}"><strong>{{ ls.display_name }}</strong></a>
+          <br><span class="muted" style="font-size:11px"><code>{{ ls.smb_folder_name }}</code></span></td>
+      <td>{{ ls.klassen_key or '—' }}</td>
+      <td>{{ ls.lernfeld or '—' }}</td>
+      <td style="font-size:12px;color:#666">{{ ls.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td><a class="btn btn-sec" style="padding:5px 11px;font-size:12px"
+             href="/wizard/{{ ls.id }}/step/1">Wizard ▸</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Noch keine Lernsituation angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "wizard/_layout.html" %}
+{% block step %}
+<h2>Schritt 1 · Kontext</h2>
+<p class="muted">Grunddaten der Lernsituation. Die Bezeichnung kannst du jederzeit ändern — der Ordnername bleibt stabil.</p>
+
+<form method="post" action="/wizard/{{ ls.id }}/step/1" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:.9rem">
+  <div>
+    <label>Bezeichnung</label>
+    <input name="display_name" value="{{ ls.display_name }}" maxlength="200" required>
+  </div>
+  <div>
+    <label>Klasse</label>
+    <input name="klassen_key" value="{{ ls.klassen_key }}" placeholder="MTA22">
+  </div>
+  <div>
+    <label>Lernfeld</label>
+    <input name="lernfeld" value="{{ ls.lernfeld }}" placeholder="LF07">
+  </div>
+  <div style="grid-column:1/4;display:flex;justify-content:space-between;margin-top:.6rem">
+    <div></div>
+    <button class="btn" type="submit">Speichern und weiter →</button>
+  </div>
+</form>
+
+<div style="margin-top:1.4rem;padding:.8rem 1rem;background:#fafafa;border-radius:6px;font-size:13px">
+  <strong>Technische Verknüpfung:</strong>
+  Slug <code>{{ ls.slug }}</code> ·
+  SMB-Ordner <code>{{ ls.smb_folder_name }}</code> ·
+  Obsidian <code>{{ ls.obsidian_note_path }}</code>
+</div>
+{% endblock %}

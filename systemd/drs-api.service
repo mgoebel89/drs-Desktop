@@ -9,6 +9,7 @@ User=drs
 Group=drs
 WorkingDirectory=/opt/drs/app
 EnvironmentFile=/etc/drs/config.env
+EnvironmentFile=-/etc/drs/onlyoffice.env
 ExecStart=/opt/drs/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=on-failure
 RestartSec=5

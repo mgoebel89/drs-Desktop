@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ ls.display_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem">
+    <h1 style="margin:0;flex:1">{{ ls.display_name }}</h1>
+    <a class="btn" href="/wizard/{{ ls.id }}/step/1">Wizard fortsetzen ▸</a>
+  </div>
+  <p class="muted">
+    Klasse {{ ls.klassen_key or '—' }} · {{ ls.lernfeld or '—' }}
+    · Ordner <code>{{ ls.smb_folder_name }}</code>
+  </p>
+
+  <form method="post" action="/ls/{{ ls.id }}/rename"
+        style="display:flex;gap:.6rem;align-items:end;margin-top:.6rem">
+    <div style="flex:1">
+      <label>Bezeichnung umbenennen (Ordner bleibt stabil)</label>
+      <input name="display_name" value="{{ ls.display_name }}" maxlength="200" required>
+    </div>
+    <button class="btn btn-sec" type="submit">Speichern</button>
+  </form>
+
+  <div style="display:flex;gap:.6rem;margin-top:1rem">
+    <a class="btn btn-sec" href="/ls/{{ ls.id }}/note">
+      📝 Obsidian-Notiz {% if not has_note %}(noch leer){% endif %}
+    </a>
+  </div>
+
+  <h2 style="margin-top:1.6rem">Materialien</h2>
+  {% if not smb_configured %}
+    <p class="muted">SMB nicht eingerichtet — <a href="/profile">jetzt konfigurieren</a>.</p>
+  {% elif smb_error %}
+    <p style="color:#c62828">SMB-Fehler: {{ smb_error }}</p>
+  {% else %}
+
+  <form method="post" action="/ls/{{ ls.id }}/upload" enctype="multipart/form-data"
+        style="margin:.6rem 0">
+    <input type="file" name="files" multiple>
+    <button class="btn" type="submit">Hochladen</button>
+  </form>
+
+  {% if files %}
+  <table>
+    <thead><tr><th>Datei</th><th>Größe</th><th></th></tr></thead>
+    <tbody>
+    {% for f in files %}
+    <tr>
+      <td>{% if f.is_dir %}📁{% else %}📄{% endif %}
+          {% if f.is_dir %}{{ f.name }}{% else %}<a href="/ls/{{ ls.id }}/preview/{{ f.name }}">{{ f.name }}</a>{% endif %}</td>
+      <td style="font-size:12px;color:#666">{% if not f.is_dir %}{{ '%.1f'|format(f.size / 1024) }} KB{% endif %}</td>
+      <td>
+        {% if not f.is_dir %}
+        <a class="btn-sec" style="padding:3px 8px;font-size:11px"
+           href="/ls/{{ ls.id }}/files/{{ f.name }}" download>↓</a>
+        <form method="post" action="/ls/{{ ls.id }}/files/{{ f.name }}/delete"
+              style="display:inline" onsubmit="return confirm('„{{ f.name }}" löschen?');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Noch keine Dateien im Ordner.</p>
+  {% endif %}
+
+  {% endif %}
+</div>
+{% endblock %}

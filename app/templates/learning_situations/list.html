@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Lernsituationen{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem">
+    <h1 style="margin:0;flex:1">Lernsituationen</h1>
+    <a class="btn" href="/wizard">Neue per Wizard ▸</a>
+  </div>
+
+  {% if not smb_configured %}
+  <p style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:.6rem .9rem;margin-top:1rem">
+    SMB-Share nicht eingerichtet — <a href="/profile">jetzt konfigurieren</a>.
+  </p>
+  {% endif %}
+
+  {% if items %}
+  <table style="margin-top:1rem">
+    <thead><tr><th>Bezeichnung</th><th>Klasse</th><th>Lernfeld</th><th>Ordner</th><th>Aktualisiert</th></tr></thead>
+    <tbody>
+    {% for ls in items %}
+    <tr>
+      <td><a href="/ls/{{ ls.id }}"><strong>{{ ls.display_name }}</strong></a></td>
+      <td>{{ ls.klassen_key or '—' }}</td>
+      <td>{{ ls.lernfeld or '—' }}</td>
+      <td><code style="font-size:11px">{{ ls.smb_folder_name }}</code></td>
+      <td style="font-size:12px;color:#666">{{ ls.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-top:1rem">Noch keine Lernsituationen angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

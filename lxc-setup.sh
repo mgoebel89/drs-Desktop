@@ -129,6 +129,15 @@ install -m 0644 "$APP_DIR/systemd/drs-api.service" /etc/systemd/system/drs-api.s
 install -m 0644 "$APP_DIR/caddy/Caddyfile" /etc/caddy/Caddyfile
 mkdir -p /var/log/caddy
 
+# Caddy liest optional Variablen aus /etc/caddy/onlyoffice.env (wird vom
+# Host-Installer erzeugt, sobald der OnlyOffice-LXC angelegt wurde).
+touch /etc/caddy/onlyoffice.env
+mkdir -p /etc/systemd/system/caddy.service.d
+cat > /etc/systemd/system/caddy.service.d/onlyoffice.conf <<'EOF'
+[Service]
+EnvironmentFile=-/etc/caddy/onlyoffice.env
+EOF
+
 systemctl daemon-reload
 systemctl enable --now drs-api
 systemctl reload caddy || systemctl restart caddy

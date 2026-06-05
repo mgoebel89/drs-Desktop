@@ -1,0 +1,35 @@
+{% extends "wizard/_layout.html" %}
+{% block step %}
+<h2>Schritt 3 · Fobizz-Prompt</h2>
+<p class="muted">
+  Diesen Kontext-Prompt in den vorbereiteten Fobizz-Agenten einkippen.
+  Den Systemprompt des Agenten richtest du einmalig ein (siehe
+  <a href="/help">Hilfe-Seite</a>).
+</p>
+
+<div style="position:relative">
+  <textarea id="prompt-box" rows="14" readonly
+            style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">{{ prompt }}</textarea>
+  <button type="button" class="btn" id="copy-btn"
+          style="position:absolute;top:.5rem;right:.5rem;padding:5px 12px;font-size:12px">In Zwischenablage</button>
+</div>
+<span id="copy-status" style="font-size:12px;color:#2e7d32;margin-left:.5rem"></span>
+
+<div style="display:flex;justify-content:space-between;margin-top:1rem">
+  <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/2">← Zurück</a>
+  <a class="btn" href="/wizard/{{ ls.id }}/step/4">Output einfügen →</a>
+</div>
+
+<script>
+  document.getElementById("copy-btn").addEventListener("click", async () => {
+    const txt = document.getElementById("prompt-box").value;
+    try {
+      await navigator.clipboard.writeText(txt);
+      document.getElementById("copy-status").textContent = "✓ kopiert";
+      setTimeout(() => document.getElementById("copy-status").textContent = "", 2500);
+    } catch (e) {
+      document.getElementById("copy-status").textContent = "✗ " + e.message;
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "wizard/_layout.html" %}
+{% block step %}
+<h2>Schritt 2 · Ziele & Inhalte</h2>
+<p class="muted">Worauf soll diese Einheit hinauslaufen? Was bringen die Schüler:innen mit?</p>
+
+<form method="post" action="/wizard/{{ ls.id }}/step/2" style="display:grid;gap:1rem">
+  <div>
+    <label>Lernziele</label>
+    <textarea name="lernziele" rows="6"
+              placeholder="- Die SuS können …&#10;- Die SuS unterscheiden …">{{ ls.lernziele }}</textarea>
+  </div>
+  <div>
+    <label>Vorwissen / Anknüpfung</label>
+    <textarea name="vorwissen" rows="4"
+              placeholder="z.B. Druck und Kraft aus LF03 bekannt, hydraulische Schaltzeichen noch nicht eingeführt">{{ ls.vorwissen }}</textarea>
+  </div>
+  <div style="display:flex;justify-content:space-between">
+    <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/1">← Zurück</a>
+    <button class="btn" type="submit">Speichern und weiter →</button>
+  </div>
+</form>
+{% endblock %}

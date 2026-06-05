@@ -5,8 +5,21 @@
 :80 {
     encode zstd gzip
     request_body {
-        max_size 20MB    # erlaubt PDF-/Bild-Uploads
+        max_size 500MB   # erlaubt große Material-Uploads in den SMB-Share
     }
+
+    # OnlyOffice Document Server (in eigenem LXC, IP via Env-Var)
+    # Wenn /etc/caddy/onlyoffice.env existiert, wird die Variable {$ONLYOFFICE_HOST}
+    # gesetzt und der Reverse-Proxy ist aktiv. Bei leerem Wert greift der Block nicht.
+    @onlyoffice path /onlyoffice/*
+    handle @onlyoffice {
+        uri strip_prefix /onlyoffice
+        reverse_proxy {$ONLYOFFICE_HOST:127.0.0.1:9981} {
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
     reverse_proxy 127.0.0.1:8000
 
     log {

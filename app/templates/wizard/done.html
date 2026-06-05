@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Fertig · {{ ls.display_name }}{% endblock %}
+{% block content %}
+<div class="card" style="text-align:center;padding:2.5rem">
+  <div style="font-size:48px;line-height:1">✓</div>
+  <h1 style="margin-top:.4rem">Wizard abgeschlossen</h1>
+  <p class="muted">Lernsituation <strong>{{ ls.display_name }}</strong> ist gespeichert.</p>
+
+  <div style="margin-top:1.6rem;display:flex;gap:.7rem;justify-content:center;flex-wrap:wrap">
+    <a class="btn" href="/ls/{{ ls.id }}">Lernsituation öffnen</a>
+    <a class="btn btn-sec" href="/ls/{{ ls.id }}/note">Notiz ansehen</a>
+    <a class="btn btn-sec" href="/wizard">Zur Wizard-Übersicht</a>
+  </div>
+</div>
+{% endblock %}

@@ -73,6 +73,67 @@
   });
   </script>
 
+  <h2>Materialien-Share (SMB)</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:.6rem">
+    Verbindung zu einem OMV-/NAS-Share über SMB. Pro Lernsituation wird im
+    Material-Unterordner automatisch ein Ordner angelegt. Die Obsidian-Vault
+    liegt als Unterordner im selben Share. Zugangsdaten werden verschlüsselt
+    gespeichert.
+  </p>
+  <form method="post" action="/profile/smb" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+    <div>
+      <label>Host (IP oder Name)</label>
+      <input name="host" value="{{ smb.host }}" placeholder="192.168.5.10">
+    </div>
+    <div>
+      <label>Share</label>
+      <input name="share" value="{{ smb.share }}" placeholder="drs-material">
+    </div>
+    <div>
+      <label>Benutzername</label>
+      <input name="username" value="{{ smb.username }}">
+    </div>
+    <div>
+      <label>Passwort {% if smb.pw_set %}<span class="muted">(gespeichert — leer lassen um zu behalten)</span>{% endif %}</label>
+      <input name="password" type="password" autocomplete="off">
+    </div>
+    <div>
+      <label>Vault-Unterpfad</label>
+      <input name="vault_subpath" value="{{ smb.vault_subpath }}" placeholder="/vault">
+    </div>
+    <div>
+      <label>Material-Unterpfad</label>
+      <input name="material_subpath" value="{{ smb.material_subpath }}" placeholder="/lernsituationen">
+    </div>
+    <div style="grid-column:1/3;display:flex;gap:.6rem;margin-top:.4rem">
+      <button class="btn" type="submit">Speichern</button>
+      {% if smb.pw_set %}
+        <button class="btn btn-sec" type="submit" name="clear" value="1"
+                onclick="return confirm('SMB-Zugang entfernen?');">Entfernen</button>
+      {% endif %}
+    </div>
+  </form>
+  <div style="margin-top:.9rem">
+    <button class="btn btn-sec" type="button" id="btn-smb-test">Verbindung testen</button>
+    <span id="smb-test-status" style="margin-left:.7rem;font-size:13px"></span>
+  </div>
+  <script>
+  document.getElementById('btn-smb-test').addEventListener('click', async () => {
+    const status = document.getElementById('smb-test-status');
+    const btn = document.getElementById('btn-smb-test');
+    btn.disabled = true; status.textContent = 'Teste…'; status.style.color = '#666';
+    try {
+      const res = await fetch('/profile/smb/test', {method: 'POST'});
+      const data = await res.json();
+      status.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
+      status.style.color = data.ok ? '#2e7d32' : '#c62828';
+    } catch (e) {
+      status.textContent = '✗ Fehler: ' + e.message;
+      status.style.color = '#c62828';
+    } finally { btn.disabled = false; }
+  });
+  </script>
+
   <h2>Externe Kalender (iCal)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Termine aus externen Kalendern (z.B. Outlook, Google, Nextcloud) im Stundenplan einblenden.

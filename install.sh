@@ -128,6 +128,78 @@ pct exec "$CTID" -- env \
 # ─── Container-IP ermitteln ───────────────────────────────────────────────
 CT_IP=$(pct exec "$CTID" -- bash -c "hostname -I | awk '{print \$1}'" 2>/dev/null || echo "?")
 
+# ─── OnlyOffice Document Server (separater LXC) ───────────────────────────
+echo
+msg "OnlyOffice Document Server (Office-Vorschau im Browser)"
+SETUP_OO="$(ask "OnlyOffice-LXC jetzt automatisch anlegen? (j/n)" "j")"
+OO_CT_IP=""
+if [[ "$SETUP_OO" =~ ^[jJyY] ]]; then
+  OO_CTID="$(ask "OnlyOffice Container-ID" "501")"
+  [[ "$OO_CTID" =~ ^[0-9]+$ ]] || die "CTID muss numerisch sein."
+  pct status "$OO_CTID" >/dev/null 2>&1 && die "Container $OO_CTID existiert bereits."
+
+  OO_HOSTNAME="$(ask "Hostname" "drs-onlyoffice")"
+  OO_DISK="$(ask "Disk-Größe (GB)" "12")"
+  OO_RAM="$(ask "RAM (MB) — empfohlen ≥4096" "4096")"
+  OO_CORES="$(ask "CPU-Kerne" "2")"
+  OO_NET_CFG="$(ask "Netzwerk (dhcp oder z.B. 192.168.1.51/24,gw=192.168.1.1)" "dhcp")"
+
+  if [[ "$OO_NET_CFG" == "dhcp" ]]; then
+    OO_NET="name=eth0,bridge=${BRIDGE},ip=dhcp,ip6=auto"
+  else
+    OO_NET="name=eth0,bridge=${BRIDGE},ip=${OO_NET_CFG}"
+  fi
+
+  msg "Erstelle OnlyOffice-Container CT $OO_CTID (privileged, für Docker) …"
+  pct create "$OO_CTID" "$TEMPLATE_REF" \
+    --hostname "$OO_HOSTNAME" \
+    --cores "$OO_CORES" \
+    --memory "$OO_RAM" \
+    --swap 1024 \
+    --rootfs "${STORAGE}:${OO_DISK}" \
+    --net0 "$OO_NET" \
+    --unprivileged 0 \
+    --features "nesting=1,keyctl=1" \
+    --onboot 1 \
+    --start 0
+  ok "Container erstellt."
+
+  pct start "$OO_CTID"
+  sleep 5
+
+  # JWT-Secret generieren
+  OO_JWT_SECRET="$(head -c 48 /dev/urandom | base64 | tr -d '\n=' | head -c 48)"
+
+  msg "Lade OnlyOffice-Setup-Skript …"
+  OO_TMP=$(mktemp)
+  curl -fsSL "${GIT_REPO%.git}/raw/${GIT_BRANCH}/lxc-onlyoffice-setup.sh" -o "$OO_TMP" 2>/dev/null \
+    || curl -fsSL "$(echo "$GIT_REPO" | sed 's|github.com|raw.githubusercontent.com|; s|\.git$||')/${GIT_BRANCH}/lxc-onlyoffice-setup.sh" -o "$OO_TMP" \
+    || die "lxc-onlyoffice-setup.sh konnte nicht geladen werden."
+
+  pct push "$OO_CTID" "$OO_TMP" /root/lxc-onlyoffice-setup.sh
+  pct exec "$OO_CTID" -- chmod +x /root/lxc-onlyoffice-setup.sh
+  rm -f "$OO_TMP"
+
+  msg "Führe OnlyOffice-Setup aus (5–10 Minuten) …"
+  pct exec "$OO_CTID" -- env \
+    OO_JWT_SECRET="$OO_JWT_SECRET" \
+    bash /root/lxc-onlyoffice-setup.sh
+
+  OO_CT_IP=$(pct exec "$OO_CTID" -- bash -c "hostname -I | awk '{print \$1}'" 2>/dev/null || echo "?")
+
+  # Secret + URL in den DRS-LXC schreiben (Caddy + App lesen das)
+  msg "Konfiguriere DRS-LXC mit OnlyOffice-Verbindung …"
+  pct exec "$CTID" -- mkdir -p /etc/drs
+  pct exec "$CTID" -- bash -c "echo -n '$OO_JWT_SECRET' > /etc/drs/onlyoffice.jwt && chmod 0640 /etc/drs/onlyoffice.jwt"
+  pct exec "$CTID" -- bash -c "echo 'ONLYOFFICE_HOST=${OO_CT_IP}:80' > /etc/caddy/onlyoffice.env"
+  pct exec "$CTID" -- bash -c "echo 'ONLYOFFICE_URL=http://${OO_CT_IP}' >> /etc/drs/onlyoffice.env"
+  pct exec "$CTID" -- systemctl reload caddy || pct exec "$CTID" -- systemctl restart caddy
+  pct exec "$CTID" -- systemctl restart drs-api
+  ok "OnlyOffice eingebunden."
+fi
+
+
+
 cat <<EOF
 
 ${GRN}╔════════════════════════════════════════════════════════════╗
@@ -137,6 +209,7 @@ ${GRN}╔═══════════════════════�
   CT-ID:       $CTID
   Hostname:    $HOSTNAME
   IP:          $CT_IP
+$( [[ -n "$OO_CT_IP" ]] && echo "  OnlyOffice:  CT $OO_CTID @ $OO_CT_IP" )
 
   → Öffne im Browser:  http://$CT_IP/
      Die Seite führt dich durch die Anlage des ersten Admin-Accounts.
