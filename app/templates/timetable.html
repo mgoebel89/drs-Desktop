@@ -556,8 +556,14 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + '<label for="ls-picker">Lernsituation</label>'
     + '<select id="ls-picker"><option value="">— keine —</option></select>'
     + '<div id="aufgaben-list" style="margin-top:.6rem"></div>'
-    + '<button type="button" id="aufgaben-save"'
-    +   ' style="margin-top:.6rem;padding:6px 14px;background:#7B61FF;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px">Aufgaben speichern</button>'
+    + '<div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">'
+    +   '<button type="button" id="aufgaben-save"'
+    +     ' style="padding:6px 14px;background:#7B61FF;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px">Aufgaben speichern</button>'
+    +   '<button type="button" id="aufgaben-ws-student"'
+    +     ' style="padding:6px 12px;background:#1565c0;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px" title="Aus den markierten Aufgaben ein Arbeitsblatt erzeugen">📄 Schüler-AB</button>'
+    +   '<button type="button" id="aufgaben-ws-teacher"'
+    +     ' style="padding:6px 12px;background:#fff;color:#1565c0;border:1px solid #1565c0;border-radius:5px;cursor:pointer;font-size:12px" title="Lehrer-Version mit Lösungsskizzen">📋 Lehrer-AB</button>'
+    + '</div>'
     + '<span class="note-status" id="aufgaben-status">—</span>'
     + '</form>';
 
@@ -692,6 +698,40 @@ async function initAufgabenPicker(dateIso, kk, sk, bs) {
   };
 
   picker.addEventListener('change', () => reload(picker.value));
+
+  // Worksheet aus Auswahl erzeugen
+  const wsCreate = async (role) => {
+    const lsId = picker.value;
+    if (!lsId) { status.textContent = '✗ erst Lernsituation wählen'; return; }
+    const ids = Array.from(document.querySelectorAll('.auf-cb:checked'));
+    // Nummern aus den Labels ziehen (steht im <strong>-Element)
+    const nummern = ids.map(cb => {
+      const lbl = cb.parentElement.querySelector('strong');
+      const m = lbl ? lbl.textContent.match(/^(\d+)\./) : null;
+      return m ? m[1] : null;
+    }).filter(Boolean);
+    status.textContent = 'lege Arbeitsblatt an …';
+    try {
+      const form = new FormData();
+      form.append('role', role);
+      if (nummern.length) form.append('aufgabe_nummern', nummern.join(','));
+      const r = await fetch('/ls/' + lsId + '/worksheet', {
+        method: 'POST', body: form, redirect: 'follow',
+      });
+      if (r.redirected) {
+        window.location.href = r.url;
+      } else if (r.ok) {
+        status.textContent = '✓ angelegt';
+      } else {
+        status.textContent = '✗ Fehler (' + r.status + ')';
+      }
+    } catch (e) {
+      status.textContent = '✗ ' + e.message;
+    }
+  };
+  document.getElementById('aufgaben-ws-student').addEventListener('click', () => wsCreate('student'));
+  document.getElementById('aufgaben-ws-teacher').addEventListener('click', () => wsCreate('teacher'));
+
   saveBtn.addEventListener('click', async () => {
     const lsId = picker.value || null;
     const ids = Array.from(document.querySelectorAll('.auf-cb:checked'))

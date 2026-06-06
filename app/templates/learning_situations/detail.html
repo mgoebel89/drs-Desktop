@@ -20,6 +20,12 @@
     <button class="btn btn-sec" type="submit">Speichern</button>
   </form>
 
+  {% if request.query_params.get('ws_error') %}
+  <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.7rem 1rem;margin-top:.6rem">
+    Arbeitsblatt konnte nicht erzeugt werden: {{ request.query_params.get('ws_error').replace('+', ' ') }}
+  </div>
+  {% endif %}
+
   <div style="display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap">
     <a class="btn btn-sec" href="/ls/{{ ls.id }}/note">
       📝 Inhalts-MD ansehen {% if not has_note %}(noch leer){% endif %}
@@ -33,6 +39,26 @@
       🗑 Lernsituation löschen
     </a>
   </div>
+
+  {% if aufgaben %}
+  <div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap;
+              padding:.8rem 1rem;background:#f5f3ff;border-radius:6px">
+    <div style="flex:1">
+      <strong>Arbeitsblatt aus dieser Lernsituation erzeugen</strong>
+      <br><span class="muted" style="font-size:12px">
+        Direkt aus den Aufgaben — ohne KI-Generierung. Du landest sofort im Editor.
+      </span>
+    </div>
+    <form method="post" action="/ls/{{ ls.id }}/worksheet" style="display:inline">
+      <input type="hidden" name="role" value="student">
+      <button class="btn" type="submit">📄 Schüler-Version</button>
+    </form>
+    <form method="post" action="/ls/{{ ls.id }}/worksheet" style="display:inline">
+      <input type="hidden" name="role" value="teacher">
+      <button class="btn btn-sec" type="submit">📋 Lehrer-Version (mit Lösungen)</button>
+    </form>
+  </div>
+  {% endif %}
   <p class="muted" style="font-size:12px;margin-top:.6rem">
     Die Inhalts-MD pflegst du in <strong>Obsidian Desktop</strong> direkt im
     Vault (Datei <code>{{ ls.smb_folder_name }}.md</code>). Der Wizard liest

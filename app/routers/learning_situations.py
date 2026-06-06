@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.auth import audit, require_user
 from app.db import get_db
 from app.models import LearningSituation, User, Worksheet
-from app.services import aufgabe_sync, obsidian_writer, smb_client, wizard_helpers
+from app.services import aufgabe_sync, obsidian_writer, smb_client, wizard_helpers, worksheet_from_ls
 from app.templating import templates
 
 router = APIRouter()
@@ -124,6 +124,48 @@ async def ls_upload(
           detail=", ".join(saved), request=request)
     db.commit()
     return RedirectResponse(f"/ls/{ls.id}", status_code=303)
+
+
+@router.post("/ls/{ls_id}/worksheet")
+def ls_create_worksheet(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    role: str = Form("student"),
+    aufgabe_nummern: str = Form(""),
+):
+    """Erzeugt direkt aus der LS-MD ein Worksheet (ohne Wizard).
+    role: 'student' oder 'teacher'.
+    aufgabe_nummern: CSV von Nummern (optional) — wenn leer, alle Aufgaben."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    if role not in ("student", "teacher"):
+        raise HTTPException(400, "Ungültige Rolle")
+
+    nummer_filter: list[int] | None = None
+    if aufgabe_nummern.strip():
+        try:
+            nummer_filter = [int(n) for n in aufgabe_nummern.split(",") if n.strip()]
+        except ValueError:
+            raise HTTPException(400, "aufgabe_nummern muss eine Zahlenliste sein")
+
+    try:
+        ws = worksheet_from_ls.create_worksheet_from_ls(
+            db, user, ls, role=role, nummer_filter=nummer_filter,  # type: ignore[arg-type]
+        )
+    except ValueError as e:
+        # Z. B. keine MD, oder Schema v1
+        return RedirectResponse(
+            f"/ls/{ls_id}?ws_error={str(e).replace(' ', '+')}",
+            status_code=303,
+        )
+
+    audit(db, "worksheet_from_ls", actor=user, target=str(ws.id),
+          detail=f"role={role}, ls={ls_id}", request=request)
+    db.commit()
+    return RedirectResponse(f"/worksheets/{ws.id}", status_code=303)
 
 
 @router.get("/ls/{ls_id}/delete", response_class=HTMLResponse)
