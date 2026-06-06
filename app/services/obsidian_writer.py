@@ -526,7 +526,7 @@ def build_template_md_v2(ls: LearningSituation) -> str:
 
     buf.write("## 1. Lernsituationsbeschreibung\n\n")
     buf.write("### Szenario / Auftrag\n")
-    buf.write("<!-- Pflicht: berufstypischer Einstieg, „Du bist Mechatroniker:in im Unternehmen …" -->\n\n")
+    buf.write("<!-- Pflicht: berufstypischer Einstieg, z.B. 'Du bist Mechatroniker:in im Unternehmen ...' -->\n\n")
     buf.write("### Lernziele\n")
     buf.write("<!-- Pflicht: operationalisiert -->\n")
     buf.write("- Die SuS können …\n\n")
