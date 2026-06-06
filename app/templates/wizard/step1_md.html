@@ -35,7 +35,20 @@
     </form>
   </div>
 {% else %}
-  {% if missing %}
+  {% if schema < 2 %}
+  <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem;margin-bottom:1rem">
+    <strong>⚠ Altes MD-Schema (v1) erkannt.</strong>
+    <p style="margin:.4rem 0">
+      Aufgaben-Sync und Stundenplan-Zuordnung sind nur mit Schema v2 verfügbar.
+      Möchtest du die Vorlage mit dem neuen Schema überschreiben?
+      <em>Dabei gehen die alten Inhalte verloren</em> — sichere sie vorher in Obsidian.
+    </p>
+    <form method="post" action="/wizard/{{ ls.id }}/template"
+          onsubmit="return confirm('Wirklich überschreiben? Alte Inhalte gehen verloren.');">
+      <button class="btn btn-sec" type="submit">Schema v2 anlegen (überschreibt v1)</button>
+    </form>
+  </div>
+  {% elif missing %}
   <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:.8rem 1rem;margin-bottom:1rem">
     <strong>⚠ Fehlende Pflichtsektionen:</strong>
     {% for m in missing %}<code style="margin-left:.4rem">{{ m }}</code>{% endfor %}
@@ -46,7 +59,8 @@
   </div>
   {% else %}
   <div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;padding:.8rem 1rem;margin-bottom:1rem">
-    ✓ Alle Pflichtsektionen (Lernziele, Sachanalyse, Inhalt) vorhanden.
+    ✓ Schema v2, alle Pflichtsektionen vorhanden,
+    <strong>{{ aufgaben_count }}</strong> Aufgabe{% if aufgaben_count != 1 %}n{% endif %} erkannt.
   </div>
   {% endif %}
 

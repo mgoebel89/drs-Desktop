@@ -186,6 +186,59 @@ def delete_file(user: User, subpath: str) -> None:
         smbclient.remove(unc)
 
 
+def delete_folder_recursive(user: User, subpath: str) -> int:
+    """Löscht den Ordner subpath inkl. aller enthaltenen Dateien/Unterordner.
+    Liefert Anzahl der gelöschten Dateien. Idempotent (kein Fehler wenn weg)."""
+    cfg = load_config(user)
+    if not cfg:
+        raise RuntimeError("SMB nicht konfiguriert")
+    _register(cfg)
+    unc = cfg.unc(subpath)
+    if not smbpath.exists(unc):
+        return 0
+    deleted = 0
+
+    def _walk(curr_unc: str) -> None:
+        nonlocal deleted
+        for name in smbclient.listdir(curr_unc):
+            child = f"{curr_unc}\\{name}"
+            if smbpath.isdir(child):
+                _walk(child)
+                smbclient.rmdir(child)
+            else:
+                smbclient.remove(child)
+                deleted += 1
+
+    _walk(unc)
+    smbclient.rmdir(unc)
+    return deleted
+
+
+def count_files(user: User, subpath: str) -> int:
+    """Zählt Dateien im Ordner rekursiv (für Vorschau auf Bestätigungsseite)."""
+    cfg = load_config(user)
+    if not cfg:
+        return 0
+    _register(cfg)
+    unc = cfg.unc(subpath)
+    if not smbpath.exists(unc):
+        return 0
+    n = 0
+    def _walk(curr_unc: str) -> None:
+        nonlocal n
+        try:
+            for name in smbclient.listdir(curr_unc):
+                child = f"{curr_unc}\\{name}"
+                if smbpath.isdir(child):
+                    _walk(child)
+                else:
+                    n += 1
+        except Exception:
+            pass
+    _walk(unc)
+    return n
+
+
 def material_subpath(cfg: SmbConfig, ls_folder_name: str) -> str:
     """Relativ-Pfad zum LS-Material-Ordner innerhalb des Shares."""
     base = cfg.material_subpath.strip("/")

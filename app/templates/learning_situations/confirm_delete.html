@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Löschen: {{ ls.display_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1 style="color:#c62828">Lernsituation löschen</h1>
+  <p>Du bist dabei, <strong>{{ ls.display_name }}</strong> dauerhaft zu entfernen.</p>
+
+  <h2>Folgendes wird gelöscht</h2>
+  <ul style="line-height:1.7">
+    <li><strong>Datenbank-Eintrag</strong> der Lernsituation (ID {{ ls.id }}, Slug <code>{{ ls.slug }}</code>)</li>
+    {% if smb_configured and not smb_error %}
+      <li>
+        <strong>SMB-Material-Ordner</strong> <code>{{ ls.smb_folder_name }}</code>
+        mit allen enthaltenen Dateien
+        ({{ file_count }} Datei{% if file_count != 1 %}en{% endif %})
+      </li>
+      <li>
+        <strong>Obsidian-Vault-Notiz</strong>
+        {% if has_note %}<code>{{ ls.smb_folder_name }}.md</code>{% else %}(noch keine Notiz vorhanden){% endif %}
+      </li>
+    {% elif smb_error %}
+      <li style="color:#c62828">SMB-Zugriff fehlgeschlagen: {{ smb_error }} — Dateien werden NICHT gelöscht.</li>
+    {% else %}
+      <li class="muted">SMB nicht eingerichtet — es werden keine Dateien angefasst.</li>
+    {% endif %}
+  </ul>
+
+  <h2>Folgendes bleibt erhalten</h2>
+  <ul style="line-height:1.7">
+    {% if linked_worksheets %}
+      <li>
+        <strong>Verknüpfte Aufgabenblätter</strong> ({{ linked_worksheets|length }}):
+        {% for ws in linked_worksheets %}
+          <a href="/worksheets/{{ ws.id }}">{{ ws.title }}</a>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+        <br><span class="muted" style="font-size:12px">
+          Die LS-Verknüpfung wird gelöst; die Aufgabenblätter bleiben unverändert.
+        </span>
+      </li>
+    {% else %}
+      <li class="muted">Keine verknüpften Aufgabenblätter.</li>
+    {% endif %}
+    <li class="muted">Stundenplan-Notizen behalten Theme/Notizen, verlieren nur die LS-Bindung.</li>
+  </ul>
+
+  <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem;margin:1.4rem 0">
+    <strong>⚠ Diese Aktion kann nicht rückgängig gemacht werden.</strong>
+    Die Dateien auf dem OMV-Share sind danach endgültig gelöscht (kein Papierkorb).
+  </div>
+
+  <form method="post" action="/ls/{{ ls.id }}/delete">
+    <label style="display:flex;align-items:center;gap:.6rem;padding:.7rem 1rem;background:#fafafa;border-radius:6px;cursor:pointer">
+      <input type="checkbox" name="confirm" value="1" id="cb-confirm"
+             style="width:18px;height:18px" required
+             onchange="document.getElementById('btn-delete').disabled = !this.checked">
+      <span>Ich weiß, dass die Dateien auf dem OMV-Share unwiederbringlich gelöscht werden.</span>
+    </label>
+    <div style="display:flex;justify-content:space-between;margin-top:1.2rem">
+      <a class="btn btn-sec" href="/ls/{{ ls.id }}">← Abbrechen</a>
+      <button id="btn-delete" class="btn" type="submit" disabled
+              style="background:#c62828;border-color:#c62828">
+        Endgültig löschen
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

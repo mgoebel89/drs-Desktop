@@ -125,6 +125,35 @@ class LessonNote(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class LsAufgabe(Base):
+    """Aufgabe innerhalb einer Lernsituation. Quelle bleibt die Inhalts-MD;
+    diese Tabelle ist ein Index für Verknüpfungen + Anzeige."""
+    __tablename__ = "ls_aufgaben"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    learning_situation_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="CASCADE"), index=True
+    )
+    nummer: Mapped[int] = mapped_column(Integer)
+    titel: Mapped[str] = mapped_column(String(500), default="")
+    anchor: Mapped[str] = mapped_column(String(120), default="")
+    phasen: Mapped[str] = mapped_column(String(255), default="")  # CSV
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LessonNoteAufgabe(Base):
+    """M2M zwischen lesson_notes und ls_aufgaben."""
+    __tablename__ = "lesson_note_aufgaben"
+
+    lesson_note_id: Mapped[int] = mapped_column(
+        ForeignKey("lesson_notes.id", ondelete="CASCADE"), primary_key=True
+    )
+    ls_aufgabe_id: Mapped[int] = mapped_column(
+        ForeignKey("ls_aufgaben.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class LearningSituation(Base):
     """Didaktische Lernsituation. Spannt meist mehrere Blöcke über Wochen.
     Verknüpft mit lesson_notes und worksheets. Hat einen stabilen SMB-Ordner und

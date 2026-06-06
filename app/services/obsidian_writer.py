@@ -20,9 +20,27 @@ from app.models import LearningSituation, User
 from app.services import smb_client
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # neuer Default für neue Vorlagen
 OUTPUT_SECTION_HEADER = "## Erzeugte Materialien"
 WIZARD_BLOCK_PREFIX = "<!-- WIZARD-BLOCK"
+
+# Schema v2 — Pflichtsektionen (## und ###)
+V2_TOP_SECTIONS = {
+    "lernsituationsbeschreibung": ["1. lernsituationsbeschreibung",
+                                   "lernsituationsbeschreibung"],
+    "phasen": ["2. phasen der vollständigen handlung",
+               "phasen der vollständigen handlung",
+               "phasen der vollstaendigen handlung"],
+    "anmerkungen": ["3. anmerkungen", "anmerkungen"],
+}
+V2_BESCHREIBUNG_SUB = {
+    "szenario": ["szenario / auftrag", "szenario", "auftrag"],
+    "lernziele": ["lernziele"],
+    "vorwissen": ["vorwissen / anknüpfung", "vorwissen / anknuepfung",
+                  "vorwissen", "anknüpfung", "anknuepfung"],
+}
+PHASEN_NAMEN = ["informieren", "planen", "entscheiden",
+                "ausführen", "ausfuehren", "kontrollieren", "bewerten"]
 
 # Pflicht- und optionale Sektionen. Schlüssel = interner Name,
 # Wert = Liste akzeptierter Header-Texte (case-insensitive).
@@ -300,6 +318,235 @@ def append_output_block(
 
     write_note(user, ls, new_md)
     return md
+
+
+# ── Schema v2: Phasen der vollständigen Handlung ─────────────────────────
+
+def detect_schema_version(md: str) -> int:
+    """Liefert 1 oder 2. Liest Frontmatter, sonst Heuristik."""
+    fm, body = split_frontmatter(md)
+    v = fm.get("schema_version") if isinstance(fm, dict) else None
+    if isinstance(v, int) and v in (1, 2):
+        return v
+    # Heuristik: v2-Marker im Body suchen
+    for line in body.splitlines():
+        if line.startswith("## "):
+            norm = _normalize_header(line[3:])
+            if any(_normalize_header(s) == norm for s in V2_TOP_SECTIONS["phasen"]):
+                return 2
+    return 1
+
+
+def _parse_h2_sections(md: str) -> dict[str, tuple[int, int, str]]:
+    """Findet ## Sektionen. Liefert {key: (start_line, end_line, header)}.
+    end_line ist exklusiv (Anfang der nächsten Sektion oder EOF).
+    Erkennt nur Sektionen aus V2_TOP_SECTIONS (oder Output-Sektion ignoriert)."""
+    _, body = split_frontmatter(md)
+    lines = body.splitlines()
+    positions: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^##\s+(.+?)\s*$", line)
+        if m:
+            positions.append((i, m.group(1)))
+    positions.append((len(lines), ""))
+
+    catalog = V2_TOP_SECTIONS
+    result: dict[str, tuple[int, int, str]] = {}
+    for i in range(len(positions) - 1):
+        start, header = positions[i]
+        end, _ = positions[i + 1]
+        if not header:
+            continue
+        for key, accepted in catalog.items():
+            if any(_normalize_header(a) == _normalize_header(header) for a in accepted):
+                result[key] = (start, end, header)
+                break
+    # Body als Strings speichern wir nicht hier — wir liefern Indizes.
+    # Helfer-Caller braucht das body-Array. Geben es global ungespeichert raus:
+    result["__lines__"] = lines  # type: ignore
+    return result
+
+
+def parse_content_sections_v2(md: str) -> dict[str, str]:
+    """Liefert {key: text} für die Top-Sektionen und die Untersektionen
+    der Lernsituationsbeschreibung."""
+    sections = _parse_h2_sections(md)
+    lines: list[str] = sections.pop("__lines__")  # type: ignore
+    result: dict[str, str] = {}
+
+    for key, (start, end, _) in sections.items():
+        result[key] = "\n".join(lines[start + 1:end]).strip()
+
+    # Lernsituationsbeschreibung in Untersektionen auflösen
+    if "lernsituationsbeschreibung" in sections:
+        s, e, _ = sections["lernsituationsbeschreibung"]
+        sub_positions: list[tuple[int, str]] = []
+        for i in range(s + 1, e):
+            m = re.match(r"^###\s+(.+?)\s*$", lines[i])
+            if m:
+                sub_positions.append((i, m.group(1)))
+        sub_positions.append((e, ""))
+        for i in range(len(sub_positions) - 1):
+            s_start, header = sub_positions[i]
+            s_end, _ = sub_positions[i + 1]
+            for sub_key, accepted in V2_BESCHREIBUNG_SUB.items():
+                if any(_normalize_header(a) == _normalize_header(header) for a in accepted):
+                    result[sub_key] = "\n".join(lines[s_start + 1:s_end]).strip()
+                    break
+    return result
+
+
+def validate_pflicht_v2(md: str) -> dict[str, bool]:
+    """Liefert {key: vorhanden_und_nicht_leer} für v2-Pflichtsektionen."""
+    sec = parse_content_sections_v2(md)
+    aufgaben = parse_aufgaben(md)
+
+    def filled(text: str) -> bool:
+        stripped = re.sub(r"<!--.*?-->", "", text or "", flags=re.DOTALL).strip()
+        return bool(stripped)
+
+    return {
+        "szenario": filled(sec.get("szenario", "")),
+        "lernziele": filled(sec.get("lernziele", "")),
+        "vorwissen": filled(sec.get("vorwissen", "")),
+        "aufgaben_min_1": len(aufgaben) >= 1,
+    }
+
+
+def missing_pflicht_v2(md: str) -> list[str]:
+    val = validate_pflicht_v2(md)
+    labels = {
+        "szenario": "Szenario / Auftrag",
+        "lernziele": "Lernziele",
+        "vorwissen": "Vorwissen / Anknüpfung",
+        "aufgaben_min_1": "mindestens eine Aufgabe",
+    }
+    return [labels[k] for k, ok in val.items() if not ok]
+
+
+_AUFGABE_HEADER_RE = re.compile(r"^###\s+Aufgabe\s+(\d+)\s*[:\.\-–]\s*(.+?)\s*$",
+                                re.IGNORECASE)
+_PHASE_LINE_RE = re.compile(r"^[\*_]+\s*(?:Phasen?|Phase)\s*:[\*_]*\s*(.+?)\s*$",
+                            re.IGNORECASE)
+
+
+def parse_aufgaben(md: str) -> list[dict]:
+    """Findet alle ### Aufgabe N: Titel-Sektionen innerhalb von
+    '## 2. Phasen der vollständigen Handlung'. Liefert Liste mit
+    {nummer, titel, anchor, phasen (list[str]), body, loesungsskizze}."""
+    sections = _parse_h2_sections(md)
+    lines: list[str] = sections.pop("__lines__")  # type: ignore
+    if "phasen" not in sections:
+        return []
+    start, end, _ = sections["phasen"]
+
+    # Aufgaben-Headers in diesem Bereich
+    headers: list[tuple[int, int, str]] = []  # (line_idx, nummer, titel)
+    for i in range(start + 1, end):
+        m = _AUFGABE_HEADER_RE.match(lines[i])
+        if m:
+            try:
+                nummer = int(m.group(1))
+            except ValueError:
+                continue
+            titel = m.group(2).strip()
+            headers.append((i, nummer, titel))
+    headers.append((end, -1, ""))  # Sentinel
+
+    out: list[dict] = []
+    for i in range(len(headers) - 1):
+        h_line, nummer, titel = headers[i]
+        next_line, _, _ = headers[i + 1]
+        block_lines = lines[h_line + 1:next_line]
+
+        # Phasen-Zeile suchen (erste nicht-leere Zeile)
+        phasen: list[str] = []
+        body_start = 0
+        for j, ln in enumerate(block_lines):
+            if not ln.strip():
+                continue
+            pm = _PHASE_LINE_RE.match(ln)
+            if pm:
+                raw = pm.group(1)
+                # Tags aufsplitten an Komma/Slash
+                parts = re.split(r"[,/]", raw)
+                for p in parts:
+                    pn = _normalize_header(p)
+                    if pn in PHASEN_NAMEN:
+                        # nett-formatiert zurück: Capitalized original
+                        phasen.append(p.strip().title())
+                body_start = j + 1
+            break
+
+        # Lösungsskizze (#### Lösungsskizze) im Block
+        body_chunk = block_lines[body_start:]
+        loesungsskizze = ""
+        body = "\n".join(body_chunk).strip()
+        for j, ln in enumerate(body_chunk):
+            m = re.match(r"^####\s+(.+?)\s*$", ln)
+            if m and _normalize_header(m.group(1)) in (
+                _normalize_header("Lösungsskizze"),
+                _normalize_header("Loesungsskizze"),
+            ):
+                body = "\n".join(body_chunk[:j]).strip()
+                loesungsskizze = "\n".join(body_chunk[j + 1:]).strip()
+                break
+
+        anchor = f"aufgabe-{nummer}"
+        out.append({
+            "nummer": nummer,
+            "titel": titel,
+            "anchor": anchor,
+            "phasen": phasen,
+            "body": body,
+            "loesungsskizze": loesungsskizze,
+        })
+    out.sort(key=lambda a: a["nummer"])
+    return out
+
+
+def build_template_md_v2(ls: LearningSituation) -> str:
+    """Schema-v2-Skeleton mit Frontmatter + Pflicht-Sektionen + 1 Beispiel-Aufgabe."""
+    fm = {
+        "ls_id": ls.id,
+        "slug": ls.slug,
+        "display_name": ls.display_name,
+        "klasse": ls.klassen_key or "",
+        "lernfeld": ls.lernfeld or "",
+        "created": (ls.created_at.date().isoformat()
+                    if ls.created_at else datetime.utcnow().date().isoformat()),
+        "updated": datetime.utcnow().date().isoformat(),
+        "schema_version": 2,
+    }
+    buf = io.StringIO()
+    buf.write("---\n")
+    buf.write(yaml.safe_dump(fm, allow_unicode=True, sort_keys=False))
+    buf.write("---\n\n")
+    buf.write(f"# {ls.display_name}\n\n")
+
+    buf.write("## 1. Lernsituationsbeschreibung\n\n")
+    buf.write("### Szenario / Auftrag\n")
+    buf.write("<!-- Pflicht: berufstypischer Einstieg, „Du bist Mechatroniker:in im Unternehmen …" -->\n\n")
+    buf.write("### Lernziele\n")
+    buf.write("<!-- Pflicht: operationalisiert -->\n")
+    buf.write("- Die SuS können …\n\n")
+    buf.write("### Vorwissen / Anknüpfung\n")
+    buf.write("<!-- Pflicht: was bringen die SuS mit, was ist noch neu -->\n\n")
+
+    buf.write("## 2. Phasen der vollständigen Handlung\n\n")
+    buf.write("### Aufgabe 1: Titel\n")
+    buf.write("*Phasen:* Informieren, Planen\n\n")
+    buf.write("<!-- Auftragstext im Imperativ, Material, Sozialform -->\n\n")
+    buf.write("#### Lösungsskizze\n")
+    buf.write("<!-- Erwartungshorizont, typische Fehler -->\n\n")
+
+    buf.write("## 3. Anmerkungen\n")
+    buf.write("<!-- optional: Erfahrungen aus dem Lauf, Material-Tipps -->\n\n")
+
+    buf.write("---\n\n")
+    buf.write(f"{OUTPUT_SECTION_HEADER}\n\n")
+    buf.write("*Vom Wizard automatisch befüllt — pro Generierung ein Block.*\n")
+    return buf.getvalue()
 
 
 def content_md_body(md: str) -> str:

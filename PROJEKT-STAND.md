@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-06-05 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-06-06 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -36,11 +36,15 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 | „Letzte Stunde"-Block im Panel | ✓ | Vorige Notiz mit Markdown/LaTeX-Rendering |
 | LXC-Installer + drs-update | ✓ | Proxmox-Helper-Script-Style, idempotent, alembic-Migrationen |
 | **Lernsituationen + Wizard v2** | ✓ | 4-stufig auf Basis Inhalts-MD im Obsidian-Vault. 9 Material-Typen, Dual-Prompt (Fobizz + Claude-Pro) |
+| **LS-Hard-Delete** | ✓ | Bestätigungsseite mit Auswirkungs-Übersicht, löscht DB + SMB-Ordner + Vault-MD |
+| **MD-Schema v2** | ✓ | Lernsituationsbeschreibung + Phasen der vollständigen Handlung mit Aufgaben + Anmerkungen. v1 bleibt lesbar |
+| **Aufgaben-Sync (DB ⇄ MD)** | ✓ | `ls_aufgaben`-Tabelle als Index, MD ist Quelle. Stale-Aufgaben werden automatisch aus DB entfernt |
+| **Stundenplan-Aufgaben-Picker** | ✓ | Pro Block: LS auswählen, Aufgaben ankreuzen. Lösungsskizzen direkt im Panel sichtbar. Grid-Pille „Aufg. N, M" |
 | **SMB-Material-Share** | ✓ | OMV-Share pro Nutzer, smbprotocol-Client, Upload + Vorschau |
 | **OnlyOffice Office-Vorschau** | ✓ | Separater LXC CT 501, JWT-gesichert, Iframe-Editor (View-Mode) |
 | **Obsidian-Vault-Schreiber** | ✓ | Pro LS eine .md im Vault, YAML-Frontmatter, App-Read-Only-Anzeige (KaTeX + Mermaid) |
 
-### Datenmodell (SQLite, Stand Migration 0010)
+### Datenmodell (SQLite, Stand Migration 0011)
 
 - `users` — jetzt zusätzlich `smb_creds_enc` (AES-GCM)
 - `user_sessions`, `audit_log`
@@ -51,6 +55,8 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 - `lesson_notes` — Key: `user_id, lesson_date, klassen_key, subjects_key, block_start`; jetzt `learning_situation_id` FK
 - `lesson_series_overrides` — Reihen-Fachname pro `user_id, klassen_key, subjects_key`
 - **`learning_situations`** — `id, user_id, slug, display_name, klassen_key, lernfeld, smb_folder_name, obsidian_note_path, lernziele, vorwissen, last_fobizz_prompt, last_fobizz_output, last_material_type, last_extras, content_md_present, created_at, updated_at`. Slug unique pro User, `smb_folder_name` stabil (`LS-{id:04d}_{slug}`). `lernziele/vorwissen` deprecated (Wizard v1) — Inhalt lebt jetzt in der Inhalts-MD im Vault.
+- **`ls_aufgaben`** — `id, learning_situation_id, nummer, titel, anchor, phasen, updated_at`. Unique `(ls_id, nummer)`. **Index** der Aufgaben aus der Inhalts-MD (Quelle bleibt die MD), für Stundenplan-Verknüpfung. Sync via `app/services/aufgabe_sync.py`.
+- **`lesson_note_aufgaben`** — M2M zwischen `lesson_notes` und `ls_aufgaben`. ON DELETE CASCADE auf beiden Seiten — gelöschte/umbenannte Aufgaben fliegen automatisch aus den Block-Zuordnungen.
 
 ---
 
@@ -160,7 +166,7 @@ drs-lxc/
     ├── main.py
     ├── config.py, db.py, models.py, crypto.py, auth.py, branding.py, cli.py
     ├── templating.py                  # geteilte Jinja-Instanz mit school_name() Global
-    ├── alembic/versions/0001–0010_*.py
+    ├── alembic/versions/0001–0011_*.py
     ├── routers/
     │   ├── auth.py, setup.py, users.py, profile.py     # profile.py: + SMB-Block
     │   ├── worksheets.py, settings.py, help.py, timetable.py
@@ -174,7 +180,8 @@ drs-lxc/
     │   ├── ical_client.py
     │   ├── smb_client.py              # smbprotocol-basiert, pro Nutzer
     │   ├── onlyoffice_client.py       # JWT-Signer + In-Memory-Filetoken
-    │   ├── obsidian_writer.py         # Schema v1, Template-Builder, Section-Parser, Output-Append
+    │   ├── obsidian_writer.py         # Schema v1+v2, Template-Builder, Aufgaben-Parser, Output-Append
+    │   ├── aufgabe_sync.py            # MD-Aufgaben ⇄ DB-Tabelle ls_aufgaben (idempotent)
     │   ├── material_prompts.py        # 9-Typen-Katalog + Dual-Prompt-Builder (Fobizz + Claude)
     │   └── wizard_helpers.py          # Slug, Folder-Name (übrig nach Refactor)
     ├── static/{drs.css, default_school_logo.jpg}
@@ -183,7 +190,7 @@ drs-lxc/
         ├── login.html, change_password.html, home.html, setup.html
         ├── profile.html, help.html, timetable.html, timetable_diagnose.html
         ├── preview.html, obsidian_note.html
-        ├── learning_situations/{list.html, detail.html}
+        ├── learning_situations/{list.html, detail.html, confirm_delete.html}
         ├── wizard/{_layout.html, start.html, step1_md.html, step2_typ.html, step3_prompt.html, step4_output.html, done.html}
         ├── admin/{users.html, settings.html}
         └── worksheets/{list.html, editor.html, revisions.html, export.html}
@@ -209,6 +216,7 @@ Login: **`mgoebel`** (Admin)
 
 | Commit | Was |
 |---|---|
+| _pending_ | **MD-Schema v2 + LS-Delete + Aufgaben-Stundenplan**: Pflichtsektionen, Aufgaben mit Phasen-Tags + Lösungsskizzen, DB-Sync, Block-Picker mit Lösungsanzeige, Grid-Pille. Migration 0011. |
 | _pending_ | **Wizard v2**: Inhalts-MD im Vault, 4 Schritte, 9 Material-Typen, Dual-Prompt (Fobizz + Claude), Worksheet-Übernahme. Migration 0010. |
 | _pending_ | Phase 6+7: Wizard-Flow + Fobizz-Agent-Systemprompt |
 | _pending_ | Phase 5: Obsidian-Writer + Read-Only-Anzeige |
@@ -224,8 +232,10 @@ Login: **`mgoebel`** (Admin)
 | `0e08cf1` | Fach-Override (Reihe + Sitzung) + Prüfung |
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (Migration
-0008 + 0009), Profil → SMB-Zugang eintragen, ggf. OnlyOffice-LXC anlegen
-(Installer-Pfad), Wizard testen.
+0008–0011), Profil → SMB-Zugang eintragen, ggf. OnlyOffice-LXC anlegen
+(Installer-Pfad), Wizard testen. Bestehende v1-LS bleiben funktional —
+beim Öffnen im Wizard bietet die App eine Schema-v2-Vorlage (überschreibt
+v1 — vorher Inhalte sichern).
 
 ---
 

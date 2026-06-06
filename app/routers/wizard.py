@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.auth import audit, require_user
 from app.db import get_db
 from app.models import LearningSituation, User, Worksheet, WorksheetRevision
-from app.services import material_prompts, obsidian_writer, smb_client, wizard_helpers
+from app.services import aufgabe_sync, material_prompts, obsidian_writer, smb_client, wizard_helpers
 from app.templating import templates
 
 router = APIRouter()
@@ -107,11 +107,18 @@ def wizard_create_template(
     cfg = smb_client.load_config(user)
     if not cfg:
         raise HTTPException(400, "SMB nicht konfiguriert")
-    md = obsidian_writer.build_template_md(ls)
+    md = obsidian_writer.build_template_md_v2(ls)
     obsidian_writer.write_note(user, ls, md)
     ls.content_md_present = True
-    audit(db, "wizard_template_created", actor=user, target=str(ls.id), request=request)
+    audit(db, "wizard_template_created", actor=user, target=str(ls.id),
+          detail="schema v2", request=request)
     db.commit()
+    # Aufgaben-Sync (initial leer, aber konsistent)
+    try:
+        aufgabe_sync.sync_from_md(db, user, ls)
+        db.commit()
+    except Exception:
+        pass
     return RedirectResponse(f"/wizard/{ls_id}/step/1?vorlage=1", status_code=303)
 
 
@@ -134,12 +141,20 @@ def wizard_step(
         missing: list[str] = []
         md_body = ""
         smb_error = ""
+        schema = 2
+        aufgaben_count = 0
         if cfg:
             try:
                 raw = obsidian_writer.read_note(user, ls)
                 md_present = bool(raw.strip())
                 if md_present:
-                    missing = obsidian_writer.missing_pflicht(raw)
+                    schema = obsidian_writer.detect_schema_version(raw)
+                    if schema >= 2:
+                        missing = obsidian_writer.missing_pflicht_v2(raw)
+                        aufgaben = obsidian_writer.parse_aufgaben(raw)
+                        aufgaben_count = len(aufgaben)
+                    else:
+                        missing = obsidian_writer.missing_pflicht(raw)
                     md_body = obsidian_writer.content_md_body(raw)
             except Exception as e:
                 smb_error = str(e)
@@ -147,11 +162,20 @@ def wizard_step(
         if ls.content_md_present != md_present:
             ls.content_md_present = md_present
             db.commit()
+        # Aufgaben in DB syncen (best-effort)
+        if md_present and schema >= 2:
+            try:
+                aufgabe_sync.sync_from_md(db, user, ls)
+                db.commit()
+            except Exception:
+                pass
         ctx.update({
             "md_present": md_present,
             "missing": missing,
             "md_body": md_body,
             "smb_error": smb_error,
+            "schema": schema,
+            "aufgaben_count": aufgaben_count,
             "vorlage_flash": request.query_params.get("vorlage") == "1",
         })
         return templates.TemplateResponse(request, "wizard/step1_md.html", ctx)

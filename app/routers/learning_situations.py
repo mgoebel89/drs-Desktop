@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import LearningSituation, User
-from app.services import obsidian_writer, smb_client, wizard_helpers
+from app.models import LearningSituation, User, Worksheet
+from app.services import aufgabe_sync, obsidian_writer, smb_client, wizard_helpers
 from app.templating import templates
 
 router = APIRouter()
@@ -54,12 +56,22 @@ def ls_detail(
         except Exception as e:
             smb_error = str(e)
     has_note = bool(obsidian_writer.read_note(user, ls)) if cfg else False
+
+    aufgaben = []
+    if cfg and has_note:
+        try:
+            aufgaben = aufgabe_sync.sync_from_md(db, user, ls)
+            db.commit()
+        except Exception:
+            db.rollback()
+
     return templates.TemplateResponse(request, "learning_situations/detail.html", {
         "ls": ls,
         "files": files,
         "smb_configured": bool(cfg),
         "smb_error": smb_error,
         "has_note": has_note,
+        "aufgaben": aufgaben,
     })
 
 
@@ -112,6 +124,90 @@ async def ls_upload(
           detail=", ".join(saved), request=request)
     db.commit()
     return RedirectResponse(f"/ls/{ls.id}", status_code=303)
+
+
+@router.get("/ls/{ls_id}/delete", response_class=HTMLResponse)
+def ls_delete_confirm(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    cfg = smb_client.load_config(user)
+
+    file_count = 0
+    smb_error = ""
+    has_note = False
+    if cfg:
+        try:
+            file_count = smb_client.count_files(
+                user, smb_client.material_subpath(cfg, ls.smb_folder_name))
+        except Exception as e:
+            smb_error = str(e)
+        try:
+            has_note = bool(obsidian_writer.read_note(user, ls))
+        except Exception:
+            pass
+
+    linked_worksheets = db.scalars(
+        select(Worksheet).where(Worksheet.learning_situation_id == ls.id)
+    ).all()
+
+    return templates.TemplateResponse(request, "learning_situations/confirm_delete.html", {
+        "ls": ls,
+        "file_count": file_count,
+        "has_note": has_note,
+        "smb_error": smb_error,
+        "smb_configured": bool(cfg),
+        "linked_worksheets": linked_worksheets,
+    })
+
+
+@router.post("/ls/{ls_id}/delete")
+def ls_delete_exec(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    confirm: str = Form(""),
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    if confirm != "1":
+        raise HTTPException(400, "Bestätigungs-Checkbox nicht gesetzt")
+
+    display_name = ls.display_name
+    folder = ls.smb_folder_name
+    cfg = smb_client.load_config(user)
+
+    smb_errors: list[str] = []
+    deleted_files = 0
+    if cfg:
+        # 1) Material-Ordner rekursiv löschen
+        try:
+            deleted_files = smb_client.delete_folder_recursive(
+                user, smb_client.material_subpath(cfg, ls.smb_folder_name))
+        except Exception as e:
+            smb_errors.append(f"Material-Ordner: {e}")
+        # 2) Vault-MD löschen
+        try:
+            smb_client.delete_file(
+                user, smb_client.vault_subpath(cfg, obsidian_writer.note_filename(ls)))
+        except Exception as e:
+            smb_errors.append(f"Vault-MD: {e}")
+
+    # 3) DB löschen — FKs in worksheets/lesson_notes sind ON DELETE SET NULL
+    db.delete(ls)
+    audit(db, "ls_deleted", actor=user, target=str(ls_id),
+          detail=f"{display_name} · {folder} · {deleted_files} Datei(en)"
+                 + (f" · Fehler: {'; '.join(smb_errors)}" if smb_errors else ""),
+          request=request)
+    db.commit()
+    return RedirectResponse("/learning-situations", status_code=303)
 
 
 @router.post("/ls/{ls_id}/files/{filename}/delete")

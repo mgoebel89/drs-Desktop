@@ -27,12 +27,40 @@
     <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/1">
       🧙 Wizard fortsetzen
     </a>
+    <div style="flex:1"></div>
+    <a class="btn btn-sec" href="/ls/{{ ls.id }}/delete"
+       style="color:#c62828;border-color:#c62828">
+      🗑 Lernsituation löschen
+    </a>
   </div>
   <p class="muted" style="font-size:12px;margin-top:.6rem">
     Die Inhalts-MD pflegst du in <strong>Obsidian Desktop</strong> direkt im
     Vault (Datei <code>{{ ls.smb_folder_name }}.md</code>). Der Wizard liest
     sie als Quelle für die Material-Generierung.
   </p>
+
+  {% if aufgaben %}
+  <h2 style="margin-top:1.6rem">Aufgaben aus der Inhalts-MD</h2>
+  <table>
+    <thead><tr><th style="width:60px">Nr</th><th>Titel</th><th>Phasen</th></tr></thead>
+    <tbody>
+    {% for a in aufgaben %}
+    <tr>
+      <td><strong>{{ a.nummer }}</strong></td>
+      <td>{{ a.titel }}
+        <br><span class="muted" style="font-size:11px"><code>#{{ a.anchor }}</code></span></td>
+      <td>
+        {% if a.phasen %}
+          {% for p in a.phasen.split(',') %}
+            <span style="display:inline-block;padding:1px 7px;background:#e8eaff;border-radius:10px;font-size:11px;margin-right:.2rem">{{ p.strip() }}</span>
+          {% endfor %}
+        {% else %}<span class="muted" style="font-size:11px">—</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   <h2 style="margin-top:1.6rem">Materialien</h2>
   {% if not smb_configured %}

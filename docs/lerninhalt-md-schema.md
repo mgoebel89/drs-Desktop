@@ -1,17 +1,20 @@
 # Schema: Inhalts-Markdown pro Lernsituation
 
 Pro Lernsituation eine `.md` im Obsidian-Vault. Diese Datei ist die
-**Quelle** für den Wizard: der Lehrer pflegt sie in Obsidian, der Wizard
-liest sie und erzeugt daraus Unterrichtsmaterialien (Arbeitsblatt,
-Lösungsblatt, Tafelbild, …).
+**Quelle** für den Wizard und für die Stundenplan-Aufgaben-Zuordnung:
+der Lehrer pflegt sie in Obsidian, App und Wizard lesen sie.
 
 Pfad im Vault:
 `<vault_subpath>/<smb_folder_name>.md`
 Beispiel: `vault/LS-0042_hydraulik-grundlagen.md`
 
+**Aktuelles Schema: v2.** Schema v1 (alte Sektionsliste) bleibt lesbar,
+neue Vorlagen werden aber als v2 angelegt. Aufgaben-Sync und
+Stundenplan-Zuordnung funktionieren nur mit v2.
+
 ---
 
-## Aufbau
+## Aufbau (v2)
 
 ```markdown
 ---
@@ -21,102 +24,138 @@ display_name: Hydraulik Grundlagen
 klasse: MTA22
 lernfeld: LF07
 created: 2026-06-05
-updated: 2026-06-05
-schema_version: 1
+updated: 2026-06-06
+schema_version: 2
 ---
 
 # Hydraulik Grundlagen
 
-## Lernziele
+## 1. Lernsituationsbeschreibung
+
+### Szenario / Auftrag
+„Du bist Mechatroniker:in im Werk Süd. Die Hydraulikpresse Nr. 7 …"
+
+### Lernziele
 - Die SuS können die hydraulische Grundgleichung anwenden.
 - Die SuS unterscheiden Volumenstrom, Druck und Kraft.
-- …
 
-## Sachanalyse
-Der fachliche Kern in eigenen Worten. Welche Begriffe stehen im Zentrum?
-Welche Zusammenhänge sind tragend? Welche typischen Fehlvorstellungen
-hast du bei deinen SuS schon erlebt?
+### Vorwissen / Anknüpfung
+Druck und Kraft aus LF03 bekannt. Hydraulikschaltzeichen noch nicht
+eingeführt.
 
-## Inhalt
-Was wird konkret unterrichtet? Stoffabfolge, Kernbeispiele, ggf. eine
-kleine Schaltzeichnung (Mermaid oder ASCII) oder Tafelbild-Skizze.
+## 2. Phasen der vollständigen Handlung
 
-## Vorwissen / Anknüpfung
-Was bringen die SuS aus LF03/LF05 mit? Was haben wir letzte Woche
-gemacht? Optional.
+### Aufgabe 1: Pumpe identifizieren
+*Phasen:* Informieren, Planen
 
-## Didaktischer Schwerpunkt
-Methodische Wahl (Stationenlernen? Erkundungs-Phase? Lehrer-Demo?),
-Phasierung, geplante Sozialformen. Optional.
+Auftragstext im Imperativ. Material: Datenblätter. Sozialform: Partner.
 
-## Aufgabenideen
-Stichpunkte oder ausformulierte Aufgaben-Drafts mit kurzem
-Erwartungshorizont. Wenn du schon konkrete Ideen hast, schreibe sie hier
-auf — der Wizard nutzt sie. Optional.
+#### Lösungsskizze
+Pumpe ist eine Zahnradpumpe. Typische Fehler: Verwechslung mit
+Kreiselpumpe.
 
-## Materialhinweise
-Realbauteile, Simulationen, Software, Werkzeuge, ggf. Datenblätter.
-Optional.
+### Aufgabe 2: Schaltung aufbauen
+*Phasen:* Ausführen
 
-## Quellen
-Lehrwerke, DIN-Normen, Hersteller-Datenblätter, Lehrplan-Bezug.
-Optional.
+…
+
+#### Lösungsskizze
+…
+
+### Aufgabe 3: Funktion prüfen
+*Phasen:* Kontrollieren, Bewerten
+
+…
+
+#### Lösungsskizze
+…
+
+## 3. Anmerkungen
+Freier Notizblock — Erfahrungen aus dem Lauf, Material-Tipps für die
+nächste Klasse, was beim nächsten Mal anders.
 
 ---
 
 ## Erzeugte Materialien
+*Vom Wizard automatisch befüllt — pro Generierung ein Block.*
 
-*Vom Wizard automatisch befüllt — pro Generierung ein Block. Bitte
-nicht von Hand bearbeiten, lieber im Wizard neu erzeugen.*
-
-<!-- WIZARD-BLOCK · 2026-06-05 14:23 · Arbeitsblatt -->
-… (vom Wizard eingefügter Output)
-
-<!-- WIZARD-BLOCK · 2026-06-05 14:45 · Lösungsblatt -->
-… (vom Wizard eingefügter Output)
+<!-- WIZARD-BLOCK · 2026-06-06 10:15 · Arbeitsblatt -->
+…
 ```
 
 ---
 
-## Sektions-Regeln
+## Pflichtsektionen
 
-### Pflicht-Sektionen
+Folgende Sektionen müssen vorhanden und befüllt sein:
 
-Folgende `## …`-Überschriften müssen vorhanden und befüllt sein (nicht
-nur Kommentare):
+- `## 1. Lernsituationsbeschreibung`
+  - `### Szenario / Auftrag`
+  - `### Lernziele`
+  - `### Vorwissen / Anknüpfung`
+- `## 2. Phasen der vollständigen Handlung`
+  - **mindestens eine** `### Aufgabe N: <Titel>`
+- `## 3. Anmerkungen` *darf leer sein*
 
-- **Lernziele**
-- **Sachanalyse**
-- **Inhalt**
+Fehlen welche, zeigt der Wizard ein gelbes Banner. Die Generierung läuft
+trotzdem; das Ergebnis wird aber dünner.
 
-Fehlen sie, warnt der Wizard mit gelbem Banner — die Generierung läuft
-trotzdem, aber das Ergebnis wird thin.
+---
 
-### Optionale Sektionen
+## Aufgaben-Sektion im Detail
 
-- **Vorwissen / Anknüpfung**
-- **Didaktischer Schwerpunkt**
-- **Aufgabenideen**
-- **Materialhinweise**
-- **Quellen**
+### Header-Format
+`### Aufgabe N: <Titel>` — `N` als Zahl, Titel frei.
 
-### Reihenfolge
+Aus dem Header wird automatisch:
+- **Nummer** (für DB-Identität + Stundenplan-Anzeige „Aufg. 2, 3")
+- **Anker** `aufgabe-N` (für Deep-Links)
+- **Titel** (für Übersicht)
 
-Sektionen dürfen in beliebiger Reihenfolge stehen, der Parser sucht nach
-Header-Text (case-insensitive, „/" und Umlaute toleriert).
+### Phasen-Tag (optional)
+Direkt unter dem Aufgabenheader:
 
-### Output-Sektion
-
-`## Erzeugte Materialien` wird vom Wizard angelegt, falls noch nicht da.
-Pro Generierung hängt der Wizard einen Block der Form
-
-```
-<!-- WIZARD-BLOCK · YYYY-MM-DD HH:MM · <Typ> -->
-<Output>
+```markdown
+*Phasen:* Informieren, Planen
 ```
 
-ans Ende an. Diese Blöcke kannst du bedenkenlos löschen — die Inhalts-
-Sektionen oben bleiben unberührt.
+Erkannt wird auch: `*Phase:*`, `_Phasen:_`, mit/ohne Bold-Sterne.
+Erlaubte Phasen (vollständige Handlung):
+
+> Informieren · Planen · Entscheiden · Ausführen · Kontrollieren · Bewerten
+
+Die Phasen werden im LS-Detail als Pillen angezeigt und im
+Aufgaben-Picker des Stundenplans neben dem Titel sichtbar.
+
+### Lösungsskizze pro Aufgabe
+`#### Lösungsskizze` direkt unter der Aufgabe.
+
+Wird beim Aufgaben-Parse als separates Feld erfasst und im
+Stundenplan-Picker als ausklappbarer Bereich angezeigt — du siehst die
+Lösung im Block ohne Obsidian-Wechsel.
+
+---
+
+## Aufgaben ↔ Stundenplan
+
+Im Stundenplan-Panel jedes Blocks gibt es **„Aufgaben aus
+Lernsituation"**:
+
+1. Lernsituation auswählen (vorgefiltert auf passende Klasse).
+2. Aufgaben per Checkbox auswählen.
+3. Speichern.
+
+Im Grid erscheint im betreffenden Block eine kleine Pille `Aufg. 2, 3`.
+
+Die DB-Tabelle `ls_aufgaben` ist nur ein **Index** — die Wahrheit ist
+die MD. Wenn du in Obsidian Aufgabe 3 löschst oder umbenennst, sync't
+die App das automatisch beim nächsten Öffnen:
+
+- Neue Aufgaben in der MD → erscheinen im Picker.
+- Gelöschte Aufgaben in der MD → werden auch aus den Stundenplan-
+  Verknüpfungen entfernt (CASCADE).
+- Vertauschte Nummern → Wizard hält die DB-Identität an der **Nummer**
+  fest; bestehende Stundenplan-Verknüpfungen folgen der Nummer.
 
 ---
 
@@ -124,39 +163,65 @@ Sektionen oben bleiben unberührt.
 
 | Feld           | Pflicht | Beschreibung |
 |---|---|---|
-| `ls_id`        | ja      | Datenbank-ID, vom Wizard gesetzt |
+| `ls_id`        | ja      | DB-ID, vom Wizard gesetzt |
 | `slug`         | ja      | URL-Slug, immutable |
-| `display_name` | ja      | Anzeigename — wird vom Wizard bei Rename aktualisiert |
+| `display_name` | ja      | Anzeigename, vom Wizard bei Rename aktualisiert |
 | `klasse`       | nein    | z. B. `MTA22` |
 | `lernfeld`     | nein    | z. B. `LF07` |
 | `created`      | ja      | Anlegedatum |
 | `updated`      | ja      | Letzte Wizard-Berührung |
-| `schema_version` | ja    | aktuell `1` |
+| `schema_version` | ja    | aktuell `2` |
 
-Felder, die du selbst ergänzen willst (z. B. `tags`, `kapitel`,
-`pruefungsrelevant`), werden vom Parser ignoriert und überschrieben nicht.
+Eigene Felder (z. B. `tags`, `pruefungsrelevant`) werden ignoriert und
+nicht überschrieben.
 
 ---
 
 ## Mermaid und LaTeX
 
-Beides ist erlaubt — Obsidian und die App rendern es:
+Beides erlaubt — Obsidian und die App rendern es:
 
 ```markdown
 $$F = p \cdot A$$
+```
 
+````markdown
 ```mermaid
 graph LR
   Pumpe --> Steuerventil --> Zylinder
 ```
-```
+````
 
 ---
 
 ## Vorlage anlegen
 
-Im Wizard Schritt 1 gibt es den Button **„Vorlage in Obsidian anlegen"**.
-Der Wizard schreibt das Skeleton (Frontmatter + leere Sektionen + Beispiel-
-Kommentare) in den Vault. Danach öffne die Datei in Obsidian Desktop und
-befülle die Pflichtsektionen — zurück im Wizard zeigt das Validierungs-
-Banner dann grün.
+Im Wizard Schritt 1 gibt es den Button **„Vorlage in Obsidian
+anlegen"**. Der Wizard schreibt das v2-Skeleton (Frontmatter +
+Pflichtsektionen + 1 Beispiel-Aufgabe + Hilfekommentare) in den Vault.
+Danach in Obsidian Desktop öffnen und befüllen.
+
+---
+
+## Anhang: Schema v1 (Legacy)
+
+Bis Juni 2026 wurde Schema v1 verwendet:
+
+```markdown
+## Lernziele
+## Sachanalyse
+## Inhalt
+## Vorwissen / Anknüpfung
+## Didaktischer Schwerpunkt
+## Aufgabenideen
+## Materialhinweise
+## Quellen
+```
+
+v1-LS bleiben funktionsfähig — der Wizard generiert Material-Prompts
+auch aus v1-Inhalten. **Aufgaben-Sync und Stundenplan-Zuordnung
+funktionieren aber nur mit v2.**
+
+Im Wizard Schritt 1 bietet die App bei v1-LS einen Button
+„Schema v2 anlegen (überschreibt v1)". Vorher die alten Inhalte in
+Obsidian sichern.

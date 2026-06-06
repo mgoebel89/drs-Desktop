@@ -10,8 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_user
 from app.db import get_db
-from app.models import IcalCalendar, LessonNote, LessonSeriesOverride, User
-from app.services import ical_client, webuntis_client
+from app.models import (
+    IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
+    LessonSeriesOverride, LsAufgabe, User,
+)
+from app.services import aufgabe_sync, ical_client, webuntis_client
 from app.templating import templates
 
 router = APIRouter()
@@ -109,6 +112,30 @@ def timetable_view(
         grid["exams"] = exams
         grid["session_override"] = session_override
         grid["series_override"] = series_override
+
+        # Aufgaben-Marker pro Block: {(d,kk,sk,bs): "Aufg. 2, 3"}
+        aufgaben_markers: dict[tuple[str, str, str, str], str] = {}
+        rows_a = db.query(
+            LessonNote.lesson_date, LessonNote.klassen_key, LessonNote.subjects_key,
+            LessonNote.block_start, LsAufgabe.nummer,
+        ).join(
+            LessonNoteAufgabe, LessonNoteAufgabe.lesson_note_id == LessonNote.id,
+        ).join(
+            LsAufgabe, LsAufgabe.id == LessonNoteAufgabe.ls_aufgabe_id,
+        ).filter(
+            LessonNote.user_id == user.id,
+            LessonNote.lesson_date >= monday.isoformat(),
+            LessonNote.lesson_date <= friday.isoformat(),
+        ).order_by(
+            LessonNote.lesson_date, LsAufgabe.nummer,
+        ).all()
+        bucket: dict[tuple[str, str, str, str], list[int]] = {}
+        for d, kk, sk, bs, num in rows_a:
+            key = (d, kk or "", sk or "", bs or "")
+            bucket.setdefault(key, []).append(num)
+        for key, nums in bucket.items():
+            aufgaben_markers[key] = "Aufg. " + ", ".join(str(n) for n in nums)
+        grid["aufgaben_markers"] = aufgaben_markers
 
     return templates.TemplateResponse(request, "timetable.html", {
         "user": user, "error": err, "grid": grid,
@@ -303,6 +330,148 @@ def api_previous_note(
     return JSONResponse({"ok": True, "note": {
         "date": n.lesson_date, "block_start": n.block_start, **_note_dict(n),
     }})
+
+
+# ── Aufgaben aus Lernsituationen pro Block ───────────────────────────────
+@router.get("/api/lesson-note/aufgaben")
+def api_get_block_aufgaben(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    date: str,
+    klassen: str = "",
+    subjects: str = "",
+    block_start: str = "",
+):
+    """Liefert verfügbare LS für diese Klasse + Aufgaben + aktuelle Auswahl."""
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.lesson_date == date,
+        LessonNote.klassen_key == klassen,
+        LessonNote.subjects_key == subjects,
+        LessonNote.block_start == block_start,
+    ).first()
+
+    selected_ls_id = n.learning_situation_id if n else None
+    selected_aufgabe_ids: list[int] = []
+    if n:
+        selected_aufgabe_ids = [
+            ena.ls_aufgabe_id for ena in db.query(LessonNoteAufgabe)
+            .filter(LessonNoteAufgabe.lesson_note_id == n.id)
+            .order_by(LessonNoteAufgabe.position).all()
+        ]
+
+    # LS dieses Lehrers, bevorzugt für die Klasse — sonst alle
+    ls_q = db.query(LearningSituation).filter(LearningSituation.user_id == user.id)
+    if klassen:
+        prefer = ls_q.filter(
+            (LearningSituation.klassen_key == klassen) |
+            (LearningSituation.klassen_key == "")
+        ).order_by(LearningSituation.updated_at.desc()).all()
+    else:
+        prefer = ls_q.order_by(LearningSituation.updated_at.desc()).all()
+
+    ls_options = [
+        {"id": ls.id, "display_name": ls.display_name,
+         "klassen_key": ls.klassen_key, "lernfeld": ls.lernfeld}
+        for ls in prefer
+    ]
+
+    aufgaben: list[dict] = []
+    if selected_ls_id:
+        ls = db.get(LearningSituation, selected_ls_id)
+        if ls and ls.user_id == user.id:
+            # Sync sicherstellen (best-effort)
+            try:
+                aufgabe_sync.sync_from_md(db, user, ls)
+                db.commit()
+            except Exception:
+                db.rollback()
+            for a in db.query(LsAufgabe).filter(
+                LsAufgabe.learning_situation_id == selected_ls_id
+            ).order_by(LsAufgabe.nummer).all():
+                # Body + Lösungsskizze on-demand
+                p = aufgabe_sync.get_aufgabe_md(user, ls, a.nummer)
+                aufgaben.append({
+                    "id": a.id, "nummer": a.nummer, "titel": a.titel,
+                    "anchor": a.anchor, "phasen": a.phasen,
+                    "body": (p or {}).get("body", ""),
+                    "loesungsskizze": (p or {}).get("loesungsskizze", ""),
+                })
+
+    return JSONResponse({
+        "ok": True,
+        "ls_options": ls_options,
+        "selected_ls_id": selected_ls_id,
+        "selected_aufgabe_ids": selected_aufgabe_ids,
+        "aufgaben": aufgaben,
+    })
+
+
+@router.post("/api/lesson-note/aufgaben")
+def api_save_block_aufgaben(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    d = (body.get("date") or "").strip()
+    if len(d) != 10:
+        raise HTTPException(400, "Ungültiges Datum")
+    kk = (body.get("klassen") or "")[:255]
+    sk = (body.get("subjects") or "")[:255]
+    bs = (body.get("block_start") or "")[:5]
+    ls_id_raw = body.get("ls_id")
+    aufgabe_ids = body.get("aufgabe_ids") or []
+
+    ls_id: int | None = None
+    if ls_id_raw not in (None, "", 0):
+        try:
+            ls_id = int(ls_id_raw)
+        except Exception:
+            raise HTTPException(400, "Ungültige ls_id")
+        ls = db.get(LearningSituation, ls_id)
+        if not ls or ls.user_id != user.id:
+            raise HTTPException(404, "LS nicht gefunden")
+
+    # lesson_note finden oder anlegen
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id, LessonNote.lesson_date == d,
+        LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+        LessonNote.block_start == bs,
+    ).first()
+    if not n:
+        n = LessonNote(
+            user_id=user.id, lesson_date=d, klassen_key=kk,
+            subjects_key=sk, block_start=bs,
+        )
+        db.add(n)
+        db.flush()
+
+    n.learning_situation_id = ls_id
+
+    # Alte M2M-Einträge wegräumen
+    db.query(LessonNoteAufgabe).filter(
+        LessonNoteAufgabe.lesson_note_id == n.id
+    ).delete(synchronize_session=False)
+
+    # Neue setzen (nur Aufgaben, die zur gewählten LS gehören)
+    if ls_id and aufgabe_ids:
+        valid_ids = {
+            row.id for row in db.query(LsAufgabe).filter(
+                LsAufgabe.learning_situation_id == ls_id
+            ).all()
+        }
+        for pos, aid in enumerate(aufgabe_ids):
+            try:
+                aid_int = int(aid)
+            except Exception:
+                continue
+            if aid_int in valid_ids:
+                db.add(LessonNoteAufgabe(
+                    lesson_note_id=n.id, ls_aufgabe_id=aid_int, position=pos,
+                ))
+
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.get("/api/timetable/today")
