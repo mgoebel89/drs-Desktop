@@ -35,22 +35,22 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 | Notiz-Indikator + Prüfungs-Rahmen | ✓ | 📝-Icon + roter Rahmen live ohne Reload |
 | „Letzte Stunde"-Block im Panel | ✓ | Vorige Notiz mit Markdown/LaTeX-Rendering |
 | LXC-Installer + drs-update | ✓ | Proxmox-Helper-Script-Style, idempotent, alembic-Migrationen |
-| **Lernsituationen + Wizard** | ✓ | 5-stufiger Planungs-Wizard, Fobizz-Anbindung (kein API-Key), persistente LS-Entität |
+| **Lernsituationen + Wizard v2** | ✓ | 4-stufig auf Basis Inhalts-MD im Obsidian-Vault. 9 Material-Typen, Dual-Prompt (Fobizz + Claude-Pro) |
 | **SMB-Material-Share** | ✓ | OMV-Share pro Nutzer, smbprotocol-Client, Upload + Vorschau |
 | **OnlyOffice Office-Vorschau** | ✓ | Separater LXC CT 501, JWT-gesichert, Iframe-Editor (View-Mode) |
 | **Obsidian-Vault-Schreiber** | ✓ | Pro LS eine .md im Vault, YAML-Frontmatter, App-Read-Only-Anzeige (KaTeX + Mermaid) |
 
-### Datenmodell (SQLite, Stand Migration 0009)
+### Datenmodell (SQLite, Stand Migration 0010)
 
 - `users` — jetzt zusätzlich `smb_creds_enc` (AES-GCM)
 - `user_sessions`, `audit_log`
 - `worksheets` — jetzt `learning_situation_id` FK (nullable)
-- `worksheet_revisions`
+- `worksheet_revisions` — jetzt `markdown_source` für Wizard-Outputs
 - `settings` (school_name, school_logo)
 - `ical_calendars` (verschlüsselte URL, Label, Farbe)
 - `lesson_notes` — Key: `user_id, lesson_date, klassen_key, subjects_key, block_start`; jetzt `learning_situation_id` FK
 - `lesson_series_overrides` — Reihen-Fachname pro `user_id, klassen_key, subjects_key`
-- **`learning_situations`** — `id, user_id, slug, display_name, klassen_key, lernfeld, smb_folder_name, obsidian_note_path, lernziele, vorwissen, last_fobizz_prompt, last_fobizz_output, created_at, updated_at`. Slug unique pro User, `smb_folder_name` stabil (`LS-{id:04d}_{slug}`)
+- **`learning_situations`** — `id, user_id, slug, display_name, klassen_key, lernfeld, smb_folder_name, obsidian_note_path, lernziele, vorwissen, last_fobizz_prompt, last_fobizz_output, last_material_type, last_extras, content_md_present, created_at, updated_at`. Slug unique pro User, `smb_folder_name` stabil (`LS-{id:04d}_{slug}`). `lernziele/vorwissen` deprecated (Wizard v1) — Inhalt lebt jetzt in der Inhalts-MD im Vault.
 
 ---
 
@@ -62,10 +62,20 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 - **Kein KI-Feedback im Schüler-Export**: Aufgabenblätter enthalten keinen
   API-Key. KI-Funktionen laufen ausschließlich im Lehrer-Container.
 - **Keine Anthropic-API-Kosten im Wizard**: Die Material-Generierung läuft
-  über **Fobizz**. Wizard ist ein Prompt-Generator + Material-Manager, kein
-  API-Client. Der Fobizz-Agent wird einmalig mit dem Systemprompt aus
-  `docs/fobizz-agent-systemprompt.md` konfiguriert; der Wizard liefert pro
-  Lauf nur den Kontext-Prompt.
+  über **Fobizz** ODER über den **Claude-Pro-Chat** des Lehrers. Wizard ist
+  Prompt-Generator + Material-Manager, kein API-Client. Pro Material-Typ
+  bietet Schritt 3 zwei Tabs:
+  - **Fobizz-Tab**: kurzer Kontext-Prompt für den vorab konfigurierten
+    Agenten (Systemprompt aus `docs/fobizz-agent-systemprompt.md`).
+  - **Claude-Tab**: self-contained Prompt inkl. didaktischer Rolle, direkt
+    in Claude.ai einkippbar (Pro-Abo nutzen, keine API-Kosten).
+- **Inhalts-MD als Quelle (Wizard v2)**: Pro Lernsituation eine
+  strukturierte `.md` im Obsidian-Vault (siehe
+  `docs/lerninhalt-md-schema.md`). Pflichtsektionen: Lernziele,
+  Sachanalyse, Inhalt. Der Lehrer pflegt sie in Obsidian Desktop; der
+  Wizard liest sie und bettet sie in den Material-Prompt ein. Erzeugte
+  Materialien hängt der Wizard als `WIZARD-BLOCK` an die Output-Sektion
+  derselben Datei — Historie bleibt erhalten.
 - **SMB-Anbindung Python-nativ**: `smbprotocol` statt systemweitem
   `mount.cifs`. Kein Root nötig, keine Mount-Lifecycle-Komplexität,
   OnlyOffice bekommt Dateien über App-interne Token-URLs gestreamt.
@@ -95,9 +105,11 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 
 ### Direkt aus letzter Session noch zu klären / zu testen
 
-- **Migration 0008 + 0009** im Container ausrollen (`drs-update`) und
-  Wizard-Flow Ende-zu-Ende durchspielen (LS anlegen → Schritt 5 abschließen,
-  SMB-Ordner und Vault-Notiz auf dem OMV verifizieren).
+- **Migration 0008 + 0009 + 0010** im Container ausrollen (`drs-update`)
+  und Wizard v2 Ende-zu-Ende durchspielen: LS anlegen → Vorlage in Vault
+  schreiben → in Obsidian befüllen → Wizard Schritt 2/3/4 mit Material-Typ
+  „Arbeitsblatt" laufen lassen, Output einfügen, optional als Worksheet
+  anlegen. Vault-MD nach dem Lauf prüfen (WIZARD-BLOCK angehängt?).
 - **OnlyOffice-LXC (CT 501)** über den neuen Installer-Pfad anlegen lassen
   und DOCX/PPTX-Vorschau im Browser prüfen.
 - **Optik-Check** des durchgehenden Event-Balkens via rowspan
@@ -142,12 +154,13 @@ drs-lxc/
 ├── alembic.ini
 ├── requirements.txt                   # + smbprotocol, markdown-it-py, python-slugify, PyYAML
 ├── docs/
-│   └── fobizz-agent-systemprompt.md   # zum 1× Einfügen in den Fobizz-Agent
+│   ├── fobizz-agent-systemprompt.md   # zum 1× Einfügen in den Fobizz-Agent
+│   └── lerninhalt-md-schema.md        # Schema der Inhalts-MD für den Lehrer
 └── app/
     ├── main.py
     ├── config.py, db.py, models.py, crypto.py, auth.py, branding.py, cli.py
     ├── templating.py                  # geteilte Jinja-Instanz mit school_name() Global
-    ├── alembic/versions/0001–0009_*.py
+    ├── alembic/versions/0001–0010_*.py
     ├── routers/
     │   ├── auth.py, setup.py, users.py, profile.py     # profile.py: + SMB-Block
     │   ├── worksheets.py, settings.py, help.py, timetable.py
@@ -161,8 +174,9 @@ drs-lxc/
     │   ├── ical_client.py
     │   ├── smb_client.py              # smbprotocol-basiert, pro Nutzer
     │   ├── onlyoffice_client.py       # JWT-Signer + In-Memory-Filetoken
-    │   ├── obsidian_writer.py         # YAML-Frontmatter + Wikilinks
-    │   └── wizard_helpers.py          # Slug, Folder-Name, Fobizz-Prompt-Builder
+    │   ├── obsidian_writer.py         # Schema v1, Template-Builder, Section-Parser, Output-Append
+    │   ├── material_prompts.py        # 9-Typen-Katalog + Dual-Prompt-Builder (Fobizz + Claude)
+    │   └── wizard_helpers.py          # Slug, Folder-Name (übrig nach Refactor)
     ├── static/{drs.css, default_school_logo.jpg}
     └── templates/
         ├── base.html                  # Nav-Einträge: Lernsituationen, Wizard
@@ -170,7 +184,7 @@ drs-lxc/
         ├── profile.html, help.html, timetable.html, timetable_diagnose.html
         ├── preview.html, obsidian_note.html
         ├── learning_situations/{list.html, detail.html}
-        ├── wizard/{_layout.html, start.html, step1..5_*.html, done.html}
+        ├── wizard/{_layout.html, start.html, step1_md.html, step2_typ.html, step3_prompt.html, step4_output.html, done.html}
         ├── admin/{users.html, settings.html}
         └── worksheets/{list.html, editor.html, revisions.html, export.html}
 ```
@@ -195,6 +209,7 @@ Login: **`mgoebel`** (Admin)
 
 | Commit | Was |
 |---|---|
+| _pending_ | **Wizard v2**: Inhalts-MD im Vault, 4 Schritte, 9 Material-Typen, Dual-Prompt (Fobizz + Claude), Worksheet-Übernahme. Migration 0010. |
 | _pending_ | Phase 6+7: Wizard-Flow + Fobizz-Agent-Systemprompt |
 | _pending_ | Phase 5: Obsidian-Writer + Read-Only-Anzeige |
 | _pending_ | Phase 4: Preview-Router (PDF/Bild/OnlyOffice-Iframe) |

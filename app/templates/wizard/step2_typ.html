@@ -1,0 +1,43 @@
+{% extends "wizard/_layout.html" %}
+{% block step %}
+<h2>Schritt 2 · Material-Typ wählen</h2>
+<p class="muted">
+  Was soll der Wizard aus deiner Inhalts-MD erzeugen? Du kannst beliebig
+  viele Materialien aus derselben Lernsituation generieren.
+</p>
+
+<form method="post" action="/wizard/{{ ls.id }}/step/2" id="typform">
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.7rem;margin:1rem 0">
+    {% for mt in catalog %}
+    <label class="mt-card" style="
+        display:block;cursor:pointer;padding:.9rem .9rem;border-radius:8px;
+        border:2px solid {{ '#7B61FF' if mt.key == selected else '#e0e0e0' }};
+        background:{{ '#f5f3ff' if mt.key == selected else '#fff' }};
+        transition:background .15s, border-color .15s">
+      <input type="radio" name="material_type" value="{{ mt.key }}"
+             style="display:none"
+             {% if mt.key == selected %}checked{% endif %}
+             onchange="this.form.submit()">
+      <div style="font-size:24px;line-height:1">{{ mt.icon }}</div>
+      <div style="font-weight:600;margin-top:.3rem">{{ mt.label }}</div>
+      <div class="muted" style="font-size:12px;margin-top:.3rem">{{ mt.description }}</div>
+    </label>
+    {% endfor %}
+  </div>
+
+  <div style="margin-top:1rem">
+    <label>Extras (optional, freitext)</label>
+    <textarea name="extras" rows="3"
+              placeholder="z. B. „Niveau HBFS, ohne Differenzierung", „mit Bezug auf Hydraulikschaltzeichen", „kurz halten"">{{ extras }}</textarea>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;margin-top:1rem">
+    <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/1">← Zurück</a>
+    <button class="btn" type="submit">Prompt generieren →</button>
+  </div>
+</form>
+
+<style>
+  .mt-card:hover { background:#f8f7ff !important; border-color:#bbb !important; }
+</style>
+{% endblock %}

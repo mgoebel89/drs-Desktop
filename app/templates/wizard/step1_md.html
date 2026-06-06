@@ -1,0 +1,69 @@
+{% extends "wizard/_layout.html" %}
+{% block step %}
+<h2>Schritt 1 · Inhalts-MD prüfen</h2>
+<p class="muted">
+  Der Wizard erzeugt Materialien aus der Inhalts-Markdown im Obsidian-Vault.
+  Diese Datei pflegst du in Obsidian Desktop. Hier siehst du den aktuellen
+  Stand und ob die Pflichtsektionen vorhanden sind.
+  <a href="/static/lerninhalt-schema" onclick="event.preventDefault();window.open('/static/lerninhalt-schema','_blank')" style="display:none"></a>
+</p>
+
+{% if vorlage_flash %}
+<div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;padding:.7rem 1rem;margin-bottom:1rem">
+  ✓ Vorlage in den Vault geschrieben. Öffne sie jetzt in <strong>Obsidian Desktop</strong>
+  und befülle die Pflichtsektionen — danach hier neu laden.
+</div>
+{% endif %}
+
+{% if not smb_configured %}
+  <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:.8rem 1rem">
+    SMB nicht eingerichtet — <a href="/profile">jetzt im Profil konfigurieren</a>.
+  </div>
+{% elif smb_error %}
+  <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.8rem 1rem">
+    SMB-Fehler: {{ smb_error }}
+  </div>
+{% elif not md_present %}
+  <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem 1.2rem;margin-bottom:1rem">
+    <h3 style="margin:0 0 .4rem 0">Noch keine Inhalts-MD vorhanden</h3>
+    <p style="margin:0 0 .8rem 0">
+      Lege jetzt eine Vorlage mit allen Pflichtsektionen im Vault an. Danach
+      öffnest du sie in Obsidian Desktop und befüllst sie inhaltlich.
+    </p>
+    <form method="post" action="/wizard/{{ ls.id }}/template">
+      <button class="btn" type="submit">Vorlage in Obsidian anlegen</button>
+    </form>
+  </div>
+{% else %}
+  {% if missing %}
+  <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:.8rem 1rem;margin-bottom:1rem">
+    <strong>⚠ Fehlende Pflichtsektionen:</strong>
+    {% for m in missing %}<code style="margin-left:.4rem">{{ m }}</code>{% endfor %}
+    <br><span class="muted" style="font-size:12px">
+      Die Generierung läuft trotzdem, das Ergebnis wird aber dünner.
+      Empfehlung: in Obsidian ergänzen und hier neu laden.
+    </span>
+  </div>
+  {% else %}
+  <div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;padding:.8rem 1rem;margin-bottom:1rem">
+    ✓ Alle Pflichtsektionen (Lernziele, Sachanalyse, Inhalt) vorhanden.
+  </div>
+  {% endif %}
+
+  <details style="margin:.6rem 0 1.2rem 0;background:#fafafa;padding:.6rem .9rem;border-radius:6px">
+    <summary style="cursor:pointer;font-size:13px">Aktuellen Inhalts-MD-Body ansehen</summary>
+    <pre style="margin-top:.6rem;font-size:12px;overflow:auto;max-height:400px">{{ md_body }}</pre>
+  </details>
+{% endif %}
+
+<div style="display:flex;justify-content:space-between;margin-top:1.2rem">
+  <a class="btn btn-sec" href="/wizard">← Übersicht</a>
+  {% if md_present %}
+    <a class="btn" href="/wizard/{{ ls.id }}/step/2">Material-Typ wählen →</a>
+  {% else %}
+    <span class="muted" style="align-self:center;font-size:13px">
+      Erst Inhalts-MD anlegen + befüllen
+    </span>
+  {% endif %}
+</div>
+{% endblock %}

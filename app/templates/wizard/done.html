@@ -4,7 +4,10 @@
 <div class="card" style="text-align:center;padding:2.5rem">
   <div style="font-size:48px;line-height:1">✓</div>
   <h1 style="margin-top:.4rem">Wizard abgeschlossen</h1>
-  <p class="muted">Lernsituation <strong>{{ ls.display_name }}</strong> ist gespeichert.</p>
+  <p class="muted">
+    {% if material_type %}{{ material_type.icon }} {{ material_type.label }} zu {% endif %}
+    <strong>{{ ls.display_name }}</strong> wurde in die Inhalts-MD eingefügt.
+  </p>
 
   <div style="margin-top:1.6rem;display:flex;gap:.7rem;justify-content:center;flex-wrap:wrap">
     <a class="btn" href="/ls/{{ ls.id }}">Lernsituation öffnen</a>

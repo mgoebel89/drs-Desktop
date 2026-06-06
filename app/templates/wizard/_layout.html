@@ -16,7 +16,7 @@
 
   {# Step-Indikator #}
   <ol style="list-style:none;padding:0;margin:1.2rem 0;display:flex;gap:.4rem">
-    {% set labels = ['Kontext','Ziele','Prompt','Output','Material'] %}
+    {% set labels = ['Inhalts-MD','Material-Typ','Prompt','Output'] %}
     {% for i in range(1, total + 1) %}
       {% set active = (i == step) %}
       {% set done = (i < step) %}

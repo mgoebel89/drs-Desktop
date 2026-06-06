@@ -1,18 +1,31 @@
 {% extends "wizard/_layout.html" %}
 {% block step %}
-<h2>Schritt 4 · Fobizz-Output einfügen</h2>
+<h2>Schritt 4 · Output einfügen — {{ material_type.label if material_type else 'Material' }}</h2>
 <p class="muted">
-  Antwort des Agenten hier als Markdown einfügen. Wird beim Speichern in die
-  Obsidian-Vault geschrieben (<code>{{ ls.smb_folder_name }}.md</code>).
+  Antwort aus Fobizz oder Claude hier als Markdown einfügen. Beim Speichern
+  wird sie als neuer Block an die Output-Sektion der Inhalts-MD angehängt.
+  Optional erzeugst du daraus direkt ein Worksheet.
 </p>
 
 <form method="post" action="/wizard/{{ ls.id }}/step/4" style="display:grid;gap:1rem">
-  <textarea name="fobizz_output" rows="18"
-            placeholder="# Lernsituation: …&#10;## Einstieg…"
+  <textarea name="output" rows="20"
+            placeholder="# {{ material_type.label if material_type else 'Material' }}: …&#10;…"
             style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">{{ output }}</textarea>
+
+  <label style="display:flex;align-items:center;gap:.6rem;padding:.8rem 1rem;background:#fafafa;border-radius:6px;cursor:pointer">
+    <input type="checkbox" name="as_worksheet" value="1" style="width:18px;height:18px">
+    <span>
+      <strong>Als neues Worksheet anlegen</strong>
+      <br><span class="muted" style="font-size:12px">
+        Erzeugt einen Eintrag unter „Aufgabenblätter" mit dem Markdown als
+        Quelle. Du kannst es dort direkt weiterbearbeiten oder exportieren.
+      </span>
+    </span>
+  </label>
+
   <div style="display:flex;justify-content:space-between">
     <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/3">← Zurück</a>
-    <button class="btn" type="submit">Speichern und weiter →</button>
+    <button class="btn" type="submit">Speichern und abschließen →</button>
   </div>
 </form>
 {% endblock %}

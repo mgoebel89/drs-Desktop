@@ -20,11 +20,19 @@
     <button class="btn btn-sec" type="submit">Speichern</button>
   </form>
 
-  <div style="display:flex;gap:.6rem;margin-top:1rem">
+  <div style="display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap">
     <a class="btn btn-sec" href="/ls/{{ ls.id }}/note">
-      📝 Obsidian-Notiz {% if not has_note %}(noch leer){% endif %}
+      📝 Inhalts-MD ansehen {% if not has_note %}(noch leer){% endif %}
+    </a>
+    <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/1">
+      🧙 Wizard fortsetzen
     </a>
   </div>
+  <p class="muted" style="font-size:12px;margin-top:.6rem">
+    Die Inhalts-MD pflegst du in <strong>Obsidian Desktop</strong> direkt im
+    Vault (Datei <code>{{ ls.smb_folder_name }}.md</code>). Der Wizard liest
+    sie als Quelle für die Material-Generierung.
+  </p>
 
   <h2 style="margin-top:1.6rem">Materialien</h2>
   {% if not smb_configured %}

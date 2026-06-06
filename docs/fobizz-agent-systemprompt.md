@@ -1,9 +1,17 @@
 # Fobizz-Agent: Systemprompt für die DRS-Unterrichtsplanung
 
 Diesen Text einmalig als **Systemprompt** in einen Fobizz-KI-Agenten einkippen.
-Der Wizard im DRS-LXC liefert pro Lauf nur noch den kurzen Kontext (Klasse,
-Lernfeld, Lernziele, Vorwissen). Der Agent kennt die Struktur, das Schul-Setting
-und das gewünschte Antwortformat.
+Der Wizard im DRS-LXC liefert pro Lauf den kurzen Kontext-Prompt mit
+eingebetteter Inhalts-MD und gewünschtem Material-Typ. Der Agent kennt die
+didaktische Rolle, das Schul-Setting und die Format-Erwartungen für jeden
+Material-Typ.
+
+> **Hinweis Wizard v2**: Seit Wizard-Version 2 enthält der Wizard-Prompt die
+> komplette **Inhalts-MD aus dem Obsidian-Vault** als Kontext sowie den
+> Material-Typ (Arbeitsblatt, Lösungsblatt, Tafelbild, Quiz, Hausaufgabe,
+> Stationenlernen, Projektauftrag, Lernlandkarte, Concept Map). Dieser
+> Systemprompt deckt **alle** Material-Typen ab — das gewünschte
+> Antwortformat steuert der Wizard-Prompt typenspezifisch.
 
 ---
 

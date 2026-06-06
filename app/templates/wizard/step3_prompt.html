@@ -1,35 +1,92 @@
 {% extends "wizard/_layout.html" %}
 {% block step %}
-<h2>Schritt 3 · Fobizz-Prompt</h2>
+<h2>Schritt 3 · Prompt — {{ material_type.label }} {{ material_type.icon }}</h2>
 <p class="muted">
-  Diesen Kontext-Prompt in den vorbereiteten Fobizz-Agenten einkippen.
-  Den Systemprompt des Agenten richtest du einmalig ein (siehe
-  <a href="/help">Hilfe-Seite</a>).
+  Wähle dein Generierungs-Ziel und kopiere den passenden Prompt. Den Output
+  fügst du im nächsten Schritt ein.
 </p>
 
-<div style="position:relative">
-  <textarea id="prompt-box" rows="14" readonly
-            style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">{{ prompt }}</textarea>
-  <button type="button" class="btn" id="copy-btn"
-          style="position:absolute;top:.5rem;right:.5rem;padding:5px 12px;font-size:12px">In Zwischenablage</button>
+<div class="tabs" style="display:flex;gap:.4rem;margin:1rem 0 .6rem 0;border-bottom:2px solid #eee">
+  <button type="button" class="tab-btn active" data-target="tab-fobizz"
+          style="border:none;background:transparent;padding:.6rem 1rem;font-size:14px;cursor:pointer;border-bottom:3px solid #7B61FF;font-weight:600">
+    Fobizz-Agent
+  </button>
+  <button type="button" class="tab-btn" data-target="tab-claude"
+          style="border:none;background:transparent;padding:.6rem 1rem;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#666">
+    Claude (Pro-Abo)
+  </button>
 </div>
-<span id="copy-status" style="font-size:12px;color:#2e7d32;margin-left:.5rem"></span>
 
-<div style="display:flex;justify-content:space-between;margin-top:1rem">
+<div id="tab-fobizz" class="tab-pane">
+  <p class="muted" style="font-size:12px">
+    Kurzer Kontext-Prompt — voraussetzt, dass dein Fobizz-Agent den
+    DRS-Systemprompt aus <code>docs/fobizz-agent-systemprompt.md</code> kennt.
+  </p>
+  <div style="position:relative">
+    <textarea id="p-fobizz" rows="16" readonly
+              style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">{{ fobizz_prompt }}</textarea>
+    <button type="button" class="btn copy-btn" data-for="p-fobizz"
+            style="position:absolute;top:.5rem;right:.5rem;padding:5px 12px;font-size:12px">
+      In Zwischenablage
+    </button>
+  </div>
+  <span class="copy-status" data-for="p-fobizz" style="font-size:12px;color:#2e7d32"></span>
+</div>
+
+<div id="tab-claude" class="tab-pane" style="display:none">
+  <p class="muted" style="font-size:12px">
+    Vollständiger Prompt für Claude.ai (z. B. mit deinem Pro-Abo) — enthält
+    die didaktische Rolle direkt im Prompt.
+  </p>
+  <div style="position:relative">
+    <textarea id="p-claude" rows="20" readonly
+              style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">{{ claude_prompt }}</textarea>
+    <button type="button" class="btn copy-btn" data-for="p-claude"
+            style="position:absolute;top:.5rem;right:.5rem;padding:5px 12px;font-size:12px">
+      In Zwischenablage
+    </button>
+  </div>
+  <span class="copy-status" data-for="p-claude" style="font-size:12px;color:#2e7d32"></span>
+</div>
+
+<div style="display:flex;justify-content:space-between;margin-top:1.2rem">
   <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/2">← Zurück</a>
   <a class="btn" href="/wizard/{{ ls.id }}/step/4">Output einfügen →</a>
 </div>
 
 <script>
-  document.getElementById("copy-btn").addEventListener("click", async () => {
-    const txt = document.getElementById("prompt-box").value;
-    try {
-      await navigator.clipboard.writeText(txt);
-      document.getElementById("copy-status").textContent = "✓ kopiert";
-      setTimeout(() => document.getElementById("copy-status").textContent = "", 2500);
-    } catch (e) {
-      document.getElementById("copy-status").textContent = "✗ " + e.message;
-    }
+  // Tab-Switch
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => {
+        b.style.borderBottomColor = "transparent";
+        b.style.color = "#666";
+        b.style.fontWeight = "400";
+        b.classList.remove("active");
+      });
+      document.querySelectorAll(".tab-pane").forEach(p => p.style.display = "none");
+      btn.style.borderBottomColor = "#7B61FF";
+      btn.style.color = "";
+      btn.style.fontWeight = "600";
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.target).style.display = "";
+    });
+  });
+
+  // Copy
+  document.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.for;
+      const txt = document.getElementById(id).value;
+      const status = document.querySelector('.copy-status[data-for="' + id + '"]');
+      try {
+        await navigator.clipboard.writeText(txt);
+        status.textContent = "✓ kopiert";
+        setTimeout(() => status.textContent = "", 2500);
+      } catch (e) {
+        status.textContent = "✗ " + e.message;
+      }
+    });
   });
 </script>
 {% endblock %}

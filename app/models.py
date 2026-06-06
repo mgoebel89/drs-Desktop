@@ -91,6 +91,8 @@ class WorksheetRevision(Base):
     comment: Mapped[str] = mapped_column(String(255), default="")
     meta_json: Mapped[str] = mapped_column(Text, default="{}")
     aufgaben_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Wenn die Revision aus dem Wizard kommt: roher Markdown-Quelltext.
+    markdown_source: Mapped[str] = mapped_column(Text, default="")
 
     worksheet: Mapped[Worksheet] = relationship(back_populates="revisions")
 
@@ -139,11 +141,16 @@ class LearningSituation(Base):
     smb_folder_name: Mapped[str] = mapped_column(String(200), default="")
     # Pfad zur Obsidian-Notiz, relativ zur Vault
     obsidian_note_path: Mapped[str] = mapped_column(String(255), default="")
-    # Wizard-Persistenz
+    # Wizard-Persistenz (lernziele/vorwissen aus Wizard v1 — werden in v2
+    # durch die Inhalts-MD ersetzt, bleiben aber für Bestandsdaten erhalten)
     lernziele: Mapped[str] = mapped_column(Text, default="")
     vorwissen: Mapped[str] = mapped_column(Text, default="")
     last_fobizz_prompt: Mapped[str] = mapped_column(Text, default="")
     last_fobizz_output: Mapped[str] = mapped_column(Text, default="")
+    # Wizard v2
+    last_material_type: Mapped[str] = mapped_column(String(32), default="")
+    last_extras: Mapped[str] = mapped_column(Text, default="")
+    content_md_present: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

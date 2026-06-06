@@ -1,24 +1,26 @@
-"""Planungs-Wizard — 5-stufiger Flow.
+"""Planungs-Wizard v2 — 4-stufiger Flow auf Basis der Inhalts-MD.
 
 Schritte:
-  1  Kontext           Klasse, Lernfeld, LS auswählen oder neu anlegen
-  2  Ziele & Inhalte   Lernziele, Vorwissen
-  3  Fobizz-Prompt     generierter Kontext-Prompt zum Kopieren
-  4  Fobizz-Output     Markdown-Output einfügen, in Vault speichern
-  5  Materialien       Upload + Vorschau
+  1  LS & Inhalts-MD  LS auswählen, Validierung der Pflichtsektionen,
+                      optional Vorlage in den Vault schreiben.
+  2  Material-Typ      Karten-Grid, Extras-Textfeld.
+  3  Prompt            Tabs Fobizz + Claude.
+  4  Output            Markdown einfügen, als WIZARD-BLOCK an MD anhängen,
+                      optional als Worksheet anlegen.
 """
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import LearningSituation, User
-from app.services import obsidian_writer, smb_client, wizard_helpers
+from app.models import LearningSituation, User, Worksheet, WorksheetRevision
+from app.services import material_prompts, obsidian_writer, smb_client, wizard_helpers
 from app.templating import templates
 
 router = APIRouter()
@@ -50,7 +52,7 @@ def wizard_start(
     })
 
 
-# ── Schritt 1: Kontext / LS anlegen ───────────────────────────────────────
+# ── LS anlegen ────────────────────────────────────────────────────────────
 @router.post("/wizard/new")
 def wizard_new(
     request: Request,
@@ -65,7 +67,6 @@ def wizard_new(
         raise HTTPException(400, "Bezeichnung fehlt")
     slug = wizard_helpers.make_slug(display_name)
 
-    # Slug eindeutig pro User: Suffix anhängen falls Kollision
     base_slug = slug
     n = 2
     while db.query(LearningSituation.id).filter(
@@ -75,102 +76,146 @@ def wizard_new(
         n += 1
 
     ls = LearningSituation(
-        user_id=user.id,
-        slug=slug,
-        display_name=display_name,
-        klassen_key=klassen_key.strip(),
-        lernfeld=lernfeld.strip(),
+        user_id=user.id, slug=slug, display_name=display_name,
+        klassen_key=klassen_key.strip(), lernfeld=lernfeld.strip(),
     )
     db.add(ls)
-    db.flush()  # ID fixieren für folder_name
+    db.flush()
     ls.smb_folder_name = wizard_helpers.folder_name(ls.id, ls.slug)
     ls.obsidian_note_path = obsidian_writer.note_filename(ls)
     audit(db, "ls_created", actor=user, target=str(ls.id), detail=display_name, request=request)
     db.commit()
 
-    # SMB-Ordner anlegen (best-effort)
     cfg = smb_client.load_config(user)
     if cfg:
         try:
-            base = smb_client.material_subpath(cfg, ls.smb_folder_name)
-            smb_client.ensure_folder(user, base)
+            smb_client.ensure_folder(user, smb_client.material_subpath(cfg, ls.smb_folder_name))
         except Exception:
-            pass  # Nutzer kriegt den Fehler später in der Detail-Ansicht
-    return RedirectResponse(f"/wizard/{ls.id}/step/2", status_code=303)
+            pass
+    return RedirectResponse(f"/wizard/{ls.id}/step/1", status_code=303)
 
 
+# ── Vorlage in den Vault schreiben ───────────────────────────────────────
+@router.post("/wizard/{ls_id}/template")
+def wizard_create_template(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ls = _get_ls(db, user, ls_id)
+    cfg = smb_client.load_config(user)
+    if not cfg:
+        raise HTTPException(400, "SMB nicht konfiguriert")
+    md = obsidian_writer.build_template_md(ls)
+    obsidian_writer.write_note(user, ls, md)
+    ls.content_md_present = True
+    audit(db, "wizard_template_created", actor=user, target=str(ls.id), request=request)
+    db.commit()
+    return RedirectResponse(f"/wizard/{ls_id}/step/1?vorlage=1", status_code=303)
+
+
+# ── Schritte (GET) ────────────────────────────────────────────────────────
 @router.get("/wizard/{ls_id}/step/{n}", response_class=HTMLResponse)
 def wizard_step(
     request: Request,
-    ls_id: int,
-    n: int,
+    ls_id: int, n: int,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    if n < 1 or n > 5:
+    if n < 1 or n > 4:
         raise HTTPException(404)
     ls = _get_ls(db, user, ls_id)
-    ctx = {"ls": ls, "step": n, "total": 5}
+    cfg = smb_client.load_config(user)
+    ctx = {"ls": ls, "step": n, "total": 4, "smb_configured": bool(cfg)}
 
     if n == 1:
-        return templates.TemplateResponse(request, "wizard/step1_kontext.html", ctx)
-    if n == 2:
-        return templates.TemplateResponse(request, "wizard/step2_ziele.html", ctx)
-    if n == 3:
-        # Prompt frisch bauen, in DB cachen
-        prompt = wizard_helpers.build_fobizz_prompt(ls)
-        ls.last_fobizz_prompt = prompt
-        db.commit()
-        ctx["prompt"] = prompt
-        return templates.TemplateResponse(request, "wizard/step3_prompt.html", ctx)
-    if n == 4:
-        ctx["output"] = ls.last_fobizz_output
-        return templates.TemplateResponse(request, "wizard/step4_output.html", ctx)
-    if n == 5:
-        cfg = smb_client.load_config(user)
-        files: list[dict] = []
+        md_present = False
+        missing: list[str] = []
+        md_body = ""
         smb_error = ""
         if cfg:
-            base = smb_client.material_subpath(cfg, ls.smb_folder_name)
             try:
-                files = smb_client.list_folder(user, base)
+                raw = obsidian_writer.read_note(user, ls)
+                md_present = bool(raw.strip())
+                if md_present:
+                    missing = obsidian_writer.missing_pflicht(raw)
+                    md_body = obsidian_writer.content_md_body(raw)
             except Exception as e:
                 smb_error = str(e)
-        ctx["files"] = files
-        ctx["smb_error"] = smb_error
-        ctx["smb_configured"] = bool(cfg)
-        return templates.TemplateResponse(request, "wizard/step5_material.html", ctx)
+        # Cache aktualisieren
+        if ls.content_md_present != md_present:
+            ls.content_md_present = md_present
+            db.commit()
+        ctx.update({
+            "md_present": md_present,
+            "missing": missing,
+            "md_body": md_body,
+            "smb_error": smb_error,
+            "vorlage_flash": request.query_params.get("vorlage") == "1",
+        })
+        return templates.TemplateResponse(request, "wizard/step1_md.html", ctx)
+
+    if n == 2:
+        ctx.update({
+            "catalog": material_prompts.CATALOG,
+            "selected": ls.last_material_type,
+            "extras": ls.last_extras,
+        })
+        return templates.TemplateResponse(request, "wizard/step2_typ.html", ctx)
+
+    if n == 3:
+        # Inhalts-MD laden, Prompts bauen
+        md_body = ""
+        if cfg:
+            try:
+                raw = obsidian_writer.read_note(user, ls)
+                md_body = obsidian_writer.content_md_body(raw)
+            except Exception:
+                pass
+        if not ls.last_material_type:
+            return RedirectResponse(f"/wizard/{ls_id}/step/2", status_code=303)
+        try:
+            prompts = material_prompts.build_prompts(
+                ls=ls,
+                content_md_body=md_body,
+                material_type_key=ls.last_material_type,
+                extras=ls.last_extras,
+            )
+        except ValueError:
+            return RedirectResponse(f"/wizard/{ls_id}/step/2", status_code=303)
+        ls.last_fobizz_prompt = prompts["fobizz"]
+        db.commit()
+        ctx.update({
+            "material_type": prompts["material_type"],
+            "fobizz_prompt": prompts["fobizz"],
+            "claude_prompt": prompts["claude"],
+        })
+        return templates.TemplateResponse(request, "wizard/step3_prompt.html", ctx)
+
+    if n == 4:
+        mt = material_prompts.get(ls.last_material_type) if ls.last_material_type else None
+        ctx.update({
+            "output": ls.last_fobizz_output,
+            "material_type": mt,
+        })
+        return templates.TemplateResponse(request, "wizard/step4_output.html", ctx)
 
 
-# ── POST-Handler pro Schritt ──────────────────────────────────────────────
-@router.post("/wizard/{ls_id}/step/1")
-def wizard_save_1(
-    ls_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-    display_name: str = Form(...),
-    klassen_key: str = Form(""),
-    lernfeld: str = Form(""),
-):
-    ls = _get_ls(db, user, ls_id)
-    ls.display_name = display_name.strip()[:200] or ls.display_name
-    ls.klassen_key = klassen_key.strip()
-    ls.lernfeld = lernfeld.strip()
-    db.commit()
-    return RedirectResponse(f"/wizard/{ls_id}/step/2", status_code=303)
-
-
+# ── Schritte (POST) ───────────────────────────────────────────────────────
 @router.post("/wizard/{ls_id}/step/2")
 def wizard_save_2(
     ls_id: int,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
-    lernziele: str = Form(""),
-    vorwissen: str = Form(""),
+    material_type: str = Form(...),
+    extras: str = Form(""),
 ):
     ls = _get_ls(db, user, ls_id)
-    ls.lernziele = lernziele.strip()
-    ls.vorwissen = vorwissen.strip()
+    if not material_prompts.get(material_type):
+        raise HTTPException(400, "Unbekannter Material-Typ")
+    ls.last_material_type = material_type
+    ls.last_extras = extras.strip()
     db.commit()
     return RedirectResponse(f"/wizard/{ls_id}/step/3", status_code=303)
 
@@ -181,63 +226,54 @@ def wizard_save_4(
     ls_id: int,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
-    fobizz_output: str = Form(""),
+    output: str = Form(""),
+    as_worksheet: str = Form(""),
 ):
     ls = _get_ls(db, user, ls_id)
-    ls.last_fobizz_output = fobizz_output
+    ls.last_fobizz_output = output
 
-    # Materialliste für Vault-Notiz holen (best-effort)
+    mt = material_prompts.get(ls.last_material_type)
+    if not mt:
+        raise HTTPException(400, "Kein Material-Typ ausgewählt")
+
+    # 1) MD-Block in die Vault-Notiz anhängen
     cfg = smb_client.load_config(user)
-    material_files: list[str] = []
-    if cfg:
+    if cfg and output.strip():
         try:
-            entries = smb_client.list_folder(
-                user, smb_client.material_subpath(cfg, ls.smb_folder_name))
-            material_files = [e["name"] for e in entries if not e["is_dir"]]
-        except Exception:
-            pass
-
-    md = obsidian_writer.build_markdown(
-        ls=ls,
-        theme=ls.display_name,
-        lernziele=ls.lernziele,
-        fobizz_output=fobizz_output,
-        material_files=material_files,
-    )
-    if cfg:
-        try:
-            obsidian_writer.write_note(user, ls, md)
+            obsidian_writer.append_output_block(user, ls, mt.label, output)
         except Exception as e:
-            audit(db, "ls_vault_write_failed", actor=user, target=str(ls.id),
-                  detail=str(e), request=request)
+            audit(db, "wizard_vault_append_failed", actor=user,
+                  target=str(ls.id), detail=str(e), request=request)
 
-    audit(db, "wizard_output_saved", actor=user, target=str(ls.id), request=request)
+    audit(db, "wizard_generated", actor=user, target=str(ls.id),
+          detail=mt.key, request=request)
+
+    new_ws_id: int | None = None
+    if as_worksheet and output.strip():
+        ws = Worksheet(
+            owner_user_id=user.id,
+            title=f"{ls.display_name} · {mt.label}",
+            learning_situation_id=ls.id,
+        )
+        db.add(ws)
+        db.flush()
+        rev = WorksheetRevision(
+            worksheet_id=ws.id,
+            created_by_user_id=user.id,
+            comment=f"Aus Wizard ({mt.label})",
+            meta_json=json.dumps({"source": "wizard", "material_type": mt.key}),
+            aufgaben_json="[]",
+            markdown_source=output,
+        )
+        db.add(rev)
+        audit(db, "worksheet_created_from_wizard", actor=user,
+              target=str(ws.id), detail=mt.label, request=request)
+        new_ws_id = ws.id
+
     db.commit()
-    return RedirectResponse(f"/wizard/{ls_id}/step/5", status_code=303)
 
-
-@router.post("/wizard/{ls_id}/step/5")
-async def wizard_save_5(
-    request: Request,
-    ls_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-    files: list[UploadFile] = File(default=[]),
-):
-    ls = _get_ls(db, user, ls_id)
-    cfg = smb_client.load_config(user)
-    if cfg and files:
-        base = smb_client.material_subpath(cfg, ls.smb_folder_name)
-        smb_client.ensure_folder(user, base)
-        for f in files:
-            name = (f.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-            if not name or name.startswith("."):
-                continue
-            data = await f.read()
-            smb_client.write_file(user, f"{base}/{name}", data)
-        audit(db, "wizard_files_uploaded", actor=user, target=str(ls.id),
-              detail=f"{len(files)} Datei(en)", request=request)
-        db.commit()
+    if new_ws_id:
+        return RedirectResponse(f"/worksheets/{new_ws_id}", status_code=303)
     return RedirectResponse(f"/wizard/{ls_id}/done", status_code=303)
 
 
@@ -249,4 +285,7 @@ def wizard_done(
     db: Annotated[Session, Depends(get_db)],
 ):
     ls = _get_ls(db, user, ls_id)
-    return templates.TemplateResponse(request, "wizard/done.html", {"ls": ls})
+    mt = material_prompts.get(ls.last_material_type) if ls.last_material_type else None
+    return templates.TemplateResponse(request, "wizard/done.html", {
+        "ls": ls, "material_type": mt,
+    })
