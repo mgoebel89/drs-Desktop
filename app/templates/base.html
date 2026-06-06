@@ -7,30 +7,146 @@
 <link rel="stylesheet" href="/static/drs.css">
 </head>
 <body>
+{% set path = request.url.path if request else '' %}
 {% if user %}
 <nav class="nav">
-  <div style="display:flex;align-items:center;gap:.9rem">
+  <button id="burger-btn" class="burger" aria-label="Menü öffnen" aria-expanded="false" aria-controls="drawer">
+    <span></span><span></span><span></span>
+  </button>
+  <div style="display:flex;align-items:center;gap:.9rem;flex:1">
     <img src="/branding/logo" alt="" style="height:28px;width:auto" onerror="this.style.display='none'">
     <span style="font-weight:700;color:var(--blau);font-size:13px">{{ school_name() }}</span>
-    <span class="muted" style="margin:0 .4rem">·</span>
-    <a href="/">Start</a>
-    <a href="/worksheets">Aufgabenblätter</a>
-    <a href="/learning-situations">Lernsituationen</a>
-    <a href="/wizard">Wizard</a>
-    <a href="/timetable">Stundenplan</a>
-    <a href="/help">Hilfe</a>
-    <a href="/profile">Profil</a>
-    {% if user.role == 'admin' %}<a href="/admin/users">Nutzer</a><a href="/admin/settings">Einstellungen</a>{% endif %}
   </div>
   <div class="right">
-    {{ user.full_name or user.username }}
+    <span class="muted" style="font-size:12px">{{ user.full_name or user.username }}</span>
     {% if user.role == 'admin' %}<span class="badge b-admin">Admin</span>{% endif %}
-    &nbsp;·&nbsp;
-    <form method="post" action="/logout" style="display:inline">
-      <button class="btn-sec" style="padding:4px 10px;font-size:12px" type="submit">Abmelden</button>
-    </form>
   </div>
 </nav>
+
+<div class="drawer-backdrop" id="drawer-backdrop"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div style="display:flex;align-items:center;gap:.6rem;flex:1">
+      <img src="/branding/logo" alt="" style="height:22px;width:auto" onerror="this.style.display='none'">
+      <strong style="font-size:13px;color:var(--blau)">{{ school_name() }}</strong>
+    </div>
+    <button id="drawer-close" class="drawer-close" aria-label="Menü schließen">×</button>
+  </div>
+  <div class="drawer-user">
+    <strong>{{ user.full_name or user.username }}</strong>
+    {% if user.role == 'admin' %}<span class="badge b-admin">Admin</span>{% endif %}
+  </div>
+
+  <div class="drawer-group">Unterricht</div>
+  <a href="/" class="drawer-link{% if path == '/' %} active{% endif %}">Start</a>
+  <a href="/timetable" class="drawer-link{% if path.startswith('/timetable') %} active{% endif %}">Stundenplan</a>
+  <a href="/learning-situations" class="drawer-link{% if path.startswith('/learning-situations') or path.startswith('/ls/') %} active{% endif %}">Lernsituationen</a>
+  <a href="/worksheets" class="drawer-link{% if path.startswith('/worksheets') %} active{% endif %}">Aufgabenblätter</a>
+
+  <div class="drawer-group">Werkzeuge</div>
+  <a href="/wizard" class="drawer-link{% if path.startswith('/wizard') %} active{% endif %}">Wizard</a>
+  <a href="/help" class="drawer-link{% if path.startswith('/help') %} active{% endif %}">Hilfe</a>
+
+  <div class="drawer-group">Konto</div>
+  <a href="/profile" class="drawer-link{% if path.startswith('/profile') %} active{% endif %}">Profil</a>
+  <form method="post" action="/logout" style="margin:0">
+    <button type="submit" class="drawer-link drawer-logout">Abmelden</button>
+  </form>
+
+  {% if user.role == 'admin' %}
+  <div class="drawer-group">Administration</div>
+  <a href="/admin/users" class="drawer-link{% if path.startswith('/admin/users') %} active{% endif %}">Nutzer</a>
+  <a href="/admin/settings" class="drawer-link{% if path.startswith('/admin/settings') %} active{% endif %}">Einstellungen</a>
+  {% endif %}
+</aside>
+
+<script>
+(function() {
+  const btn = document.getElementById('burger-btn');
+  const dr = document.getElementById('drawer');
+  const bd = document.getElementById('drawer-backdrop');
+  const close = document.getElementById('drawer-close');
+  function open() {
+    dr.classList.add('open'); bd.classList.add('open');
+    dr.setAttribute('aria-hidden', 'false');
+    btn.setAttribute('aria-expanded', 'true');
+    btn.classList.add('open');
+  }
+  function shut() {
+    dr.classList.remove('open'); bd.classList.remove('open');
+    dr.setAttribute('aria-hidden', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.classList.remove('open');
+  }
+  btn.addEventListener('click', () => dr.classList.contains('open') ? shut() : open());
+  close.addEventListener('click', shut);
+  bd.addEventListener('click', shut);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') shut(); });
+  dr.querySelectorAll('a, button[type="submit"]').forEach(el => {
+    el.addEventListener('click', () => { /* Drawer schließt sich beim Navigieren von selbst neu */ });
+  });
+})();
+</script>
+
+<style>
+  .nav { display:flex; align-items:center; gap:.9rem; }
+  .nav .right { display:flex; align-items:center; gap:.5rem; }
+  .burger {
+    width: 34px; height: 34px; padding: 0; border: 1px solid #d0d0d0;
+    background: #fff; border-radius: 6px; cursor: pointer;
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  }
+  .burger span {
+    display: block; width: 18px; height: 2px; background: var(--blau); border-radius: 1px;
+    transition: transform .18s, opacity .18s;
+  }
+  .burger:hover { background: #f5f5ff; }
+  .burger.open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  .burger.open span:nth-child(2) { opacity: 0; }
+  .burger.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+  .drawer-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.32);
+    opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 998;
+  }
+  .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; left: -320px; bottom: 0; width: 290px;
+    background: #fff; box-shadow: 4px 0 24px rgba(0,0,0,.18);
+    transition: left .22s ease; z-index: 999; overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .drawer.open { left: 0; }
+  .drawer-head {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .9rem 1rem; border-bottom: 1px solid #eee;
+  }
+  .drawer-close {
+    border: none; background: transparent; font-size: 26px; line-height: 1;
+    cursor: pointer; color: #888; padding: 0 .3rem;
+  }
+  .drawer-close:hover { color: #333; }
+  .drawer-user {
+    padding: .7rem 1rem; background: #fafafa; font-size: 13px;
+    border-bottom: 1px solid #eee; display: flex; align-items: center; gap: .5rem;
+  }
+  .drawer-group {
+    padding: .9rem 1rem .25rem; font-size: 11px; color: #888;
+    text-transform: uppercase; letter-spacing: .8px; font-weight: 600;
+  }
+  .drawer-link {
+    display: block; padding: .6rem 1rem; color: var(--text);
+    text-decoration: none; font-size: 14px; border-left: 3px solid transparent;
+    background: none; border-top: none; border-right: none; border-bottom: none;
+    width: 100%; text-align: left; cursor: pointer; font-family: inherit;
+  }
+  .drawer-link:hover { background: #f5f5ff; }
+  .drawer-link.active {
+    background: #f0ecff; border-left-color: var(--blau);
+    color: var(--blau); font-weight: 600;
+  }
+  .drawer-logout { color: var(--pink); }
+</style>
 {% else %}
 <div class="nav" style="justify-content:center">
   <div style="display:flex;align-items:center;gap:.9rem">
