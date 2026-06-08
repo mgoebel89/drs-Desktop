@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Schüler{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Schüler</h1>
+  <p class="muted">Pro Klasse pflegst du hier deine Schülerliste. Wird von Prüfungen als Quelle genutzt.</p>
+
+  {% if request.query_params.get('import_ok') %}
+    <div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;padding:.6rem 1rem;margin:.8rem 0">
+      ✓ {{ request.query_params.get('import_ok') }} Schüler importiert
+      ({{ request.query_params.get('format') }}-Format).
+    </div>
+  {% endif %}
+  {% if request.query_params.get('import_err') %}
+    <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.6rem 1rem;margin:.8rem 0">
+      Import fehlgeschlagen: {{ request.query_params.get('import_err').replace('+', ' ') }}
+    </div>
+  {% endif %}
+
+  <div style="display:flex;gap:.6rem;align-items:end;margin:1rem 0 1.4rem 0;flex-wrap:wrap">
+    <form method="get" action="/students" style="display:flex;gap:.4rem;align-items:end">
+      <div>
+        <label>Klasse filtern</label>
+        <select name="klasse" onchange="this.form.submit()" style="min-width:160px">
+          <option value="">— alle —</option>
+          {% for k in klassen %}
+          <option value="{{ k }}" {% if k == filter_klasse %}selected{% endif %}>{{ k }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </div>
+
+  <h2 style="margin-top:.4rem">Schüler hinzufügen</h2>
+  <form method="post" action="/students"
+        style="display:grid;grid-template-columns:120px 1fr 1fr 1fr auto;gap:.5rem;align-items:end">
+    <div>
+      <label>Klasse</label>
+      <input name="klassen_key" value="{{ filter_klasse }}" placeholder="MTA22" required>
+    </div>
+    <div>
+      <label>Nachname</label>
+      <input name="nachname" required>
+    </div>
+    <div>
+      <label>Vorname</label>
+      <input name="vorname">
+    </div>
+    <div>
+      <label>E-Mail (optional)</label>
+      <input name="email" type="email">
+    </div>
+    <div><button class="btn" type="submit">+ Hinzufügen</button></div>
+  </form>
+
+  <h2 style="margin-top:1.6rem">Aus CSV importieren</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:.6rem">
+    Erkennt automatisch das <strong>Moodle-Teilnehmer-CSV</strong> (Komma-getrennt, mit Header)
+    und das klassische Format <code>Nachname;Vorname[;Email]</code>.
+  </p>
+  <form method="post" action="/students/import" enctype="multipart/form-data"
+        style="display:flex;gap:.6rem;align-items:end;flex-wrap:wrap">
+    <div>
+      <label>Ziel-Klasse</label>
+      <input name="klassen_key" value="{{ filter_klasse }}" placeholder="MTA22" required>
+    </div>
+    <div style="flex:1">
+      <label>CSV-Datei</label>
+      <input name="file" type="file" accept=".csv,text/csv" required>
+    </div>
+    <label style="display:flex;align-items:center;gap:.3rem;font-size:13px;font-weight:normal">
+      <input type="checkbox" name="overwrite" value="1">
+      Klasse vorher leeren
+    </label>
+    <div><button class="btn" type="submit">Importieren</button></div>
+  </form>
+
+  <h2 style="margin-top:1.6rem">Schülerliste{% if filter_klasse %} — {{ filter_klasse }}{% endif %}</h2>
+  {% if students %}
+  <table>
+    <thead><tr>
+      <th>Klasse</th><th>Nachname</th><th>Vorname</th><th>E-Mail</th><th>Moodle-ID</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for s in students %}
+    <tr>
+      <td><code style="font-size:11px">{{ s.klassen_key }}</code></td>
+      <td><strong>{{ s.nachname }}</strong></td>
+      <td>{{ s.vorname }}</td>
+      <td style="font-size:12px;color:#666">{{ s.email or '—' }}</td>
+      <td style="font-size:11px;color:#999">{{ s.moodle_id or '—' }}</td>
+      <td>
+        <form method="post" action="/students/{{ s.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Schüler/in „{{ s.nachname }}, {{ s.vorname }}" löschen?');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">Keine Schüler{% if filter_klasse %} in dieser Klasse{% endif %}.</p>
+  {% endif %}
+</div>
+{% endblock %}

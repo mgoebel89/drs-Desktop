@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Prüfungen{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem">
+    <h1 style="margin:0;flex:1">Prüfungen / Bewertungen</h1>
+    <a class="btn" href="/exams/new">+ Neue Prüfung</a>
+  </div>
+  <p class="muted">Klassenarbeiten, Tests, mündliche Bewertungen. Verknüpfung mit Lernsituationen möglich.</p>
+
+  {% if items %}
+  <table style="margin-top:1rem">
+    <thead><tr>
+      <th>Titel</th><th>Datum</th><th>Klasse</th><th>Skala</th><th>Modus</th><th>Stand</th>
+    </tr></thead>
+    <tbody>
+    {% for it in items %}
+    {% set e = it.exam %}
+    <tr>
+      <td><a href="/exams/{{ e.id }}"><strong>{{ e.title }}</strong></a></td>
+      <td>{{ e.datum or '—' }}</td>
+      <td>{{ e.klassen_key or '—' }}</td>
+      <td style="font-size:11px;color:#666">{{ e.grading_scale_key }}</td>
+      <td>
+        {% if e.input_mode == 'stages' %}
+          <span class="badge b-teacher">Stufen</span>
+        {% else %}
+          <span class="badge b-inactive">Zahlen</span>
+        {% endif %}
+      </td>
+      <td style="font-size:12px">
+        {% if it.has_results %}✓ bewertet{% elif it.has_students %}— offen{% else %}⚠ keine Schüler{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted" style="margin-top:1rem">Noch keine Prüfungen angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

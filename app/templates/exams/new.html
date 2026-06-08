@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Neue Prüfung{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Neue Prüfung anlegen</h1>
+  <p class="muted">Grunddaten setzen, im nächsten Schritt Schüler/Feedbackpunkte zuordnen und bewerten.</p>
+
+  <form method="post" action="/exams"
+        style="display:grid;grid-template-columns:1fr 1fr;gap:.9rem;max-width:760px;margin-top:1rem">
+    <div style="grid-column:1/3">
+      <label>Titel</label>
+      <input name="title" required maxlength="200"
+             value="{% if prefill_ls %}{{ prefill_ls.display_name }} · Bewertung{% endif %}">
+    </div>
+    <div>
+      <label>Datum</label>
+      <input name="datum" type="date" value="{{ today }}">
+    </div>
+    <div>
+      <label>Klasse</label>
+      <input name="klassen_key" list="klassen-list"
+             value="{% if prefill_ls %}{{ prefill_ls.klassen_key }}{% endif %}"
+             placeholder="MTA22">
+      <datalist id="klassen-list">
+        {% for k in klassen %}<option value="{{ k }}">{% endfor %}
+      </datalist>
+    </div>
+    <div>
+      <label>Verknüpfte Lernsituation (optional)</label>
+      <select name="learning_situation_id">
+        <option value="">— keine —</option>
+        {% for ls in ls_options %}
+          <option value="{{ ls.id }}"
+                  {% if prefill_ls and ls.id == prefill_ls.id %}selected{% endif %}>
+            {{ ls.display_name }}{% if ls.klassen_key %} ({{ ls.klassen_key }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Notenskala</label>
+      <select name="grading_scale_key">
+        {% for key, lbl in scales %}
+          <option value="{{ key }}" {% if key == default_scale %}selected{% endif %}>{{ lbl }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="grid-column:1/3">
+      <label>Eingabemodus</label>
+      <div style="display:flex;gap:.8rem;margin-top:.3rem">
+        <label style="font-weight:normal;display:flex;align-items:center;gap:.4rem">
+          <input type="radio" name="input_mode" value="numeric" checked> Zahlen-Eingabe (klassisch)
+        </label>
+        <label style="font-weight:normal;display:flex;align-items:center;gap:.4rem">
+          <input type="radio" name="input_mode" value="stages"> Stufen-Schnellauswahl
+        </label>
+      </div>
+      <p class="muted" style="font-size:11px;margin-top:.3rem">
+        Im Stufen-Modus klickst du beim Bewerten nur auf eine Stufe pro Punkt (z. B.
+        „voll erfüllt"). Pro Feedbackpunkt definierst du die Stufen einmalig.
+        Kann pro Prüfung jederzeit umgestellt werden.
+      </p>
+    </div>
+    <div style="grid-column:1/3;display:flex;gap:.6rem;justify-content:flex-end;margin-top:.6rem">
+      <a class="btn btn-sec" href="/exams">Abbrechen</a>
+      <button class="btn" type="submit">Anlegen und öffnen →</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

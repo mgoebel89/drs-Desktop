@@ -213,6 +213,91 @@ class IcalCalendar(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Student(Base):
+    """Schüler pro Lehrer + Klasse. Quelle für Prüfungs-Bewertungen."""
+    __tablename__ = "students"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    klassen_key: Mapped[str] = mapped_column(String(255), default="", index=True)
+    nachname: Mapped[str] = mapped_column(String(120))
+    vorname: Mapped[str] = mapped_column(String(120), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    moodle_id: Mapped[str] = mapped_column(String(64), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class Exam(Base):
+    """Prüfung/Bewertung. Kann an LS und/oder Stundenblock hängen."""
+    __tablename__ = "exams"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), default="Neue Prüfung")
+    datum: Mapped[str] = mapped_column(String(10), default="")  # ISO YYYY-MM-DD
+    klassen_key: Mapped[str] = mapped_column(String(255), default="", index=True)
+    learning_situation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    lesson_note_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lesson_notes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    grading_scale_key: Mapped[str] = mapped_column(String(32), default="mss_noten")
+    input_mode: Mapped[str] = mapped_column(String(16), default="numeric")  # "numeric" | "stages"
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    feedback_points: Mapped[list["ExamFeedbackPoint"]] = relationship(
+        back_populates="exam", cascade="all, delete-orphan",
+        order_by="ExamFeedbackPoint.position",
+    )
+    results: Mapped[list["ExamResult"]] = relationship(
+        back_populates="exam", cascade="all, delete-orphan",
+    )
+
+
+class ExamFeedbackPoint(Base):
+    """Ein Bewertungspunkt einer Prüfung (z.B. 'Aufgabe 1', max 10 Pkt)."""
+    __tablename__ = "exam_feedback_points"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exam_id: Mapped[int] = mapped_column(
+        ForeignKey("exams.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    max_points: Mapped[float] = mapped_column(default=0.0)
+    # Optional: JSON [{label, points}, ...] für Stufen-Modus
+    stages_json: Mapped[str] = mapped_column(Text, default="")
+
+    exam: Mapped[Exam] = relationship(back_populates="feedback_points")
+
+
+class ExamResult(Base):
+    """Bewertung eines Schülers in einer Prüfung."""
+    __tablename__ = "exam_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exam_id: Mapped[int] = mapped_column(
+        ForeignKey("exams.id", ondelete="CASCADE"), index=True
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True
+    )
+    # JSON: {feedback_point_id: erreicht_pkt}
+    erreicht_json: Mapped[str] = mapped_column(Text, default="{}")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    exam: Mapped[Exam] = relationship(back_populates="results")
+
+
 class Setting(Base):
     """Globale Schlüssel/Wert-Einstellungen (Branding etc.)."""
     __tablename__ = "settings"
