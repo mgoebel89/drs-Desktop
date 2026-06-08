@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Notenschlüssel{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Notenschlüssel</h1>
+  <p class="muted">Eigene Notenskalen für Prüfungen. Typ MSS Punkte oder MSS Noten, Prozentgrenzen editierbar.</p>
+
+  <h2 style="margin-top:1.2rem">Neuen Schlüssel anlegen</h2>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.6rem 0 1.4rem">
+    {% for key, lbl in scale_types %}
+      <a class="btn" href="/grading-scales/new?type={{ key }}">+ {{ lbl }}</a>
+    {% endfor %}
+  </div>
+
+  <h2>Eigene Schlüssel</h2>
+  {% if scales %}
+  <table>
+    <thead><tr><th>Name</th><th>Typ</th><th></th></tr></thead>
+    <tbody>
+    {% for s in scales %}
+    <tr>
+      <td><a href="/grading-scales/{{ s.id }}"><strong>{{ s.name }}</strong></a></td>
+      <td style="font-size:12px;color:#666">{{ s.scale_type }}</td>
+      <td>
+        <a class="btn-sec" style="padding:3px 9px;font-size:11px" href="/grading-scales/{{ s.id }}">Bearbeiten</a>
+        <form method="post" action="/grading-scales/{{ s.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Notenschlüssel „{{ s.name }}" löschen?');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">🗑</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">Noch keine eigenen Schlüssel. Built-ins (unten) sind immer verfügbar.</p>
+  {% endif %}
+
+  <h2 style="margin-top:1.6rem">Eingebaute Vorlagen</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Typ</th><th>Stufen</th><th></th></tr></thead>
+    <tbody>
+    {% for b in builtins %}
+    <tr>
+      <td>{{ b.label }}</td>
+      <td style="font-size:12px;color:#666">{{ b.type }}</td>
+      <td>{{ b.n_stufen }}</td>
+      <td><a class="btn-sec" style="padding:3px 9px;font-size:11px"
+             href="/grading-scales/new?copy_from={{ b.key }}">Als Vorlage kopieren</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -22,6 +22,8 @@ from app.routers import learning_situations as ls_router
 from app.routers import wizard as wizard_router
 from app.routers import students as students_router
 from app.routers import exams as exams_router
+from app.routers import grading_scales as grading_scales_router
+from app.routers import feedback_templates as feedback_templates_router
 from app.models import User
 from app.templating import templates
 
@@ -44,6 +46,8 @@ app.include_router(ls_router.router)
 app.include_router(wizard_router.router)
 app.include_router(students_router.router)
 app.include_router(exams_router.router)
+app.include_router(grading_scales_router.router)
+app.include_router(feedback_templates_router.router)
 
 
 @app.get("/")

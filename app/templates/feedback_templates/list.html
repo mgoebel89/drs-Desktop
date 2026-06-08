@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Feedback-Vorlagen{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem">
+    <h1 style="margin:0;flex:1">Feedback-Vorlagen</h1>
+    <a class="btn" href="/feedback-templates/new">+ Neue Vorlage</a>
+  </div>
+  <p class="muted">Wiederverwendbare Feedbackpunkt-Sets (Name, Max-Punkte, Gruppen-/Einzelwertung, Stufen). Beim Anlegen einer Prüfung „aus Vorlage laden".</p>
+
+  {% if items %}
+  <table style="margin-top:1rem">
+    <thead><tr><th>Name</th><th>Punkte</th><th></th></tr></thead>
+    <tbody>
+    {% for it in items %}
+    <tr>
+      <td><a href="/feedback-templates/{{ it.t.id }}"><strong>{{ it.t.name }}</strong></a></td>
+      <td>{{ it.n }}</td>
+      <td>
+        <a class="btn-sec" style="padding:3px 9px;font-size:11px" href="/feedback-templates/{{ it.t.id }}">Bearbeiten</a>
+        <form method="post" action="/feedback-templates/{{ it.t.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Vorlage „{{ it.t.name }}" löschen?');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">🗑</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted" style="margin-top:1rem">Noch keine Vorlagen.</p>
+  {% endif %}
+</div>
+{% endblock %}

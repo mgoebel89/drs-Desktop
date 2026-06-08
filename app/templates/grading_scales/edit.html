@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Notenschlüssel bearbeiten' if scale else 'Neuer Notenschlüssel' }}{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem">
+    <h1 style="margin:0;flex:1">{{ 'Notenschlüssel bearbeiten' if scale else 'Neuer Notenschlüssel' }}</h1>
+    <a class="btn btn-sec" href="/grading-scales">← Übersicht</a>
+  </div>
+  <p class="muted">Typ: <strong>{{ type_label }}</strong> · Labels sind fix, Prozentgrenzen editierbar.</p>
+
+  <div style="max-width:680px;margin-top:1rem">
+    <label>Name</label>
+    <input id="f-name" value="{{ name }}" maxlength="120" placeholder="z.B. Klassenarbeit 50%">
+
+    <h3 style="margin-top:1.2rem">Stufen</h3>
+    <table id="stufen-table">
+      <thead><tr><th>Note/Punkte</th><th>min %</th><th>max %</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:1rem">
+      <button class="btn" type="button" id="btn-save">Speichern</button>
+    </div>
+    <div><span id="status" class="muted" style="font-size:12px"></span></div>
+  </div>
+</div>
+
+<script>
+const SCALE_ID = {{ scale.id if scale else 'null' }};
+const SCALE_TYPE = {{ scale_type|tojson }};
+const STUFEN = {{ stufen|tojson }};
+
+const tbody = document.querySelector('#stufen-table tbody');
+function render() {
+  tbody.innerHTML = '';
+  STUFEN.forEach((st, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${escapeHtml(st.label)}</strong></td>
+      <td><input type="number" step="1" min="0" max="100" value="${st.min_pct}" data-i="${i}" data-f="min_pct" style="width:80px"></td>
+      <td><input type="number" step="1" min="0" max="100" value="${st.max_pct}" data-i="${i}" data-f="max_pct" style="width:80px"></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      STUFEN[inp.dataset.i][inp.dataset.f] = parseFloat(inp.value) || 0;
+    });
+  });
+}
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+render();
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const status = document.getElementById('status');
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { status.textContent = '✗ Name fehlt'; return; }
+  status.textContent = 'speichere …';
+  const url = SCALE_ID ? '/grading-scales/' + SCALE_ID : '/grading-scales';
+  const r = await fetch(url, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, scale_type: SCALE_TYPE, stufen: STUFEN}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    status.textContent = '✓ gespeichert';
+    if (!SCALE_ID && d.id) { location.href = '/grading-scales/' + d.id; }
+  } else { status.textContent = '✗ Fehler'; }
+});
+</script>
+{% endblock %}

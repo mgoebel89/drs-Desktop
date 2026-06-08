@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Vorlage bearbeiten' if tmpl else 'Neue Feedback-Vorlage' }}{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem">
+    <h1 style="margin:0;flex:1">{{ 'Vorlage bearbeiten' if tmpl else 'Neue Feedback-Vorlage' }}</h1>
+    <a class="btn btn-sec" href="/feedback-templates">← Übersicht</a>
+  </div>
+
+  <div style="max-width:760px;margin-top:1rem">
+    <label>Name</label>
+    <input id="f-name" value="{{ name }}" maxlength="120" placeholder="z.B. Projektbewertung Standard">
+
+    <h3 style="margin-top:1.2rem">Feedbackpunkte</h3>
+    <div id="fps-list"></div>
+    <button class="btn btn-sec" type="button" id="btn-add" style="margin-top:.8rem">+ Punkt hinzufügen</button>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:1rem">
+      <button class="btn" type="button" id="btn-save">Speichern</button>
+    </div>
+    <div><span id="status" class="muted" style="font-size:12px"></span></div>
+  </div>
+</div>
+
+<script>
+const TID = {{ tmpl.id if tmpl else 'null' }};
+let fps = {{ points|tojson }};
+fps = fps.map(p => ({name:p.name||'', max_points:p.max_points||0, scope:p.scope||'individual', stages:p.stages||[]}));
+
+const list = document.getElementById('fps-list');
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function render() {
+  list.innerHTML = '';
+  fps.forEach((fp, idx) => {
+    const div = document.createElement('div');
+    div.style = 'border:1px solid #e0e0e0;border-radius:6px;padding:.8rem;margin-bottom:.6rem;background:#fafafa';
+    div.innerHTML = `
+      <div style="display:grid;grid-template-columns:30px 1fr 90px 130px 30px;gap:.5rem;align-items:end">
+        <div style="font-weight:600;color:#666">${idx+1}.</div>
+        <div><label style="font-size:11px">Name</label><input class="fp-name" value="${escapeHtml(fp.name)}"></div>
+        <div><label style="font-size:11px">Max</label><input class="fp-max" type="number" step="0.5" min="0" value="${fp.max_points}"></div>
+        <div><label style="font-size:11px">Wertung</label>
+          <select class="fp-scope">
+            <option value="individual"${fp.scope==='individual'?' selected':''}>Einzel</option>
+            <option value="group"${fp.scope==='group'?' selected':''}>Gruppe</option>
+          </select></div>
+        <div><button class="btn-sec fp-del" style="padding:5px 8px;color:var(--pink);border-color:var(--pink)">✕</button></div>
+      </div>
+      <div style="margin-top:.6rem;padding-top:.6rem;border-top:1px dashed #ddd">
+        <div style="font-size:11px;color:#666;margin-bottom:.3rem">Stufen (optional):</div>
+        <div class="stages-list"></div>
+        <button type="button" class="btn-sec stage-add" style="padding:3px 8px;font-size:11px;margin-top:.3rem">+ Stufe</button>
+      </div>`;
+    list.appendChild(div);
+    div.querySelector('.fp-name').addEventListener('input', e => fp.name = e.target.value);
+    div.querySelector('.fp-max').addEventListener('input', e => fp.max_points = parseFloat(e.target.value)||0);
+    div.querySelector('.fp-scope').addEventListener('change', e => fp.scope = e.target.value);
+    div.querySelector('.fp-del').addEventListener('click', () => { if(confirm('Punkt löschen?')){fps.splice(idx,1);render();} });
+
+    const sl = div.querySelector('.stages-list');
+    function renderStages() {
+      sl.innerHTML = '';
+      fp.stages.forEach((st, si) => {
+        const r = document.createElement('div');
+        r.style = 'display:grid;grid-template-columns:1fr 90px 30px;gap:.3rem;margin-bottom:.2rem';
+        r.innerHTML = `<input class="st-label" value="${escapeHtml(st.label)}" placeholder="Label">
+          <input class="st-pts" type="number" step="0.5" value="${st.points}" placeholder="Pkt">
+          <button class="btn-sec st-del" style="padding:3px 6px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>`;
+        sl.appendChild(r);
+        r.querySelector('.st-label').addEventListener('input', e => st.label = e.target.value);
+        r.querySelector('.st-pts').addEventListener('input', e => st.points = parseFloat(e.target.value)||0);
+        r.querySelector('.st-del').addEventListener('click', () => {fp.stages.splice(si,1);renderStages();});
+      });
+    }
+    renderStages();
+    div.querySelector('.stage-add').addEventListener('click', () => {fp.stages.push({label:'',points:0});renderStages();});
+  });
+}
+document.getElementById('btn-add').addEventListener('click', () => {fps.push({name:'',max_points:10,scope:'individual',stages:[]});render();});
+render();
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const status = document.getElementById('status');
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { status.textContent = '✗ Name fehlt'; return; }
+  status.textContent = 'speichere …';
+  const url = TID ? '/feedback-templates/' + TID : '/feedback-templates';
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, points: fps})});
+  const d = await r.json();
+  if (d.ok) { status.textContent = '✓ gespeichert';
+    if (!TID && d.id) location.href = '/feedback-templates/' + d.id;
+  } else { status.textContent = '✗ Fehler'; }
+});
+</script>
+{% endblock %}

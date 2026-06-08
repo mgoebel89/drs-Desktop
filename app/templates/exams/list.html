@@ -13,7 +13,7 @@
   {% if items %}
   <table style="margin-top:1rem">
     <thead><tr>
-      <th>Titel</th><th>Datum</th><th>Klasse</th><th>Skala</th><th>Modus</th><th>Stand</th>
+      <th>Titel</th><th>Datum</th><th>Klasse</th><th>Skala</th><th>Modus</th><th>Stand</th><th></th>
     </tr></thead>
     <tbody>
     {% for it in items %}
@@ -32,6 +32,15 @@
       </td>
       <td style="font-size:12px">
         {% if it.has_results %}✓ bewertet{% elif it.has_students %}— offen{% else %}⚠ keine Schüler{% endif %}
+      </td>
+      <td>
+        <form method="post" action="/exams/{{ e.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Prüfung „{{ e.title }}" wirklich löschen? Alle Bewertungen gehen verloren.');">
+          <input type="hidden" name="confirm" value="1">
+          <button class="btn-sec" type="submit"
+                  style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)"
+                  title="Prüfung löschen">🗑</button>
+        </form>
       </td>
     </tr>
     {% endfor %}

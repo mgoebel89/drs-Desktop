@@ -1,93 +1,224 @@
-"""Notenskalen — hardcoded.
+"""Notenskalen.
 
-Pro Skala eine Liste (label, min_pct, max_pct) — Grenzen inklusiv.
-Die Note für eine erreichte Prozentzahl wird über die erste passende
-Stufe ermittelt.
+Zwei Typen: MSS-Noten (1 … 6 mit +/−, KEIN 1+) und MSS-Punkte (15 … 0).
+Pro Stufe (label, min_pct, max_pct) — Grenzen inklusiv.
 
-Neue Skalen lassen sich hier ergänzen; das Dropdown im Exam-Formular
-liest direkt aus dieser Datei.
+- **Built-in-Skalen** stehen immer zur Verfügung (Referenz "builtin:<key>").
+- **Custom-Skalen** liegen in der DB-Tabelle grading_scales und werden
+  über die Referenz "custom:<id>" angesprochen. Sie übernehmen die fixen
+  Labels ihres Typs, erlauben aber editierbare Prozentgrenzen.
+
+Referenz-Strings (in exams.grading_scale_key gespeichert):
+  "builtin:mss_noten" | "builtin:mss_punkte" | "custom:<id>"
+Bare Altwerte ("mss_noten"/"mss_punkte") werden als Built-in interpretiert.
 """
 from __future__ import annotations
 
+import json
 
-SCALES: dict[str, dict] = {
-    "mss_noten": {
-        "label": "MSS Schulnoten (1+ … 6)",
-        "stufen": [
-            ("1+", 96, 100),
-            ("1",  92, 95),
-            ("1-", 88, 91),
-            ("2+", 84, 87),
-            ("2",  80, 83),
-            ("2-", 76, 79),
-            ("3+", 72, 75),
-            ("3",  68, 71),
-            ("3-", 64, 67),
-            ("4+", 60, 63),
-            ("4",  55, 59),
-            ("4-", 50, 54),
-            ("5+", 45, 49),
-            ("5",  40, 44),
-            ("5-", 33, 39),
-            ("6",   0, 32),
-        ],
-    },
-    "mss_punkte": {
-        "label": "MSS Punkte (15 … 0)",
-        "stufen": [
-            ("15", 95, 100),
-            ("14", 90, 94),
-            ("13", 85, 89),
-            ("12", 80, 84),
-            ("11", 75, 79),
-            ("10", 70, 74),
-            ("9",  65, 69),
-            ("8",  60, 64),
-            ("7",  55, 59),
-            ("6",  50, 54),
-            ("5",  45, 49),
-            ("4",  40, 44),
-            ("3",  33, 39),
-            ("2",  27, 32),
-            ("1",  20, 26),
-            ("0",   0, 19),
-        ],
-    },
+
+# ── Typ-Definitionen: fixe Label-Leiter + Default-Grenzen ────────────────
+
+# MSS-Noten: 1+ entfällt, Top-Note "1" reicht bis 100 %.
+_MSS_NOTEN_DEFAULT = [
+    ("1",  92, 100),
+    ("1-", 88, 91),
+    ("2+", 84, 87),
+    ("2",  80, 83),
+    ("2-", 76, 79),
+    ("3+", 72, 75),
+    ("3",  68, 71),
+    ("3-", 64, 67),
+    ("4+", 60, 63),
+    ("4",  55, 59),
+    ("4-", 50, 54),
+    ("5+", 45, 49),
+    ("5",  40, 44),
+    ("5-", 33, 39),
+    ("6",   0, 32),
+]
+
+_MSS_PUNKTE_DEFAULT = [
+    ("15", 95, 100),
+    ("14", 90, 94),
+    ("13", 85, 89),
+    ("12", 80, 84),
+    ("11", 75, 79),
+    ("10", 70, 74),
+    ("9",  65, 69),
+    ("8",  60, 64),
+    ("7",  55, 59),
+    ("6",  50, 54),
+    ("5",  45, 49),
+    ("4",  40, 44),
+    ("3",  33, 39),
+    ("2",  27, 32),
+    ("1",  20, 26),
+    ("0",   0, 19),
+]
+
+SCALE_TYPES: dict[str, dict] = {
+    "mss_noten": {"label": "MSS Schulnoten", "default_stufen": _MSS_NOTEN_DEFAULT},
+    "mss_punkte": {"label": "MSS Punkte", "default_stufen": _MSS_PUNKTE_DEFAULT},
 }
 
-DEFAULT_SCALE = "mss_noten"
 
+# ── Built-in-Skalen ──────────────────────────────────────────────────────
+
+BUILTINS: dict[str, dict] = {
+    "mss_noten": {"label": "MSS Schulnoten (1 … 6)", "type": "mss_noten",
+                  "stufen": _MSS_NOTEN_DEFAULT},
+    "mss_punkte": {"label": "MSS Punkte (15 … 0)", "type": "mss_punkte",
+                   "stufen": _MSS_PUNKTE_DEFAULT},
+}
+
+# Rückwärtskompatibler Alias (alte Aufrufer nutzen grading.SCALES)
+SCALES = BUILTINS
+
+DEFAULT_SCALE = "builtin:mss_noten"
+
+
+# ── Typ-Helfer (für den Skalen-Editor) ───────────────────────────────────
+
+def list_scale_types() -> list[tuple[str, str]]:
+    return [(k, v["label"]) for k, v in SCALE_TYPES.items()]
+
+
+def labels_for(scale_type: str) -> list[str]:
+    t = SCALE_TYPES.get(scale_type) or SCALE_TYPES["mss_noten"]
+    return [lbl for lbl, _, _ in t["default_stufen"]]
+
+
+def default_stufen_for(scale_type: str) -> list[dict]:
+    """Default-Grenzen je Typ als Dict-Liste (für JSON/Template-Editor)."""
+    t = SCALE_TYPES.get(scale_type) or SCALE_TYPES["mss_noten"]
+    return [{"label": lbl, "min_pct": lo, "max_pct": hi}
+            for lbl, lo, hi in t["default_stufen"]]
+
+
+# ── Referenz-Auflösung ───────────────────────────────────────────────────
+
+def _normalize_ref(ref: str | None) -> str:
+    if not ref:
+        return DEFAULT_SCALE
+    if ref.startswith("builtin:") or ref.startswith("custom:"):
+        return ref
+    # bare Altwert
+    if ref in BUILTINS:
+        return f"builtin:{ref}"
+    return DEFAULT_SCALE
+
+
+def resolve_stufen(db, user, ref: str | None) -> list[tuple[str, float, float]]:
+    """Liefert die Stufen-Liste [(label, min_pct, max_pct), …] für eine
+    Referenz. Custom-Skalen werden aus der DB geladen (nur eigene)."""
+    ref = _normalize_ref(ref)
+    if ref.startswith("builtin:"):
+        key = ref.split(":", 1)[1]
+        return list(BUILTINS.get(key, BUILTINS["mss_noten"])["stufen"])
+    # custom:<id>
+    try:
+        scale_id = int(ref.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return list(BUILTINS["mss_noten"]["stufen"])
+    from app.models import GradingScale  # lazy, vermeidet Zirkularimport
+    gs = db.get(GradingScale, scale_id)
+    if not gs or (user is not None and gs.owner_user_id != user.id):
+        return list(BUILTINS["mss_noten"]["stufen"])
+    try:
+        payload = json.loads(gs.payload_json) or []
+    except Exception:
+        payload = []
+    out: list[tuple[str, float, float]] = []
+    for row in payload:
+        try:
+            out.append((str(row["label"]), float(row["min_pct"]), float(row["max_pct"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out or list(BUILTINS["mss_noten"]["stufen"])
+
+
+def list_scales_for(db, user) -> list[tuple[str, str]]:
+    """Dropdown-Optionen: Built-ins + eigene Custom-Skalen.
+    Liefert [(ref, label), …]."""
+    out: list[tuple[str, str]] = [
+        (f"builtin:{k}", v["label"]) for k, v in BUILTINS.items()
+    ]
+    if db is not None and user is not None:
+        from app.models import GradingScale
+        from sqlalchemy import select
+        rows = db.scalars(
+            select(GradingScale)
+            .where(GradingScale.owner_user_id == user.id)
+            .order_by(GradingScale.name)
+        ).all()
+        for gs in rows:
+            type_lbl = SCALE_TYPES.get(gs.scale_type, {}).get("label", gs.scale_type)
+            out.append((f"custom:{gs.id}", f"{gs.name} ({type_lbl})"))
+    return out
+
+
+def scale_label(db, user, ref: str | None) -> str:
+    """Anzeigename einer Referenz (für Listen/PDF)."""
+    ref = _normalize_ref(ref)
+    if ref.startswith("builtin:"):
+        key = ref.split(":", 1)[1]
+        return BUILTINS.get(key, BUILTINS["mss_noten"])["label"]
+    try:
+        scale_id = int(ref.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return "Unbekannt"
+    from app.models import GradingScale
+    gs = db.get(GradingScale, scale_id)
+    return gs.name if gs else "Gelöschter Schlüssel"
+
+
+# ── Noten-Berechnung ─────────────────────────────────────────────────────
+
+def grade_from_stufen(stufen: list, pct: float) -> str:
+    """Stufen-Label für Prozentwert aus einer aufgelösten Stufen-Liste."""
+    if not stufen:
+        return ""
+    pct_clamped = max(0, min(100, int(round(pct))))
+    for label, lo, hi in stufen:
+        if lo <= pct_clamped <= hi:
+            return str(label)
+    return str(stufen[-1][0])
+
+
+def grade_for_ref(db, user, ref: str | None, pct: float) -> str:
+    """Note für eine Referenz (löst Built-in/Custom auf)."""
+    return grade_from_stufen(resolve_stufen(db, user, ref), pct)
+
+
+# ── Rückwärtskompatible Built-in-only-API (ohne db) ──────────────────────
 
 def list_scales() -> list[tuple[str, str]]:
-    """Liefert [(key, label), …] für Dropdown."""
-    return [(k, v["label"]) for k, v in SCALES.items()]
+    """Nur Built-ins (Legacy). Neue Aufrufer: list_scales_for(db, user)."""
+    return [(f"builtin:{k}", v["label"]) for k, v in BUILTINS.items()]
 
 
 def get_scale(key: str | None) -> dict:
-    """Liefert die Skala. Fällt auf DEFAULT_SCALE zurück, wenn key unbekannt."""
-    if not key or key not in SCALES:
-        return SCALES[DEFAULT_SCALE]
-    return SCALES[key]
+    ref = _normalize_ref(key)
+    if ref.startswith("builtin:"):
+        return BUILTINS.get(ref.split(":", 1)[1], BUILTINS["mss_noten"])
+    return BUILTINS["mss_noten"]
 
 
 def grade_for_percent(scale_key: str | None, pct: float) -> str:
-    """Liefert das Stufen-Label für einen Prozentwert.
-    pct wird auf 0..100 geklemmt und auf ganze Prozente gerundet."""
-    pct_clamped = max(0, min(100, int(round(pct))))
-    scale = get_scale(scale_key)
-    for label, lo, hi in scale["stufen"]:
-        if lo <= pct_clamped <= hi:
-            return label
-    # Sollte nicht passieren, aber Fallback auf letzte Stufe (schlechteste Note)
-    return scale["stufen"][-1][0]
+    """Built-in-Pfad (kein db). Für Custom-Skalen grade_for_ref nutzen."""
+    return grade_from_stufen(get_scale(scale_key)["stufen"], pct)
 
 
 def grade_for_points(scale_key: str | None, erreicht: float, maximum: float) -> str:
-    """Komfort-Wrapper: liefert Note für (erreichte / max) * 100."""
     if maximum <= 0:
         return ""
     return grade_for_percent(scale_key, (erreicht / maximum) * 100.0)
 
 
 def is_known_scale(key: str | None) -> bool:
-    return bool(key) and key in SCALES
+    """Built-in bekannt? (bare oder builtin:-Form)."""
+    if not key:
+        return False
+    k = key.split(":", 1)[1] if key.startswith("builtin:") else key
+    return k in BUILTINS
