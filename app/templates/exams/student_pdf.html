@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>{{ student.nachname }}, {{ student.vorname }} — {{ exam.title }}</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 11pt; color: #000; line-height: 1.4;
+  }
+  .header {
+    border: 1.5px solid #000;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    display: table; width: 100%;
+  }
+  .header-row { display: table-row; }
+  .header-cell-left {
+    display: table-cell; vertical-align: middle;
+    padding-right: 16px; width: 70px;
+  }
+  .header-cell-right {
+    display: table-cell; vertical-align: top;
+  }
+  .header img { max-height: 50px; max-width: 70px; }
+  .schueler-name {
+    font-size: 16pt; font-weight: bold; margin: 0 0 4px 0;
+  }
+  .pruefung-titel { margin: 4px 0 8px 0; font-size: 12pt; }
+  .meta-line {
+    font-size: 10pt; color: #333; margin-top: 6px;
+  }
+  table.bewertung {
+    width: 100%; border-collapse: collapse; margin: 8px 0 20px 0;
+  }
+  table.bewertung th, table.bewertung td {
+    border: 1px solid #000; padding: 6px 10px;
+  }
+  table.bewertung th {
+    background: #e8e8e8; text-align: left; font-weight: bold;
+  }
+  table.bewertung tr:nth-child(even) td { background: #fafafa; }
+  table.bewertung .num { text-align: right; width: 70px; }
+  table.bewertung .num-erreicht {
+    text-align: right; width: 90px; font-weight: bold;
+  }
+  .summary {
+    display: table; width: 100%; margin-top: 26px;
+  }
+  .summary-half {
+    display: table-cell; width: 50%; vertical-align: top;
+    padding: 12px 16px; border: 1px solid #000;
+  }
+  .summary-left { border-right: none; }
+  .summary-label {
+    text-transform: uppercase; font-size: 9pt; color: #555;
+    letter-spacing: 0.5px; margin-bottom: 4px;
+  }
+  .summary-value-big {
+    font-size: 22pt; font-weight: bold; margin: 4px 0;
+  }
+  .punkte-zeile { font-size: 11pt; margin: 2px 0; }
+  .note-block { text-align: center; }
+  .signature {
+    margin-top: 28px; text-align: right;
+  }
+  .signature-line {
+    display: inline-block; min-width: 200px;
+    border-top: 1px solid #000; padding-top: 4px;
+    font-size: 9pt; color: #555;
+  }
+  .signature img {
+    max-height: 60px; max-width: 220px; display: block;
+    margin-left: auto; margin-bottom: 2px;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-row">
+      {% if school_logo_data_url %}
+      <div class="header-cell-left">
+        <img src="{{ school_logo_data_url }}" alt="Schullogo">
+      </div>
+      {% endif %}
+      <div class="header-cell-right">
+        <p class="schueler-name">{{ student.nachname }}, {{ student.vorname }}</p>
+        <p class="pruefung-titel">{{ exam.title }}</p>
+        <p class="meta-line">
+          {% if datum_pretty %}{{ datum_pretty }}{% endif %}
+          {% if datum_pretty and lehrer_name %} · {% endif %}
+          {% if lehrer_name %}{{ lehrer_name }}{% endif %}
+          {% if klassen_key %} · Klasse {{ klassen_key }}{% endif %}
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <table class="bewertung">
+    <thead>
+      <tr>
+        <th>Feedbackpunkt</th>
+        <th class="num">Max</th>
+        <th class="num-erreicht">Erreicht</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td class="num">{{ row.max_str }}</td>
+        <td class="num-erreicht">{{ row.erreicht_str }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="summary">
+    <div class="summary-half summary-left">
+      <div class="summary-label">Gesamtergebnis</div>
+      <p class="punkte-zeile">Erreichte Punkte: <strong>{{ sum_err_str }} von {{ sum_max_str }}</strong></p>
+      <p class="punkte-zeile">Prozent: <strong>{{ pct_str }} %</strong></p>
+    </div>
+    <div class="summary-half note-block">
+      <div class="summary-label">Note</div>
+      <div class="summary-value-big">{{ note or '—' }}</div>
+    </div>
+  </div>
+
+  <div class="signature">
+    {% if signature_data_url %}
+      <img src="{{ signature_data_url }}" alt="Unterschrift">
+      <div class="signature-line">Unterschrift Lehrer/in</div>
+    {% else %}
+      <div class="signature-line">Unterschrift Lehrer/in</div>
+    {% endif %}
+  </div>
+
+  {% if comment %}
+  <div style="margin-top:18px;padding:10px 14px;border:1px dashed #999;font-size:10pt">
+    <div class="summary-label">Bemerkungen</div>
+    <p style="margin:4px 0 0 0">{{ comment }}</p>
+  </div>
+  {% endif %}
+</body>
+</html>

@@ -155,12 +155,67 @@
 
   <!-- ── EXPORT ── -->
   <div id="tab-exp" class="tab-pane" style="padding:1rem 0;display:none">
-    <p class="muted">Export folgt in Phase 7 (PDF) und Phase 9 (MD).</p>
-    <ul>
-      <li><em>PDF pro Schüler — kommt</em></li>
-      <li><em>ZIP aller PDFs — kommt</em></li>
-      <li><em>Prüfungs-MD-Export — kommt</em></li>
-    </ul>
+    <h3 style="margin-top:0">PDF-Export</h3>
+    <p class="muted" style="font-size:12px">PDF wird serverseitig per Playwright/Chromium gerendert — gleiches S/W-Layout wie die Offline-App.</p>
+
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.4rem">
+      <a class="btn" href="/exams/{{ exam.id }}/export.zip">
+        📦 Alle als ZIP herunterladen
+      </a>
+    </div>
+
+    {% if students_view %}
+    <h4 style="margin-top:1rem">Einzel-PDF pro Schüler</h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.4rem">
+      {% for sv in students_view %}
+        <a class="btn btn-sec" style="text-align:left;font-size:12px"
+           href="/exams/{{ exam.id }}/export/pdf?student_id={{ sv.student.id }}">
+          📄 {{ sv.student.nachname }}, {{ sv.student.vorname }}
+          {% if sv.note %}<span style="float:right;color:var(--blau);font-weight:700">{{ sv.note }}</span>{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <h3 style="margin-top:2rem">Markdown-Export / -Import</h3>
+    <p class="muted" style="font-size:12px">
+      Vollständige Prüfungs-MD inkl. Bewertungen — für die Offline-App
+      (USB-Stick) oder Pflege in Obsidian. Re-Import schreibt die
+      Bewertungen aus der MD zurück.
+    </p>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+      <a class="btn" href="/exams/{{ exam.id }}/export.md">⬇ MD herunterladen</a>
+      <label class="btn btn-sec" style="cursor:pointer">
+        ⬆ MD hochladen + Bewertungen importieren
+        <input id="md-import-file" type="file" accept=".md,text/markdown" style="display:none">
+      </label>
+      <span id="md-import-status" class="muted" style="align-self:center;font-size:12px"></span>
+    </div>
+    <script>
+    document.getElementById('md-import-file').addEventListener('change', async (ev) => {
+      const f = ev.target.files[0];
+      if (!f) return;
+      const status = document.getElementById('md-import-status');
+      status.textContent = 'lese Datei …';
+      const text = await f.text();
+      status.textContent = 'importiere …';
+      try {
+        const r = await fetch('/exams/' + EXAM_ID + '/import.md', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({md: text}),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          status.textContent = '✓ ' + d.imported + ' Bewertung(en) importiert — Seite wird neu geladen …';
+          setTimeout(() => location.reload(), 1200);
+        } else {
+          status.textContent = '✗ Fehler';
+        }
+      } catch (e) {
+        status.textContent = '✗ ' + e.message;
+      }
+    });
+    </script>
   </div>
 </div>
 

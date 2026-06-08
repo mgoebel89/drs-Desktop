@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_user
 from app.db import get_db
 from app.models import (
-    IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
+    Exam, IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
     LessonSeriesOverride, LsAufgabe, User,
 )
 from app.services import aufgabe_sync, ical_client, webuntis_client
@@ -472,6 +472,45 @@ def api_save_block_aufgaben(
 
     db.commit()
     return JSONResponse({"ok": True})
+
+
+@router.get("/api/lesson-note/exams")
+def api_get_block_exams(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    date: str,
+    klassen: str = "",
+    subjects: str = "",
+    block_start: str = "",
+):
+    """Liefert Prüfungen für diese Klasse mit Datum-Markierung."""
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.lesson_date == date,
+        LessonNote.klassen_key == klassen,
+        LessonNote.subjects_key == subjects,
+        LessonNote.block_start == block_start,
+    ).first()
+    note_id = n.id if n else None
+
+    # Prüfungen mit klassen_key == klassen ODER explizit zu diesem note verknüpft
+    q = db.query(Exam).filter(Exam.owner_user_id == user.id)
+    if klassen:
+        from sqlalchemy import or_
+        q = q.filter(or_(Exam.klassen_key == klassen, Exam.lesson_note_id == note_id))
+    exams = q.order_by(Exam.datum.desc()).limit(20).all()
+
+    items = []
+    for e in exams:
+        items.append({
+            "id": e.id,
+            "title": e.title,
+            "datum": e.datum,
+            "klassen_key": e.klassen_key,
+            "this_block": (e.lesson_note_id == note_id) if note_id else False,
+            "this_date": (e.datum == date),
+        })
+    return JSONResponse({"ok": True, "exams": items})
 
 
 @router.get("/api/timetable/today")

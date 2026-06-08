@@ -556,6 +556,9 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + '<label for="ls-picker">Lernsituation</label>'
     + '<select id="ls-picker"><option value="">— keine —</option></select>'
     + '<div id="aufgaben-list" style="margin-top:.6rem"></div>'
+    + '<h4 style="margin-top:1.4rem">Bewertungen</h4>'
+    + '<div id="exams-list" style="margin:.3rem 0;font-size:13px"></div>'
+    + '<a class="btn-sec" href="#" id="exam-new-btn" style="display:inline-block;padding:5px 12px;font-size:12px;text-decoration:none">+ Neue Prüfung für diese Stunde</a>'
     + '<div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">'
     +   '<button type="button" id="aufgaben-save"'
     +     ' style="padding:6px 14px;background:#7B61FF;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px">Aufgaben speichern</button>'
@@ -615,6 +618,9 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
   // Aufgaben-Picker initialisieren
   await initAufgabenPicker(dateIso, klassenKey, subjectsKey, blockStart || '');
 
+  // Prüfungen für diesen Block laden
+  await initBlockExams(dateIso, klassenKey, subjectsKey, blockStart || '');
+
   // Vorherige Notiz laden (bevorzugt gleicher Block)
   try {
     const r2 = await fetch('/api/lesson-note/previous?before=' + encodeURIComponent(dateIso)
@@ -637,6 +643,47 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     }
   } catch (e) {}
 }
+
+// ── Bewertungen-Box pro Block ─────────────────────────────────────────────
+async function initBlockExams(dateIso, kk, sk, bs) {
+  const list = document.getElementById('exams-list');
+  const newBtn = document.getElementById('exam-new-btn');
+  if (!list) return;
+
+  // "Neue Prüfung"-Button: zur Anlage-Seite mit vorausgefüllter Klasse
+  // (LS-ID hängen wir an, falls die Note eine LS verknüpft hat)
+  newBtn.href = '/exams/new';
+  newBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    location.href = '/exams/new';
+  });
+
+  list.innerHTML = '<span class="muted" style="font-size:12px">lade …</span>';
+  try {
+    const params = '?date=' + encodeURIComponent(dateIso)
+      + '&klassen=' + encodeURIComponent(kk)
+      + '&subjects=' + encodeURIComponent(sk)
+      + '&block_start=' + encodeURIComponent(bs);
+    const r = await fetch('/api/lesson-note/exams' + params);
+    const d = await r.json();
+    if (!d.exams || !d.exams.length) {
+      list.innerHTML = '<span class="muted" style="font-size:12px">Keine Prüfungen für diese Klasse.</span>';
+      return;
+    }
+    list.innerHTML = d.exams.map(e => {
+      const badge = e.this_block
+        ? '<span style="background:#7B61FF;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:.4rem">dieser Block</span>'
+        : (e.this_date ? '<span style="background:#e8eaff;color:#5e3fc0;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:.4rem">heute</span>' : '');
+      return '<div style="padding:.3rem 0;border-bottom:1px dashed #eee">'
+        + '<a href="/exams/' + e.id + '">' + esc(e.title) + '</a>'
+        + ' <span class="muted" style="font-size:11px">' + esc(e.datum || '—') + '</span>'
+        + badge + '</div>';
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<span style="color:#c62828;font-size:12px">Fehler: ' + esc(e.message) + '</span>';
+  }
+}
+
 
 // ── Aufgaben-Picker ───────────────────────────────────────────────────────
 async function initAufgabenPicker(dateIso, kk, sk, bs) {
