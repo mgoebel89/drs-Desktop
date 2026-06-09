@@ -19,57 +19,85 @@ branch_labels = None
 depends_on = None
 
 
+_LS_COLUMNS = [
+    ("schema_version", lambda: sa.Column("schema_version", sa.Integer(),
+                                          nullable=False, server_default="2")),
+    ("dauer_stunden", lambda: sa.Column("dauer_stunden", sa.Integer(),
+                                         nullable=False, server_default="0")),
+    ("version_no", lambda: sa.Column("version_no", sa.Integer(),
+                                      nullable=False, server_default="1")),
+    ("lernsituation_md", lambda: sa.Column("lernsituation_md", sa.Text(),
+                                            nullable=False, server_default="")),
+    ("lernsituation_bild_path", lambda: sa.Column("lernsituation_bild_path",
+                                                   sa.String(500),
+                                                   nullable=False,
+                                                   server_default="")),
+    ("kompetenzen_md", lambda: sa.Column("kompetenzen_md", sa.Text(),
+                                          nullable=False, server_default="")),
+    ("uebergreifende_aspekte_md", lambda: sa.Column("uebergreifende_aspekte_md",
+                                                     sa.Text(),
+                                                     nullable=False,
+                                                     server_default="")),
+    ("lehrer_vorwissen_md", lambda: sa.Column("lehrer_vorwissen_md", sa.Text(),
+                                               nullable=False,
+                                               server_default="")),
+    ("leistungsfeststellung_md", lambda: sa.Column("leistungsfeststellung_md",
+                                                    sa.Text(),
+                                                    nullable=False,
+                                                    server_default="")),
+    ("content_hash", lambda: sa.Column("content_hash", sa.String(64),
+                                        nullable=False, server_default="")),
+    ("content_mtime", lambda: sa.Column("content_mtime", sa.DateTime(),
+                                         nullable=True)),
+]
+
+
+def _existing_columns(insp, table: str) -> set[str]:
+    try:
+        return {c["name"] for c in insp.get_columns(table)}
+    except Exception:
+        return set()
+
+
 def upgrade() -> None:
-    with op.batch_alter_table("learning_situations") as batch:
-        batch.add_column(sa.Column("schema_version", sa.Integer(),
-                                   nullable=False, server_default="2"))
-        batch.add_column(sa.Column("dauer_stunden", sa.Integer(),
-                                   nullable=False, server_default="0"))
-        batch.add_column(sa.Column("version_no", sa.Integer(),
-                                   nullable=False, server_default="1"))
-        batch.add_column(sa.Column("lernsituation_md", sa.Text(),
-                                   nullable=False, server_default=""))
-        batch.add_column(sa.Column("lernsituation_bild_path", sa.String(500),
-                                   nullable=False, server_default=""))
-        batch.add_column(sa.Column("kompetenzen_md", sa.Text(),
-                                   nullable=False, server_default=""))
-        batch.add_column(sa.Column("uebergreifende_aspekte_md", sa.Text(),
-                                   nullable=False, server_default=""))
-        batch.add_column(sa.Column("lehrer_vorwissen_md", sa.Text(),
-                                   nullable=False, server_default=""))
-        batch.add_column(sa.Column("leistungsfeststellung_md", sa.Text(),
-                                   nullable=False, server_default=""))
-        # Sync-Tracking: hash des zuletzt geschriebenen MD-Inhalts +
-        # mtime der Datei. Sektionsweise updated_at deckt der Parser ab.
-        batch.add_column(sa.Column("content_hash", sa.String(64),
-                                   nullable=False, server_default=""))
-        batch.add_column(sa.Column("content_mtime", sa.DateTime(),
-                                   nullable=True))
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
 
-    op.create_table(
-        "ls_arbeitsblaetter",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("learning_situation_id", sa.Integer(),
-                  sa.ForeignKey("learning_situations.id", ondelete="CASCADE"),
-                  nullable=False, index=True),
-        sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("title", sa.String(255), nullable=False, server_default=""),
-        sa.Column("phase", sa.String(255), nullable=False, server_default=""),
-        sa.Column("bearbeitungshinweis_md", sa.Text(),
-                  nullable=False, server_default=""),
-        sa.Column("content_md", sa.Text(), nullable=False, server_default=""),
-        sa.Column("updated_at", sa.DateTime(), nullable=False,
-                  server_default=sa.func.now()),
-    )
-    op.create_index("ix_ls_arbeitsblaetter_ls_pos", "ls_arbeitsblaetter",
-                    ["learning_situation_id", "position"])
+    ls_existing = _existing_columns(insp, "learning_situations")
+    missing = [(name, factory) for name, factory in _LS_COLUMNS
+               if name not in ls_existing]
+    if missing:
+        with op.batch_alter_table("learning_situations") as batch:
+            for _, factory in missing:
+                batch.add_column(factory())
 
-    with op.batch_alter_table("ls_aufgaben") as batch:
-        batch.add_column(sa.Column(
-            "arbeitsblatt_id", sa.Integer(),
-            sa.ForeignKey("ls_arbeitsblaetter.id", ondelete="CASCADE"),
-            nullable=True, index=True,
-        ))
+    if "ls_arbeitsblaetter" not in set(insp.get_table_names()):
+        op.create_table(
+            "ls_arbeitsblaetter",
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column("learning_situation_id", sa.Integer(),
+                      sa.ForeignKey("learning_situations.id", ondelete="CASCADE"),
+                      nullable=False, index=True),
+            sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("title", sa.String(255), nullable=False, server_default=""),
+            sa.Column("phase", sa.String(255), nullable=False, server_default=""),
+            sa.Column("bearbeitungshinweis_md", sa.Text(),
+                      nullable=False, server_default=""),
+            sa.Column("content_md", sa.Text(), nullable=False, server_default=""),
+            sa.Column("updated_at", sa.DateTime(), nullable=False,
+                      server_default=sa.func.now()),
+        )
+        op.create_index("ix_ls_arbeitsblaetter_ls_pos", "ls_arbeitsblaetter",
+                        ["learning_situation_id", "position"])
+
+    aufg_existing = _existing_columns(insp, "ls_aufgaben")
+    if "arbeitsblatt_id" not in aufg_existing:
+        with op.batch_alter_table("ls_aufgaben") as batch:
+            batch.add_column(sa.Column(
+                "arbeitsblatt_id", sa.Integer(),
+                sa.ForeignKey("ls_arbeitsblaetter.id", ondelete="CASCADE"),
+                nullable=True, index=True,
+            ))
 
 
 def downgrade() -> None:

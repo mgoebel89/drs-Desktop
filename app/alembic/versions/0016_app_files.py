@@ -14,6 +14,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if "app_files" in set(insp.get_table_names()):
+        return
     op.create_table(
         "app_files",
         sa.Column("id", sa.Integer(), primary_key=True),
