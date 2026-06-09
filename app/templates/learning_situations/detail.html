@@ -176,12 +176,7 @@
         <button class="btn-sec" data-aufgabe-add="{{ ab.id }}" style="padding:3px 8px;font-size:11px">+ Neue Aufgabe</button>
         <div style="flex:1"></div>
         <form method="post" action="/ls/{{ ls.id }}/arbeitsblatt/{{ ab.id }}/worksheet" style="display:inline">
-          <input type="hidden" name="role" value="student">
-          <button class="btn" type="submit" style="padding:4px 10px;font-size:11px">📄 Schüler-Arbeitsblatt erzeugen</button>
-        </form>
-        <form method="post" action="/ls/{{ ls.id }}/arbeitsblatt/{{ ab.id }}/worksheet" style="display:inline">
-          <input type="hidden" name="role" value="teacher">
-          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:11px">📋 Lehrer-Version</button>
+          <button class="btn" type="submit" style="padding:4px 10px;font-size:11px">📄 Arbeitsblatt erzeugen</button>
         </form>
       </div>
       {% for a in ab._aufgaben %}

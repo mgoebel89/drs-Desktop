@@ -132,15 +132,17 @@ def create_worksheet_from_ls(
 
 def create_worksheet_from_arbeitsblatt(
     db: Session, user: User, ls: LearningSituation,
-    ab: LsArbeitsblatt, role: Role,
+    ab: LsArbeitsblatt, role: Role = "student",
 ) -> Worksheet:
     """Baut ein Worksheet aus einem einzelnen v3-Arbeitsblatt (DB-Daten).
 
-    Schüler-Variante: ohne Lösungsskizzen, ohne Lehrerinformationen.
-    Lehrer-Variante: mit Lösungsskizzen pro Aufgabe."""
+    Ein Worksheet hält IMMER beides: den Aufgabentext für die Schüler-
+    Variante und die Lösungsskizze als musterloesungText. Die Schüler-
+    vs. Lehrer-Ansicht erfolgt beim Export aus dem Editor heraus.
+    Der `role`-Parameter bleibt nur aus Kompatibilität — er beeinflusst
+    den Aufgabentext nicht mehr."""
     label = "lernfeld" if ls.lernfeld else "fach"
     header_value = ls.lernfeld or ls.klassen_key or ""
-    role_suffix = "Lehrer-Version" if role == "teacher" else "Schüler-Version"
 
     # Vorspann aus Lernsituation + Arbeitsblatt-Intro
     parts: list[str] = []
@@ -159,7 +161,6 @@ def create_worksheet_from_arbeitsblatt(
         "lernsituationTitel": f"{ls.display_name} · {ab.title}",
         "lernsituationText": "\n\n".join(parts).strip(),
         "lernsituationBild": ls.lernsituation_bild_path or "",
-        "role": role,
         "source": "ls_arbeitsblatt",
         "ls_id": ls.id,
         "arbeitsblatt_id": ab.id,
@@ -171,21 +172,19 @@ def create_worksheet_from_arbeitsblatt(
 
     aufgaben_out: list[dict] = []
     for a in aufgaben_rows:
-        # Nur den reinen Aufgabentext übernehmen — die 'Aufgabe N'-
-        # Überschrift rendert der Worksheet-Editor selbst.
-        text = (a.text_md or "").strip()
-        loesung = (a.loesungsskizze_md or "").strip() if role == "teacher" else ""
+        # Schüler-Aufgabentext + Lehrer-Lösung beide in dieselbe Aufgabe.
+        # Die 'Aufgabe N'-Überschrift rendert der Worksheet-Editor selbst.
         aufgaben_out.append({
             "id": a.nummer,
-            "text": text,
+            "text": (a.text_md or "").strip(),
             "kriterien": "",
-            "musterloesungText": loesung,
+            "musterloesungText": (a.loesungsskizze_md or "").strip(),
             "musterloesungBild": "",
             "upload": True,
             "uploadPDF": False,
         })
 
-    title = f"{ls.display_name} · {ab.title} · {role_suffix}"
+    title = f"{ls.display_name} · {ab.title}"
     ws = Worksheet(
         owner_user_id=user.id,
         title=title[:200],
@@ -197,7 +196,7 @@ def create_worksheet_from_arbeitsblatt(
     rev = WorksheetRevision(
         worksheet_id=ws.id,
         created_by_user_id=user.id,
-        comment=f"Aus {ab.title} ({role_suffix})",
+        comment=f"Aus {ab.title}",
         meta_json=json.dumps(meta, ensure_ascii=False),
         aufgaben_json=json.dumps(aufgaben_out, ensure_ascii=False),
         markdown_source="",
