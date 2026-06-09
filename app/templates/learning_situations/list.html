@@ -4,7 +4,10 @@
 <div class="card">
   <div style="display:flex;align-items:center;gap:1rem">
     <h1 style="margin:0;flex:1">Lernsituationen</h1>
-    <a class="btn" href="/wizard">Neue per Wizard ▸</a>
+    <a class="btn" href="/ls/new">+ Neue Lernsituation</a>
+    {% if ai_enabled() %}
+    <a class="btn btn-sec" href="/wizard">Neue per Wizard ▸</a>
+    {% endif %}
   </div>
 
   {% if not smb_configured %}

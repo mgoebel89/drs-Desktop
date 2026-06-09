@@ -50,7 +50,9 @@
   <a href="/feedback-templates" class="drawer-link{% if path.startswith('/feedback-templates') %} active{% endif %}">Feedback-Vorlagen</a>
 
   <div class="drawer-group">Werkzeuge</div>
+  {% if ai_enabled() %}
   <a href="/wizard" class="drawer-link{% if path.startswith('/wizard') %} active{% endif %}">Wizard</a>
+  {% endif %}
   <a href="/help" class="drawer-link{% if path.startswith('/help') %} active{% endif %}">Hilfe</a>
 
   <div class="drawer-group">Konto</div>

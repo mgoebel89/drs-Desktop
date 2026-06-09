@@ -35,8 +35,27 @@ def settings_view(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    return templates.TemplateResponse(request, "admin/settings.html",
-                                      {"user": admin, "flash": None})
+    from app.services.feature_flags import is_ai_enabled
+    return templates.TemplateResponse(request, "admin/settings.html", {
+        "user": admin, "flash": None,
+        "ai_enabled_now": is_ai_enabled(db),
+    })
+
+
+@router.post("/admin/settings/ai-enabled")
+def settings_ai_enabled(
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    enabled: str = Form(""),
+):
+    from app.services.feature_flags import set_ai_enabled
+    on = enabled.lower() in ("1", "true", "on", "yes")
+    set_ai_enabled(db, on)
+    audit(db, "settings_ai_enabled", actor=admin,
+          detail="on" if on else "off", request=request)
+    db.commit()
+    return RedirectResponse("/admin/settings", status_code=303)
 
 
 @router.post("/admin/settings/school-name")

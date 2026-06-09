@@ -32,5 +32,20 @@
         onsubmit="return confirm('Auf Default-Logo zurücksetzen?');">
     <button class="btn btn-sec" type="submit">Auf Default-Logo zurücksetzen</button>
   </form>
+
+  <h2 style="margin-top:1.6rem">KI-Unterstützung</h2>
+  <p class="muted" style="font-size:13px">
+    Schaltet KI-Bestandteile (Wizard, Fobizz-/Claude-Tabs, Material-
+    Generierung) sichtbar oder unsichtbar. Im ausgeschalteten Modus
+    arbeitet die App rein manuell — Lernsituationen werden über
+    <code>+ Neue Lernsituation</code> und Inline-Edit gepflegt.
+  </p>
+  <form method="post" action="/admin/settings/ai-enabled">
+    <label style="display:flex;align-items:center;gap:.5rem;font-weight:normal">
+      <input type="checkbox" name="enabled" value="1" {% if ai_enabled_now %}checked{% endif %}>
+      KI-Wizard + KI-Buttons anzeigen
+    </label>
+    <button class="btn" type="submit" style="margin-top:.6rem">Speichern</button>
+  </form>
 </div>
 {% endblock %}

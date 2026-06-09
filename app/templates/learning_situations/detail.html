@@ -4,21 +4,39 @@
 <div class="card">
   <div style="display:flex;align-items:center;gap:1rem">
     <h1 style="margin:0;flex:1">{{ ls.display_name }}</h1>
+    {% if ai_enabled() %}
     <a class="btn" href="/wizard/{{ ls.id }}/step/1">Wizard fortsetzen ▸</a>
+    {% endif %}
   </div>
-  <p class="muted">
-    Klasse {{ ls.klassen_key or '—' }} · {{ ls.lernfeld or '—' }}
-    · Ordner <code>{{ ls.smb_folder_name }}</code>
+  <p class="muted" style="margin-bottom:.4rem">
+    Ordner <code>{{ ls.smb_folder_name }}</code>
   </p>
 
-  <form method="post" action="/ls/{{ ls.id }}/rename"
-        style="display:flex;gap:.6rem;align-items:end;margin-top:.6rem">
-    <div style="flex:1">
-      <label>Bezeichnung umbenennen (Ordner bleibt stabil)</label>
-      <input name="display_name" value="{{ ls.display_name }}" maxlength="200" required>
+  <div id="ls-meta" style="display:grid;grid-template-columns:2fr 1fr 1fr 100px 100px;gap:.6rem;align-items:end;margin-top:.4rem">
+    <div>
+      <label style="font-size:12px">Bezeichnung</label>
+      <input data-meta="display_name" value="{{ ls.display_name }}" maxlength="200">
     </div>
-    <button class="btn btn-sec" type="submit">Speichern</button>
-  </form>
+    <div>
+      <label style="font-size:12px">Klasse</label>
+      <input data-meta="klassen_key" value="{{ ls.klassen_key or '' }}" maxlength="64" placeholder="—">
+    </div>
+    <div>
+      <label style="font-size:12px">Lernfeld</label>
+      <input data-meta="lernfeld" value="{{ ls.lernfeld or '' }}" maxlength="64" placeholder="—">
+    </div>
+    <div>
+      <label style="font-size:12px">Dauer (h)</label>
+      <input data-meta="dauer_stunden" type="number" min="0" value="{{ ls.dauer_stunden or 0 }}">
+    </div>
+    <div>
+      <label style="font-size:12px">Version</label>
+      <input data-meta="version_no" type="number" min="1" value="{{ ls.version_no or 1 }}">
+    </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-top:.2rem">
+    <span id="ls-meta-status" class="muted" style="font-size:11px"></span>
+  </div>
 
   {% if request.query_params.get('ws_error') %}
   <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.7rem 1rem;margin-top:.6rem">
@@ -30,9 +48,11 @@
     <a class="btn btn-sec" href="/ls/{{ ls.id }}/note">
       📝 Inhalts-MD ansehen {% if not has_note %}(noch leer){% endif %}
     </a>
+    {% if ai_enabled() %}
     <a class="btn btn-sec" href="/wizard/{{ ls.id }}/step/1">
       🧙 Wizard fortsetzen
     </a>
+    {% endif %}
     <div style="flex:1"></div>
     <a class="btn btn-sec" href="/ls/{{ ls.id }}/delete"
        style="color:#c62828;border-color:#c62828">
@@ -213,6 +233,26 @@
     if(!r.ok) throw new Error((await r.text()) || r.statusText);
     return r.json();
   }
+
+  // ── LS-Stammdaten Inline-Edit (debounced)
+  const metaStatus = document.getElementById('ls-meta-status');
+  let metaTimer;
+  document.querySelectorAll('#ls-meta [data-meta]').forEach(el => {
+    el.addEventListener('input', () => {
+      const field = el.dataset.meta;
+      const value = el.value;
+      clearTimeout(metaTimer);
+      metaStatus.textContent = '✎';
+      metaTimer = setTimeout(async () => {
+        metaStatus.textContent = 'speichere …';
+        try{
+          await postJSON(`/ls/${LS_ID}/meta`, {field, value});
+          metaStatus.textContent = '✓ gespeichert';
+          setTimeout(() => metaStatus.textContent = '', 1500);
+        }catch(e){ metaStatus.textContent = '✗ ' + e.message; }
+      }, 600);
+    });
+  });
 
   // ── v2 → v3 Migrations-Button
   const btnMig = document.getElementById('btn-migrate-v3');

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Neue Lernsituation{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Neue Lernsituation</h1>
+  <p class="muted">
+    Manuelles Anlegen — wird direkt im Schema v3 erzeugt. Du landest
+    danach auf der Detailseite und kannst alle Sektionen (Lernsituation,
+    Lehrerinformationen, Arbeitsblätter, Leistungsfeststellung) inline
+    pflegen oder parallel in Obsidian editieren.
+  </p>
+
+  <form method="post" action="/ls/new"
+        style="display:grid;grid-template-columns:1fr 1fr;gap:.9rem;max-width:720px;margin-top:1rem">
+    <div style="grid-column:1/3">
+      <label>Bezeichnung</label>
+      <input name="display_name" maxlength="200" required autofocus
+             placeholder="z. B. Hydraulik Grundlagen">
+    </div>
+    <div>
+      <label>Klasse</label>
+      <input name="klassen_key" maxlength="64" placeholder="z. B. BSMT23a">
+    </div>
+    <div>
+      <label>Lernfeld</label>
+      <input name="lernfeld" maxlength="64" placeholder="z. B. LF07">
+    </div>
+    <div>
+      <label>Dauer in Stunden</label>
+      <input name="dauer_stunden" type="number" min="0" max="200" value="8">
+    </div>
+    <div style="grid-column:1/3;display:flex;gap:.6rem;justify-content:flex-end;margin-top:.6rem">
+      <a class="btn btn-sec" href="/learning-situations">Abbrechen</a>
+      <button class="btn" type="submit">Anlegen und öffnen →</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -37,6 +37,122 @@ def ls_list(
     })
 
 
+@router.get("/ls/new", response_class=HTMLResponse)
+def ls_new_form(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Manuelles Anlegen einer Lernsituation (ohne KI/Wizard).
+
+    Erzeugt die LS direkt im Schema v3 — der Lehrer landet danach auf
+    der Detail-Seite mit Inline-Edit für alle Sektionen."""
+    return templates.TemplateResponse(request, "learning_situations/new.html", {})
+
+
+@router.post("/ls/new")
+def ls_new_create(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    display_name: str = Form(...),
+    klassen_key: str = Form(""),
+    lernfeld: str = Form(""),
+    dauer_stunden: int = Form(8),
+):
+    display_name = display_name.strip()[:200]
+    if not display_name:
+        raise HTTPException(400, "Bezeichnung fehlt")
+    slug = wizard_helpers.make_slug(display_name)
+    base_slug = slug
+    n = 2
+    while db.query(LearningSituation.id).filter(
+        LearningSituation.user_id == user.id, LearningSituation.slug == slug,
+    ).first():
+        slug = f"{base_slug}-{n}"
+        n += 1
+
+    ls = LearningSituation(
+        user_id=user.id, slug=slug, display_name=display_name,
+        klassen_key=klassen_key.strip(), lernfeld=lernfeld.strip(),
+        dauer_stunden=max(0, dauer_stunden),
+        schema_version=3, version_no=1,
+    )
+    db.add(ls)
+    db.flush()
+    ls.smb_folder_name = wizard_helpers.folder_name(ls.id, ls.slug)
+    ls.obsidian_note_path = obsidian_writer.note_filename(ls)
+
+    # Erstes leeres Arbeitsblatt + Skeleton-MD in den Vault
+    db.add(LsArbeitsblatt(
+        learning_situation_id=ls.id, position=1,
+        title="Arbeitsblatt 1", phase="",
+        bearbeitungshinweis_md="", content_md="",
+    ))
+    db.flush()
+    cfg = smb_client.load_config(user)
+    if cfg:
+        try:
+            smb_client.ensure_folder(user, smb_client.material_subpath(cfg, ls.smb_folder_name))
+            ls_sync.save_to_vault(user, ls, db)
+        except Exception:
+            pass
+    audit(db, "ls_created_manual", actor=user, target=str(ls.id),
+          detail=display_name, request=request)
+    db.commit()
+    return RedirectResponse(f"/ls/{ls.id}", status_code=303)
+
+
+@router.post("/ls/{ls_id}/meta")
+def ls_meta_update(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Inline-Edit der LS-Stammdaten (display_name, klassen_key, lernfeld,
+    dauer_stunden, version_no). Bei v3-LS wird die MD anschließend neu
+    in den Vault geschrieben, damit die Unterrichtsinformationen-Tabelle
+    aktualisiert wird."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    field = (body.get("field") or "").strip()
+    value = body.get("value")
+    if field == "display_name":
+        v = str(value or "").strip()[:200]
+        if not v:
+            raise HTTPException(400, "Bezeichnung darf nicht leer sein")
+        ls.display_name = v
+    elif field == "klassen_key":
+        ls.klassen_key = str(value or "").strip()[:255]
+    elif field == "lernfeld":
+        ls.lernfeld = str(value or "").strip()[:64]
+    elif field == "dauer_stunden":
+        try:
+            ls.dauer_stunden = max(0, int(value))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Dauer muss eine Zahl sein")
+    elif field == "version_no":
+        try:
+            ls.version_no = max(1, int(value))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Version muss eine Zahl sein")
+    else:
+        raise HTTPException(400, "Unbekanntes Feld")
+
+    if (ls.schema_version or 2) >= 3:
+        try:
+            ls_sync.save_to_vault(user, ls, db)
+        except Exception:
+            pass
+    audit(db, "ls_meta_updated", actor=user, target=str(ls.id),
+          detail=f"{field}={value}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
 @router.get("/ls/{ls_id}", response_class=HTMLResponse)
 def ls_detail(
     request: Request,

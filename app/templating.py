@@ -11,6 +11,7 @@ from app.branding import get_school_name
 from app.config import settings
 from app.db import SessionLocal
 from app.models import User, UserSession
+from app.services.feature_flags import is_ai_enabled
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -51,3 +52,14 @@ templates = Jinja2Templates(
     context_processors=[_inject_user],
 )
 templates.env.globals["school_name"] = _school_name
+
+
+def _ai_enabled() -> bool:
+    db = SessionLocal()
+    try:
+        return is_ai_enabled(db)
+    finally:
+        db.close()
+
+
+templates.env.globals["ai_enabled"] = _ai_enabled
