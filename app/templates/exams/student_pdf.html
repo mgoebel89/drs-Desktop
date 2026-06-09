@@ -36,7 +36,7 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
 .sec-label{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
   color:var(--blau);margin-bottom:6px;}
 .note-big{font-size:30px;font-weight:700;color:var(--blau);}
-.signature{margin-top:2rem;text-align:right;}
+.signature{margin-top:4.5rem;text-align:right;}
 .signature img{max-height:55px;max-width:200px;display:block;margin-left:auto;margin-bottom:2px;}
 .signature .line{display:inline-block;min-width:210px;border-top:1px solid #000;
   padding-top:4px;font-size:10px;color:var(--muted);}
@@ -99,7 +99,7 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
 
   <div class="signature">
     {% if signature_data_url %}<img src="{{ signature_data_url }}" alt="">{% endif %}
-    <div class="line">Unterschrift Lehrer/in</div>
+    <div class="line">{{ lehrer_name or 'Unterschrift Lehrer/in' }}</div>
   </div>
 </body>
 </html>

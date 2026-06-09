@@ -387,6 +387,7 @@ def exams_detail(
             })
 
     # Bewertungs-Tab: Teilnehmer mit Live-Note
+    comments_by_student = {r.student_id: (r.comment or "") for r in ex.results}
     student_views = []
     for s, g in participants:
         er = ctx["indiv_results"].get(s.id, {})
@@ -394,6 +395,7 @@ def exams_detail(
         student_views.append({
             "student": s, "group_label": g,
             "erreicht": er, "n_filled": n_filled, "pct": pct, "note": note,
+            "comment": comments_by_student.get(s.id, ""),
         })
     scale_labels = [lbl for lbl, _, _ in ctx["stufen"]]
 
@@ -593,7 +595,8 @@ def exams_save(
                 r = ExamResult(exam_id=ex.id, student_id=s.id)
                 db.add(r)
             r.erreicht_json = json.dumps(cleaned, ensure_ascii=False)
-            r.comment = (body.get("comment") or "")[:2000]
+            if "comment" in body:
+                r.comment = (body.get("comment") or "")[:2000]
     else:
         raise HTTPException(400, f"Unbekannter Tab: {tab}")
 
