@@ -641,6 +641,21 @@ def exams_save(
         fps_in = body.get("feedback_points") or []
         if not isinstance(fps_in, list):
             raise HTTPException(400, "feedback_points muss Liste sein")
+        # Summe der Gewichte über alle note-FPs darf 100 % nicht
+        # überschreiten (Frontend hat den Save-Knopf bereits gesperrt;
+        # Backend ist hier die Pflicht-Schranke gegen direkten API-Aufruf).
+        note_weight_sum = 0.0
+        for item in fps_in:
+            if (item.get("eval_type") or "").strip() == "note":
+                try:
+                    note_weight_sum += float(item.get("weight_pct") or 0)
+                except (TypeError, ValueError):
+                    continue
+        if note_weight_sum > 100.0001:
+            raise HTTPException(
+                400,
+                f"Summe der Gewichte ({note_weight_sum:.1f} %) darf 100 % nicht überschreiten",
+            )
         old_fps = list(ex.feedback_points)
         for ofp in old_fps:
             db.delete(ofp)

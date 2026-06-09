@@ -116,7 +116,10 @@
     {% endif %}
     <div id="fps-list"></div>
     <button type="button" class="btn btn-sec" id="btn-fps-add" style="margin-top:.8rem">+ Punkt hinzufügen</button>
-    <div style="display:flex;justify-content:flex-end;margin-top:1rem"><button class="btn" type="button" id="btn-fps-save">Speichern</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem;gap:.6rem;flex-wrap:wrap">
+      <div id="fps-weight-sum" style="font-size:12px"></div>
+      <button class="btn" type="button" id="btn-fps-save">Speichern</button>
+    </div>
     <div><span id="fps-status" class="muted" style="font-size:12px"></span></div>
   </div>
 
@@ -301,7 +304,7 @@ function renderFPs(){
       renderFPs();
     });
     const maxEl=div.querySelector('.fp-max'); if(maxEl)maxEl.addEventListener('input',e=>fp.max_points=parseFloat(e.target.value)||0);
-    const wEl=div.querySelector('.fp-weight'); if(wEl)wEl.addEventListener('input',e=>fp.weight_pct=parseFloat(e.target.value)||0);
+    const wEl=div.querySelector('.fp-weight'); if(wEl)wEl.addEventListener('input',e=>{fp.weight_pct=parseFloat(e.target.value)||0;refreshWeightSum();});
     div.querySelector('.fp-group').addEventListener('change',e=>fp.scope=e.target.checked?'group':'individual');
     div.querySelector('.fp-del').addEventListener('click',()=>{if(confirm('Punkt löschen?')){fps.splice(idx,1);renderFPs();}});
     if(showStages){
@@ -324,6 +327,19 @@ function renderFPs(){
       div.querySelectorAll('.preset').forEach(b=>b.addEventListener('click',()=>{const p=PRE[b.dataset.n];fp.stages=p.map(([l,pc])=>({label:l,points:Math.round((fp.max_points||0)*pc)/100}));rs();}));
     }
   });
+  refreshWeightSum();
+}
+function refreshWeightSum(){
+  const el=document.getElementById('fps-weight-sum');
+  if(!el)return;
+  const noteFps=fps.filter(f=>f.eval_type==='note');
+  if(!noteFps.length){el.textContent='';return;}
+  const sum=noteFps.reduce((s,f)=>s+(parseFloat(f.weight_pct)||0),0);
+  const over=sum>100.0001;
+  el.innerHTML='Summe der Gewichte: <strong>'+sum.toFixed(1).replace('.',',')+' %</strong>'+(over?' <span style="color:var(--pink);font-weight:600">— über 100 %, bitte anpassen</span>':' / 100 %');
+  el.style.color=over?'var(--pink)':'';
+  const btn=document.getElementById('btn-fps-save');
+  if(btn)btn.disabled=over;
 }
 document.getElementById('btn-fps-add').addEventListener('click',()=>{
   const et = FORCED_TYPE || 'punkte';
@@ -332,8 +348,10 @@ document.getElementById('btn-fps-add').addEventListener('click',()=>{
 });
 document.getElementById('btn-fps-save').addEventListener('click',async()=>{
   const st=document.getElementById('fps-status'); st.textContent='speichere …';
+  const sum=fps.filter(f=>f.eval_type==='note').reduce((s,f)=>s+(parseFloat(f.weight_pct)||0),0);
+  if(sum>100.0001){st.textContent='✗ Summe der Gewichte über 100 %';return;}
   const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'feedbackpunkte',feedback_points:fps});
-  st.textContent=d.ok?'✓ gespeichert — Seite neu laden für Bewertung':'✗ Fehler';
+  st.textContent=d.ok?'✓ gespeichert — Seite neu laden für Bewertung':'✗ '+(d.detail||'Fehler');
 });
 renderFPs();
 
