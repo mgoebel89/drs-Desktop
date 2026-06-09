@@ -102,8 +102,34 @@
   <div id="sync-banner" style="margin-top:1rem;padding:.7rem 1rem;border-radius:8px;display:none"></div>
 
   <h2 style="margin-top:1.6rem">Lernsituation</h2>
+  <div class="v3-section v3-lernsituation" data-key="lernsituation" style="margin:.8rem 0;overflow:hidden">
+    <label style="font-weight:600">Szenario / Lernsituation</label>
+    <div id="ls-bild-wrap" style="float:right;margin:0 0 .6rem 1rem;max-width:280px;text-align:center">
+      {% if ls.lernsituation_bild_path %}
+      <img id="ls-bild-preview" src="{{ ls.lernsituation_bild_path }}" alt=""
+           style="max-width:100%;max-height:220px;border-radius:6px;border:1px solid #ddd;display:block">
+      {% else %}
+      <img id="ls-bild-preview" alt="" style="display:none;max-width:100%;max-height:220px;border-radius:6px;border:1px solid #ddd">
+      {% endif %}
+      <div style="display:flex;gap:.4rem;justify-content:center;margin-top:.3rem;flex-wrap:wrap">
+        <label class="btn-sec" style="cursor:pointer;padding:3px 8px;font-size:11px">
+          {% if ls.lernsituation_bild_path %}Bild ersetzen{% else %}Bild hochladen{% endif %}
+          <input id="ls-bild-file" type="file" accept="image/*" style="display:none">
+        </label>
+        {% if ls.lernsituation_bild_path %}
+        <button class="btn-sec" id="btn-ls-bild-del" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">Bild entfernen</button>
+        {% endif %}
+      </div>
+      <p class="muted" id="ls-bild-status" style="font-size:11px;margin-top:.2rem"></p>
+    </div>
+    <textarea data-input rows="8" style="width:100%;font-family:Consolas,monospace;font-size:13px">{{ ls.lernsituation_md or '' }}</textarea>
+    <div style="display:flex;gap:.6rem;align-items:center;margin-top:.3rem;clear:right">
+      <button class="btn-sec" data-save style="padding:4px 10px;font-size:12px">Speichern</button>
+      <span class="muted" data-status style="font-size:11px"></span>
+    </div>
+  </div>
+
   {% set sections = [
-    ('lernsituation', 'Szenario / Lernsituation', ls.lernsituation_md, 8),
     ('kompetenzen', 'Kompetenzen (Lehrerinfo)', ls.kompetenzen_md, 5),
     ('uebergreifende_aspekte', 'Übergreifende Aspekte', ls.uebergreifende_aspekte_md, 4),
     ('lehrer_vorwissen', 'Vorwissen (Lehrerinfo)', ls.lehrer_vorwissen_md, 4),
@@ -145,9 +171,18 @@
       <label style="font-size:12px">Aufgabenblock / Intro</label>
       <textarea data-field="content" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ ab.content_md or '' }}</textarea>
 
-      <div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem">
+      <div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
         <strong style="font-size:13px">Aufgaben</strong>
         <button class="btn-sec" data-aufgabe-add="{{ ab.id }}" style="padding:3px 8px;font-size:11px">+ Neue Aufgabe</button>
+        <div style="flex:1"></div>
+        <form method="post" action="/ls/{{ ls.id }}/arbeitsblatt/{{ ab.id }}/worksheet" style="display:inline">
+          <input type="hidden" name="role" value="student">
+          <button class="btn" type="submit" style="padding:4px 10px;font-size:11px">📄 Schüler-Arbeitsblatt erzeugen</button>
+        </form>
+        <form method="post" action="/ls/{{ ls.id }}/arbeitsblatt/{{ ab.id }}/worksheet" style="display:inline">
+          <input type="hidden" name="role" value="teacher">
+          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:11px">📋 Lehrer-Version</button>
+        </form>
       </div>
       {% for a in ab._aufgaben %}
       <div class="v3-aufgabe" data-auf-id="{{ a.id }}" style="margin-top:.5rem;padding:.6rem .8rem;background:#f9f9fb;border-radius:6px">
@@ -323,6 +358,33 @@
         }, 700);
       });
     });
+  });
+
+  // ── Lernsituations-Bild: Upload + Entfernen
+  const bildFile = document.getElementById('ls-bild-file');
+  const bildStatus = document.getElementById('ls-bild-status');
+  if(bildFile) bildFile.addEventListener('change', async ev => {
+    const f = ev.target.files[0]; if(!f) return;
+    bildStatus.textContent = 'lade hoch …';
+    const fd = new FormData();
+    fd.append('file', f);
+    try{
+      const r = await fetch(`/ls/${LS_ID}/bild`, {method:'POST', body: fd});
+      if(!r.ok) throw new Error(await r.text());
+      const d = await r.json();
+      const img = document.getElementById('ls-bild-preview');
+      img.src = d.path; img.style.display = 'block';
+      bildStatus.textContent = '✓ hochgeladen — neu laden für vollständiges Layout';
+      setTimeout(() => location.reload(), 800);
+    }catch(e){ bildStatus.textContent = '✗ ' + e.message; }
+  });
+  const bildDel = document.getElementById('btn-ls-bild-del');
+  if(bildDel) bildDel.addEventListener('click', async () => {
+    if(!confirm('Bild aus der Lernsituationsbeschreibung entfernen?')) return;
+    try{
+      await postJSON(`/ls/${LS_ID}/bild/delete`);
+      location.reload();
+    }catch(e){ alert('Fehler: ' + e.message); }
   });
 
   // ── Aufgaben: Inline-Edit (debounced) + Löschen

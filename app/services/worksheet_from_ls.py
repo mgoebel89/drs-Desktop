@@ -15,7 +15,8 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from app.models import LearningSituation, User, Worksheet, WorksheetRevision
+from app.models import (LearningSituation, LsArbeitsblatt, LsAufgabe, User,
+                        Worksheet, WorksheetRevision)
 from app.services import obsidian_writer
 
 Role = Literal["student", "teacher"]
@@ -120,6 +121,86 @@ def create_worksheet_from_ls(
         comment=f"Aus Lernsituation ({role_suffix})",
         meta_json=json.dumps(meta, ensure_ascii=False),
         aufgaben_json=json.dumps(aufgaben, ensure_ascii=False),
+        markdown_source="",
+    )
+    db.add(rev)
+    return ws
+
+
+# ── Schema v3: Worksheet pro Arbeitsblatt aus der DB ────────────────────
+
+
+def create_worksheet_from_arbeitsblatt(
+    db: Session, user: User, ls: LearningSituation,
+    ab: LsArbeitsblatt, role: Role,
+) -> Worksheet:
+    """Baut ein Worksheet aus einem einzelnen v3-Arbeitsblatt (DB-Daten).
+
+    Schüler-Variante: ohne Lösungsskizzen, ohne Lehrerinformationen.
+    Lehrer-Variante: mit Lösungsskizzen pro Aufgabe."""
+    label = "lernfeld" if ls.lernfeld else "fach"
+    header_value = ls.lernfeld or ls.klassen_key or ""
+    role_suffix = "Lehrer-Version" if role == "teacher" else "Schüler-Version"
+
+    # Vorspann aus Lernsituation + Arbeitsblatt-Intro
+    parts: list[str] = []
+    if (ls.lernsituation_md or "").strip():
+        parts.append(ls.lernsituation_md.strip())
+    if ab.phase:
+        parts.append(f"_Phase: {ab.phase}_")
+    if ab.bearbeitungshinweis_md:
+        parts.append("**Bearbeitungshinweis:** " + ab.bearbeitungshinweis_md.strip())
+    if ab.content_md:
+        parts.append(ab.content_md.strip())
+
+    meta = {
+        "headerLabel": label,
+        "headerValue": header_value,
+        "lernsituationTitel": f"{ls.display_name} · {ab.title}",
+        "lernsituationText": "\n\n".join(parts).strip(),
+        "lernsituationBild": ls.lernsituation_bild_path or "",
+        "role": role,
+        "source": "ls_arbeitsblatt",
+        "ls_id": ls.id,
+        "arbeitsblatt_id": ab.id,
+    }
+
+    aufgaben_rows = db.query(LsAufgabe).filter(
+        LsAufgabe.arbeitsblatt_id == ab.id
+    ).order_by(LsAufgabe.nummer).all()
+
+    aufgaben_out: list[dict] = []
+    for a in aufgaben_rows:
+        title = f"Aufgabe {a.nummer}"
+        if a.titel:
+            title += f": {a.titel}"
+        text = f"**{title}**\n\n" + (a.text_md or "").strip()
+        loesung = (a.loesungsskizze_md or "").strip() if role == "teacher" else ""
+        aufgaben_out.append({
+            "id": a.nummer,
+            "text": text.strip(),
+            "kriterien": "",
+            "musterloesungText": loesung,
+            "musterloesungBild": "",
+            "upload": True,
+            "uploadPDF": False,
+        })
+
+    title = f"{ls.display_name} · {ab.title} · {role_suffix}"
+    ws = Worksheet(
+        owner_user_id=user.id,
+        title=title[:200],
+        learning_situation_id=ls.id,
+    )
+    db.add(ws)
+    db.flush()
+
+    rev = WorksheetRevision(
+        worksheet_id=ws.id,
+        created_by_user_id=user.id,
+        comment=f"Aus {ab.title} ({role_suffix})",
+        meta_json=json.dumps(meta, ensure_ascii=False),
+        aufgaben_json=json.dumps(aufgaben_out, ensure_ascii=False),
         markdown_source="",
     )
     db.add(rev)

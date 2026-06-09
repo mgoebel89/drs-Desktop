@@ -12,8 +12,9 @@ from sqlalchemy import select
 from app.auth import audit, require_user
 from app.db import get_db
 from app.models import LearningSituation, LsArbeitsblatt, LsAufgabe, User, Worksheet
-from app.services import (aufgabe_sync, ls_sync, obsidian_writer, smb_client,
-                          wizard_helpers, worksheet_from_ls)
+from app.services import (aufgabe_sync, file_store, ls_sync, obsidian_writer,
+                          smb_client, wizard_helpers, worksheet_from_ls)
+from app.models import AppFile
 from app.templating import templates
 
 router = APIRouter()
@@ -587,6 +588,84 @@ def ls_section_save(
           detail=section_key, request=request)
     db.commit()
     return JSONResponse({"ok": True, "hash": ls.content_hash})
+
+
+@router.post("/ls/{ls_id}/bild")
+async def ls_bild_upload(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(...),
+):
+    """Lädt ein Bild für die Lernsituationsbeschreibung hoch und setzt
+    `ls.lernsituation_bild_path` auf `/api/files/<uuid>/<name>`. Die MD
+    wird neu in den Vault geschrieben."""
+    import mimetypes
+    ls = _require_v3(db, user, ls_id)
+    payload = await file.read()
+    try:
+        file_uuid, fname = file_store.store(payload, file.filename or "bild")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    mime = file.content_type or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+    db.add(AppFile(
+        file_uuid=file_uuid, owner_user_id=user.id,
+        filename=fname, mime=mime, size=len(payload),
+    ))
+    ls.lernsituation_bild_path = f"/api/files/{file_uuid}/{fname}"
+    try:
+        ls_sync.save_to_vault(user, ls, db)
+    except Exception:
+        pass
+    audit(db, "ls_bild_uploaded", actor=user, target=str(ls.id),
+          detail=f"{fname} · {len(payload)}B", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "path": ls.lernsituation_bild_path})
+
+
+@router.post("/ls/{ls_id}/bild/delete")
+def ls_bild_delete(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Entfernt das Bild aus der Lernsituationsbeschreibung. Die Datei
+    bleibt in /api/files erhalten (kein delete) — der Pfad wird in der
+    LS nur geleert."""
+    ls = _require_v3(db, user, ls_id)
+    ls.lernsituation_bild_path = ""
+    try:
+        ls_sync.save_to_vault(user, ls, db)
+    except Exception:
+        pass
+    audit(db, "ls_bild_deleted", actor=user, target=str(ls.id), request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/ls/{ls_id}/arbeitsblatt/{ab_id}/worksheet")
+def ls_arbeitsblatt_worksheet(
+    request: Request,
+    ls_id: int,
+    ab_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    role: str = Form("student"),
+):
+    """Erzeugt ein Worksheet aus einem v3-Arbeitsblatt (DB-Daten)."""
+    ls = _require_v3(db, user, ls_id)
+    ab = db.get(LsArbeitsblatt, ab_id)
+    if not ab or ab.learning_situation_id != ls.id:
+        raise HTTPException(404, "Arbeitsblatt nicht gefunden")
+    if role not in ("student", "teacher"):
+        raise HTTPException(400, "role muss student|teacher sein")
+    ws = worksheet_from_ls.create_worksheet_from_arbeitsblatt(db, user, ls, ab, role)  # type: ignore[arg-type]
+    audit(db, "worksheet_from_arbeitsblatt", actor=user, target=str(ws.id),
+          detail=f"ls={ls.id} ab={ab.id} role={role}", request=request)
+    db.commit()
+    return RedirectResponse(f"/worksheets/{ws.id}", status_code=303)
 
 
 @router.post("/ls/{ls_id}/arbeitsblatt/{ab_id}/aufgabe")

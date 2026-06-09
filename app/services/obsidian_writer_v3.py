@@ -160,13 +160,14 @@ def build_markdown_v3(ls: LearningSituation, doc: V3Document) -> str:
     buf.write("\n# Unterrichtsinformationen\n\n")
     buf.write(_meta_table(ls))
     buf.write("\n\n# Lernsituation\n\n")
-    # lernsituation_md enthält bereits den kompletten Body inkl. ## Bild.
-    # Wenn kein MD da ist, aber ein Bildpfad vorliegt, Skeleton schreiben.
+    # Bild und Text werden getrennt verwaltet: Bild-Headline + ![] aus
+    # dem Pfad-Feld, danach der reine Prosa-Text aus lernsituation_md.
+    if doc.lernsituation_bild_path:
+        buf.write("## Bild\n\n")
+        buf.write(f"![]({doc.lernsituation_bild_path})\n\n")
     if doc.lernsituation_md and doc.lernsituation_md.strip():
         buf.write(doc.lernsituation_md.rstrip() + "\n\n")
-    elif doc.lernsituation_bild_path:
-        buf.write(f"## Bild\n\n![]({doc.lernsituation_bild_path})\n\n")
-    else:
+    elif not doc.lernsituation_bild_path:
         buf.write("\n")
 
     buf.write("# Lehrerinformationen\n\n")
@@ -343,14 +344,21 @@ def _parse_lehrerinformationen(body: str) -> tuple[str, str, str]:
 
 
 def _parse_lernsituation(body: str) -> tuple[str, str]:
-    """Bild-Pfad extra extrahieren (für UI-Vorschau), den kompletten Body
-    als lernsituation_md erhalten. So bleibt 'Hier steht die Situation'
-    direkt nach dem Bild sichtbar und beim Rebuild geht nichts verloren."""
+    """Bild-Pfad extra extrahieren UND aus dem Text-Body entfernen.
+
+    Der Bild-Tag und die optionale `## Bild`-Headline werden gestrippt,
+    damit `lernsituation_md` nur den Prosa-Text enthält. Beim Rebuild
+    wird die Bild-Sektion aus `lernsituation_bild_path` neu erzeugt."""
     bild = ""
     m = _BILD_RE.search(body)
     if m:
         bild = m.group(1).strip()
-    return bild, body.strip("\n")
+    cleaned = _BILD_RE.sub("", body)
+    # Optionale '## Bild'-Headline entfernen, wenn sie jetzt leer ist
+    cleaned = re.sub(r"(?m)^##\s*Bild\s*$\n?", "", cleaned)
+    # Mehrfache Leerzeilen reduzieren
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip("\n")
+    return bild, cleaned
 
 
 def parse_v3(md: str) -> V3Document:
