@@ -589,6 +589,104 @@ def ls_section_save(
     return JSONResponse({"ok": True, "hash": ls.content_hash})
 
 
+@router.post("/ls/{ls_id}/arbeitsblatt/{ab_id}/aufgabe")
+def ls_aufgabe_add(
+    request: Request,
+    ls_id: int,
+    ab_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Legt eine neue Aufgabe in einem Arbeitsblatt an. Nummer = max+1."""
+    ls = _require_v3(db, user, ls_id)
+    ab = db.get(LsArbeitsblatt, ab_id)
+    if not ab or ab.learning_situation_id != ls.id:
+        raise HTTPException(404, "Arbeitsblatt nicht gefunden")
+    max_n = db.query(LsAufgabe.nummer).filter(
+        LsAufgabe.arbeitsblatt_id == ab.id
+    ).order_by(LsAufgabe.nummer.desc()).first()
+    nummer = (max_n[0] if max_n else 0) + 1
+    a = LsAufgabe(
+        learning_situation_id=ls.id,
+        arbeitsblatt_id=ab.id,
+        nummer=nummer,
+        titel="",
+        anchor=f"aufgabe-{nummer}",
+        phasen=ab.phase or "",
+        text_md="",
+        loesungsskizze_md="",
+    )
+    db.add(a)
+    db.flush()
+    ls_sync.save_to_vault(user, ls, db)
+    audit(db, "ls_aufgabe_added", actor=user, target=str(ls.id),
+          detail=f"ab={ab.id} nr={nummer}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "aufgabe_id": a.id, "nummer": nummer})
+
+
+@router.post("/ls/{ls_id}/aufgabe/{auf_id}")
+def ls_aufgabe_update(
+    request: Request,
+    ls_id: int,
+    auf_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Inline-Save eines Aufgabe-Feldes: titel|text|loesungsskizze."""
+    ls = _require_v3(db, user, ls_id)
+    a = db.get(LsAufgabe, auf_id)
+    if not a or a.learning_situation_id != ls.id:
+        raise HTTPException(404, "Aufgabe nicht gefunden")
+    field = (body.get("field") or "").strip()
+    value = str(body.get("value") or "")
+    if field == "titel":
+        a.titel = value[:500]
+    elif field == "text":
+        a.text_md = value[:200000]
+    elif field == "loesungsskizze":
+        a.loesungsskizze_md = value[:200000]
+    else:
+        raise HTTPException(400, "Unbekanntes Feld")
+    ls_sync.save_to_vault(user, ls, db)
+    audit(db, "ls_aufgabe_saved", actor=user, target=str(ls.id),
+          detail=f"auf={a.id} {field}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "hash": ls.content_hash})
+
+
+@router.post("/ls/{ls_id}/aufgabe/{auf_id}/delete")
+def ls_aufgabe_delete(
+    request: Request,
+    ls_id: int,
+    auf_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Löscht eine Aufgabe und nummeriert die nachfolgenden im selben
+    Arbeitsblatt durch (1, 2, 3 …)."""
+    ls = _require_v3(db, user, ls_id)
+    a = db.get(LsAufgabe, auf_id)
+    if not a or a.learning_situation_id != ls.id:
+        raise HTTPException(404, "Aufgabe nicht gefunden")
+    ab_id = a.arbeitsblatt_id
+    db.delete(a)
+    db.flush()
+    # Nachfolger neu nummerieren
+    rest = db.query(LsAufgabe).filter(
+        LsAufgabe.arbeitsblatt_id == ab_id
+    ).order_by(LsAufgabe.nummer).all()
+    for i, ra in enumerate(rest, start=1):
+        ra.nummer = i
+        ra.anchor = f"aufgabe-{i}"
+    ls_sync.save_to_vault(user, ls, db)
+    audit(db, "ls_aufgabe_deleted", actor=user, target=str(ls.id),
+          detail=f"auf={auf_id}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
 @router.post("/ls/{ls_id}/sync/resolve")
 def ls_sync_resolve(
     request: Request,

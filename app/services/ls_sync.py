@@ -93,8 +93,8 @@ def _doc_from_db(db: Session, ls: LearningSituation) -> v3.V3Document:
             aufgaben=[
                 v3.V3Aufgabe(
                     nummer=a.nummer, titel=a.titel,
-                    text_md="",  # Aufgaben-Body wird unten aus content_md gezogen
-                    loesungsskizze_md="",
+                    text_md=a.text_md or "",
+                    loesungsskizze_md=a.loesungsskizze_md or "",
                 )
                 for a in aufg
             ],
@@ -168,6 +168,8 @@ def load_from_vault(db: Session, user: User, ls: LearningSituation) -> bool:
                 titel=a.titel or "",
                 anchor=f"aufgabe-{a.nummer}",
                 phasen=ab.phase or "",
+                text_md=a.text_md or "",
+                loesungsskizze_md=a.loesungsskizze_md or "",
             ))
 
     ls.content_hash = file_hash
@@ -377,6 +379,8 @@ def apply_resolution(
                     titel=a.titel or "",
                     anchor=f"aufgabe-{a.nummer}",
                     phasen=vab.phase or "",
+                    text_md=a.text_md or "",
+                    loesungsskizze_md=a.loesungsskizze_md or "",
                 ))
 
     save_to_vault(user, ls, db)

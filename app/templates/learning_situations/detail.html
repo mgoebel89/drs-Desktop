@@ -143,12 +143,28 @@
         </div>
       </div>
       <label style="font-size:12px">Aufgabenblock / Intro</label>
-      <textarea data-field="content" rows="5" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ ab.content_md or '' }}</textarea>
-      {% if ab._aufgaben %}
-      <p class="muted" style="font-size:11px;margin-top:.3rem">
-        Aufgaben aus MD: {% for a in ab._aufgaben %}<code>Aufg. {{ a.nummer }}</code> {% if a.titel %}{{ a.titel }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
-      </p>
-      {% endif %}
+      <textarea data-field="content" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ ab.content_md or '' }}</textarea>
+
+      <div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem">
+        <strong style="font-size:13px">Aufgaben</strong>
+        <button class="btn-sec" data-aufgabe-add="{{ ab.id }}" style="padding:3px 8px;font-size:11px">+ Neue Aufgabe</button>
+      </div>
+      {% for a in ab._aufgaben %}
+      <div class="v3-aufgabe" data-auf-id="{{ a.id }}" style="margin-top:.5rem;padding:.6rem .8rem;background:#f9f9fb;border-radius:6px">
+        <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.3rem">
+          <strong style="color:var(--blau);min-width:2.5rem">#{{ a.nummer }}</strong>
+          <input data-auf-field="titel" value="{{ a.titel or '' }}" placeholder="Titel (optional)" style="flex:1;font-size:12px">
+          <span class="muted" data-auf-status style="font-size:11px"></span>
+          <button class="btn-sec" data-auf-del style="padding:2px 6px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </div>
+        <label style="font-size:11px">Aufgabentext</label>
+        <textarea data-auf-field="text" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ a.text_md or '' }}</textarea>
+        <label style="font-size:11px;margin-top:.3rem;display:block">Lösungsskizze</label>
+        <textarea data-auf-field="loesungsskizze" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ a.loesungsskizze_md or '' }}</textarea>
+      </div>
+      {% else %}
+      <p class="muted" style="font-size:11px;margin-top:.3rem">Noch keine Aufgaben. Lege die erste über den +-Knopf an.</p>
+      {% endfor %}
     </div>
     {% endfor %}
   {% else %}
@@ -306,6 +322,50 @@
           }catch(e){ status.textContent = '✗ ' + e.message; }
         }, 700);
       });
+    });
+  });
+
+  // ── Aufgaben: Inline-Edit (debounced) + Löschen
+  function wireAufgabe(box){
+    const aufId = box.dataset.aufId;
+    const status = box.querySelector('[data-auf-status]');
+    let timer;
+    box.querySelectorAll('[data-auf-field]').forEach(el => {
+      el.addEventListener('input', () => {
+        const field = el.dataset.aufField;
+        const value = el.value;
+        clearTimeout(timer);
+        status.textContent = '✎';
+        timer = setTimeout(async () => {
+          status.textContent = 'speichere …';
+          try{
+            await postJSON(`/ls/${LS_ID}/aufgabe/${aufId}`, {field, value});
+            status.textContent = '✓';
+            setTimeout(() => status.textContent = '', 1200);
+          }catch(e){ status.textContent = '✗ ' + e.message; }
+        }, 700);
+      });
+    });
+    const delBtn = box.querySelector('[data-auf-del]');
+    if(delBtn) delBtn.addEventListener('click', async () => {
+      if(!confirm('Diese Aufgabe wirklich löschen?')) return;
+      try{
+        await postJSON(`/ls/${LS_ID}/aufgabe/${aufId}/delete`);
+        location.reload();
+      }catch(e){ alert('Fehler: ' + e.message); }
+    });
+  }
+  document.querySelectorAll('.v3-aufgabe').forEach(wireAufgabe);
+
+  // ── + Neue Aufgabe pro Arbeitsblatt
+  document.querySelectorAll('[data-aufgabe-add]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const abId = btn.dataset.aufgabeAdd;
+      btn.disabled = true;
+      try{
+        await postJSON(`/ls/${LS_ID}/arbeitsblatt/${abId}/aufgabe`, {});
+        location.reload();
+      }catch(e){ alert('Fehler: ' + e.message); btn.disabled = false; }
     });
   });
 

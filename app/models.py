@@ -144,6 +144,11 @@ class LsAufgabe(Base):
     titel: Mapped[str] = mapped_column(String(500), default="")
     anchor: Mapped[str] = mapped_column(String(120), default="")
     phasen: Mapped[str] = mapped_column(String(255), default="")  # CSV
+    # Schema v3 (Migration 0017): Aufgaben-Inhalt direkt in der DB für
+    # Inline-Edit. v2-Aufgaben haben hier leere Strings — Inhalt lebt
+    # dort weiter in der MD.
+    text_md: Mapped[str] = mapped_column(Text, default="")
+    loesungsskizze_md: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
