@@ -63,6 +63,12 @@ body{font-family:'DIN Pro',Calibri,Arial,sans-serif;background:var(--bg);color:v
 .aufg-nr{font-size:12px;font-weight:700;color:var(--blau);white-space:nowrap;}
 .aufg-text{font-size:14px;line-height:1.7;margin-bottom:11px;}
 .aufg-text p{margin-bottom:.5em;}
+.musterloesung{margin-top:.7rem;padding:.7rem .9rem;background:#f3f8fc;border-left:4px solid var(--blau);border-radius:0 6px 6px 0;}
+.musterloesung .ml-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--blau);margin-bottom:5px;}
+.musterloesung .ml-text{font-size:13px;line-height:1.6;}
+.musterloesung .ml-text p{margin-bottom:.4em;}
+.musterloesung .ml-bild{margin-top:.5rem;}
+.musterloesung .ml-bild img{max-width:100%;max-height:260px;border-radius:6px;}
 textarea.antwort{width:100%;min-height:90px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;background:#fafafa;color:var(--text);resize:vertical;line-height:1.55;}
 textarea.antwort:focus{outline:none;border-color:var(--blau);box-shadow:0 0 0 2px rgba(0,99,156,.1);}
 .upload-row{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;}
@@ -192,11 +198,23 @@ function renderAufgaben() {
       if (a.uploadPDF) uploadHtml += '<label class="upl-btn" for="pdf-' + id + '">📎 PDF anhängen<input id="pdf-' + id + '" type="file" accept="application/pdf" onchange="addFile(' + id + ',this,\'pdf\')"></label>';
       uploadHtml += '</div><div class="preview-area" id="prev-' + id + '"></div>';
     }
+    let solutionHtml = '';
+    if (CFG.withSolutions) {
+      const mlText = (a.musterloesungText || '').trim();
+      const mlBild = a.musterloesungBild;
+      if (mlText || mlBild) {
+        solutionHtml = '<div class="musterloesung"><div class="ml-label">Musterlösung</div>'
+          + (mlText ? '<div class="ml-text">' + paragraphs(mlText) + '</div>' : '')
+          + (mlBild ? '<div class="ml-bild"><img src="' + mlBild + '" alt=""></div>' : '')
+          + '</div>';
+      }
+    }
     html += '<div class="aufgabe" id="aufgabe-' + id + '">'
       + '<div class="aufg-top"><span class="aufg-nr">Aufgabe ' + id + '</span></div>'
       + '<div class="aufg-text">' + paragraphs(text) + '</div>'
-      + '<textarea class="antwort" id="ant-' + id + '" placeholder="Deine Antwort…"></textarea>'
-      + uploadHtml
+      + (CFG.withSolutions ? '' : '<textarea class="antwort" id="ant-' + id + '" placeholder="Deine Antwort…"></textarea>')
+      + (CFG.withSolutions ? '' : uploadHtml)
+      + solutionHtml
       + '</div>';
   });
   container.innerHTML = html;

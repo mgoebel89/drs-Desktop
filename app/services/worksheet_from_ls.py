@@ -144,22 +144,17 @@ def create_worksheet_from_arbeitsblatt(
     label = "lernfeld" if ls.lernfeld else "fach"
     header_value = ls.lernfeld or ls.klassen_key or ""
 
-    # Vorspann aus Lernsituation + Arbeitsblatt-Intro
-    parts: list[str] = []
-    if (ls.lernsituation_md or "").strip():
-        parts.append(ls.lernsituation_md.strip())
-    if ab.phase:
-        parts.append(f"_Phase: {ab.phase}_")
-    if ab.bearbeitungshinweis_md:
-        parts.append("**Bearbeitungshinweis:** " + ab.bearbeitungshinweis_md.strip())
-    if ab.content_md:
-        parts.append(ab.content_md.strip())
+    # Lernsituationstext = ausschließlich die LS-Beschreibung.
+    # Phase, Bearbeitungshinweis und Arbeitsblatt-Intro werden NICHT
+    # in den Worksheet-Lernsituationsblock übernommen — die gehören
+    # zur Arbeitsblatt-Sicht in der LS-Pflege, nicht zum Schüler-PDF.
+    lernsituation_text = (ls.lernsituation_md or "").strip()
 
     meta = {
         "headerLabel": label,
         "headerValue": header_value,
         "lernsituationTitel": f"{ls.display_name} · {ab.title}",
-        "lernsituationText": "\n\n".join(parts).strip(),
+        "lernsituationText": lernsituation_text,
         "lernsituationBild": ls.lernsituation_bild_path or "",
         "source": "ls_arbeitsblatt",
         "ls_id": ls.id,

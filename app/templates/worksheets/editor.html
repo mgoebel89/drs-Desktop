@@ -9,8 +9,11 @@
         <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/revisions">Verlauf</a>
         <button class="btn-sec btn" type="button" id="btn-preview-html">Vorschau HTML</button>
         <button class="btn-sec btn" type="button" id="btn-preview-pdf">Vorschau PDF</button>
+        <button class="btn-sec btn" type="button" id="btn-preview-pdf-loesung" title="Vorschau PDF mit Musterlösungen">PDF Lehrer ▾</button>
         <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.html">HTML ↓</a>
         <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.pdf">PDF ↓</a>
+        <a class="btn-sec btn" href="/worksheets/{{ ws_id }}/export.pdf?with_solutions=1"
+           title="Schüler-Aufgabenblatt + Musterlösungen für die Lehrkraft">PDF Lehrer ↓</a>
       {% endif %}
       <button class="btn" type="button" id="btn-save">Speichern</button>
     </div>
@@ -299,6 +302,8 @@ const _previewHtmlBtn = document.getElementById('btn-preview-html');
 if (_previewHtmlBtn) _previewHtmlBtn.addEventListener('click', () => saveThenOpen('/preview.html'));
 const _previewPdfBtn = document.getElementById('btn-preview-pdf');
 if (_previewPdfBtn) _previewPdfBtn.addEventListener('click', () => saveThenOpen('/preview.pdf'));
+const _previewPdfLoesungBtn = document.getElementById('btn-preview-pdf-loesung');
+if (_previewPdfLoesungBtn) _previewPdfLoesungBtn.addEventListener('click', () => saveThenOpen('/preview.pdf?with_solutions=1'));
 
 // ── WebUntis-Integration: "Aus Stundenplan…" ─────────────────────────────
 const _untisBtn = document.getElementById('btn-untis-pick');

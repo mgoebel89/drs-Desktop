@@ -171,13 +171,16 @@ def delete_worksheet(
 
 
 # ── Export / Preview ──────────────────────────────────────────────────────
-def _render_export_html(db: Session, ws: Worksheet, rev: WorksheetRevision) -> str:
+def _render_export_html(db: Session, ws: Worksheet, rev: WorksheetRevision,
+                        with_solutions: bool = False) -> str:
     payload = {
         "meta": json.loads(rev.meta_json),
         "aufgaben": json.loads(rev.aufgaben_json),
+        "withSolutions": bool(with_solutions),
     }
+    title = ws.title + (" · Lehrer-Version" if with_solutions else "")
     return templates.get_template("worksheets/export.html").render({
-        "ws_title": ws.title,
+        "ws_title": title,
         "config_json": json.dumps(payload, ensure_ascii=False),
         "school_name_value": get_school_name(db),
         "logo_data_url": logo_data_url(db),
@@ -201,10 +204,12 @@ def export_html(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
+    with_solutions: int = 0,
 ):
     ws = _owned(db, ws_id, user)
-    rendered = _render_export_html(db, ws, _require_rev(db, ws))
-    safe = _safe_filename(ws.title, ws.id)
+    rendered = _render_export_html(db, ws, _require_rev(db, ws), bool(with_solutions))
+    suffix = "_loesungen" if with_solutions else ""
+    safe = _safe_filename(ws.title, ws.id) + suffix
     return Response(content=rendered, media_type="text/html; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{safe}.html"'})
 
@@ -215,9 +220,11 @@ def preview_html(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
+    with_solutions: int = 0,
 ):
     ws = _owned(db, ws_id, user)
-    return HTMLResponse(content=_render_export_html(db, ws, _require_rev(db, ws)))
+    return HTMLResponse(content=_render_export_html(
+        db, ws, _require_rev(db, ws), bool(with_solutions)))
 
 
 @router.get("/{ws_id}/export.pdf")
@@ -226,13 +233,16 @@ async def export_pdf(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
+    with_solutions: int = 0,
 ):
     ws = _owned(db, ws_id, user)
-    rendered = _render_export_html(db, ws, _require_rev(db, ws))
+    rendered = _render_export_html(db, ws, _require_rev(db, ws), bool(with_solutions))
     pdf_bytes = await render_pdf(rendered)
-    audit(db, "worksheet_exported_pdf", actor=user, target=str(ws.id), request=request)
+    audit(db, "worksheet_exported_pdf", actor=user, target=str(ws.id),
+          detail="loesungen" if with_solutions else "", request=request)
     db.commit()
-    safe = _safe_filename(ws.title, ws.id)
+    suffix = "_loesungen" if with_solutions else ""
+    safe = _safe_filename(ws.title, ws.id) + suffix
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
 
@@ -243,10 +253,12 @@ async def preview_pdf(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
+    with_solutions: int = 0,
 ):
     ws = _owned(db, ws_id, user)
-    rendered = _render_export_html(db, ws, _require_rev(db, ws))
+    rendered = _render_export_html(db, ws, _require_rev(db, ws), bool(with_solutions))
     pdf_bytes = await render_pdf(rendered)
-    safe = _safe_filename(ws.title, ws.id)
+    suffix = "_loesungen" if with_solutions else ""
+    safe = _safe_filename(ws.title, ws.id) + suffix
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{safe}.pdf"'})
