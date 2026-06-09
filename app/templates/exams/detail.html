@@ -145,6 +145,12 @@
       {% endfor %}
     </div>
     {% endif %}
+    <h3 style="margin-top:2rem">Notenliste (Excel / Moodle)</h3>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
+      <a class="btn" href="/exams/{{ exam.id }}/export.csv">⬇ CSV herunterladen</a>
+      <span class="muted" style="font-size:12px">Tendenznoten als Dezimal: 2+ = 1,7 · 2 = 2,0 · 2- = 2,3</span>
+    </div>
+
     <h3 style="margin-top:2rem">Markdown</h3>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap">
       <a class="btn" href="/exams/{{ exam.id }}/export.md">⬇ MD herunterladen</a>

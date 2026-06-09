@@ -1,6 +1,7 @@
 """Prüfungen / Bewertungen — CRUD + 4-Tab-Edit + Export."""
 from __future__ import annotations
 
+import csv
 import io
 import json
 import zipfile
@@ -842,6 +843,70 @@ async def exams_summary_pdf(
     filename = f"{slugify(ex.title)}_Zusammenfassung.pdf"
     return Response(
         content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
+    )
+
+
+@router.get("/exams/{ex_id}/export.csv")
+def exams_export_csv(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Notenliste als CSV (Excel/Moodle-kompatibel).
+
+    Tendenznoten werden zusätzlich als Dezimalwert ausgegeben
+    (2+ = 1,7 · 2 = 2,0 · 2- = 2,3). Trennzeichen `;`, UTF-8 mit BOM,
+    damit Excel deutsche Umlaute und Komma-Dezimalstellen direkt erkennt.
+    """
+    ex = _get_exam(db, user, ex_id)
+    ctx = _scoring_ctx(db, user, ex)
+    participants = _exam_participants(db, ex)
+
+    buf = io.StringIO()
+    buf.write("﻿")  # BOM für Excel
+    w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    w.writerow([
+        "Nachname", "Vorname", "Klasse", "E-Mail", "Moodle-ID",
+        "Gruppe", "Prozent", "Note", "Note (Dezimal)",
+    ])
+
+    def _fmt_de(v) -> str:
+        if v is None or v == "":
+            return ""
+        return str(v).replace(".", ",")
+
+    rows = []
+    for s, g in participants:
+        _, pct, note = _student_total(ctx, s.id, g)
+        dec = grading.label_to_decimal(note) if note else None
+        rows.append({
+            "nachname": s.nachname or "",
+            "vorname": s.vorname or "",
+            "klasse": s.klassen_key or "",
+            "email": s.email or "",
+            "moodle_id": s.moodle_id or "",
+            "gruppe": g or "",
+            "pct": round(pct, 1),
+            "note": note or "",
+            "dec": dec,
+        })
+    rows.sort(key=lambda r: (r["nachname"].lower(), r["vorname"].lower()))
+    for r in rows:
+        w.writerow([
+            r["nachname"], r["vorname"], r["klasse"], r["email"], r["moodle_id"],
+            r["gruppe"], _fmt_de(r["pct"]), r["note"], _fmt_de(r["dec"]),
+        ])
+
+    audit(db, "exam_csv_export", actor=user, target=str(ex_id),
+          detail=f"{len(rows)} Zeilen", request=request)
+    db.commit()
+
+    filename = f"{slugify(ex.title)}_{ex.datum or 'export'}.csv"
+    return Response(
+        content=buf.getvalue().encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
     )
 

@@ -204,6 +204,38 @@ def percent_for_grade(stufen: list, label: str) -> float | None:
     return None
 
 
+def label_to_decimal(label: str | None) -> float | None:
+    """Konvertiert ein Noten-Label zu einer Dezimalzahl für CSV/Excel-Exporte.
+
+    MSS-Schulnoten mit Tendenz: '+' → −0,3 · '-' → +0,3 (z. B. '2+' → 1,7,
+    '2' → 2,0, '2-' → 2,3). Numerische Labels (MSS-Punkte '15' … '0') werden
+    direkt zurückgegeben. Unbekannte Labels → None.
+    """
+    if label is None:
+        return None
+    s = str(label).strip()
+    if not s:
+        return None
+    # Reine Zahl (MSS-Punkte oder bereits dezimal)
+    try:
+        return float(s.replace(",", "."))
+    except ValueError:
+        pass
+    # Schulnote mit optionaler Tendenz
+    tendenz = 0.0
+    base = s
+    if s.endswith("+"):
+        tendenz = -0.3
+        base = s[:-1].strip()
+    elif s.endswith("-"):
+        tendenz = +0.3
+        base = s[:-1].strip()
+    try:
+        return round(float(base.replace(",", ".")) + tendenz, 1)
+    except ValueError:
+        return None
+
+
 def weighted_final(items: list[tuple[float, float]]) -> float:
     """items = [(percent, weight), …]. Liefert gewichteten Prozent-Schnitt.
     Gewichte werden auf ihre Summe normiert; Gewicht 0 zählt als 1
