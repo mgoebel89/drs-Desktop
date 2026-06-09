@@ -50,12 +50,22 @@ def _exam_classes(ex: Exam) -> list[str]:
 
 
 def _exam_participants(db: Session, ex: Exam) -> list[tuple[Student, str]]:
-    """Teilnehmer (Member) der Prüfung + group_label, sortiert."""
+    """Teilnehmer (Member) der Prüfung + group_label, alphabetisch nach
+    Nachname/Vorname (case-insensitive), Gruppe als sekundärer Schlüssel.
+
+    Single Source of Truth für Wizard, Bewertungs-Tabelle, PDFs, ZIP,
+    CSV und Lehrer-Zusammenfassung. Sortier-Reihenfolge ist überall
+    identisch."""
+    from sqlalchemy import func as _f
     rows = db.execute(
         select(Student, ExamStudent.group_label)
         .join(ExamStudent, ExamStudent.student_id == Student.id)
         .where(ExamStudent.exam_id == ex.id)
-        .order_by(ExamStudent.group_label, Student.nachname, Student.vorname)
+        .order_by(
+            ExamStudent.group_label,
+            _f.lower(Student.nachname),
+            _f.lower(Student.vorname),
+        )
     ).all()
     return [(s, g or "") for s, g in rows]
 
@@ -71,10 +81,15 @@ def _scoring_ctx(db: Session, user: User, ex: Exam):
     indiv_results = {r.student_id: _loadjson(r.erreicht_json) for r in ex.results}
     group_results = {gr.group_label or "": _loadjson(gr.erreicht_json)
                      for gr in ex.group_results}
+    indiv_remarks = {r.student_id: _loadjson(r.feedback_remarks_json or "{}")
+                     for r in ex.results}
+    group_remarks = {gr.group_label or "": _loadjson(gr.feedback_remarks_json or "{}")
+                     for gr in ex.group_results}
     return {
         "fps": fps, "indiv_fps": indiv_fps, "group_fps": group_fps,
         "sum_max": sum_max, "stufen": stufen,
         "indiv_results": indiv_results, "group_results": group_results,
+        "indiv_remarks": indiv_remarks, "group_remarks": group_remarks,
     }
 
 
@@ -460,7 +475,9 @@ def exams_detail(
         n_filled, pct, note = _student_total(ctx, s.id, g)
         student_views.append({
             "student": s, "group_label": g,
-            "erreicht": er, "n_filled": n_filled, "pct": pct, "note": note,
+            "erreicht": er,
+            "remarks": ctx["indiv_remarks"].get(s.id, {}),
+            "n_filled": n_filled, "pct": pct, "note": note,
             "comment": comments_by_student.get(s.id, ""),
         })
     scale_labels = [lbl for lbl, _, _ in ctx["stufen"]]
@@ -472,6 +489,7 @@ def exams_detail(
         group_views.append({
             "label": g,
             "erreicht": ctx["group_results"].get(g, {}),
+            "remarks": ctx["group_remarks"].get(g, {}),
             "members": [s.nachname for s, gg in participants if gg == g],
         })
 
@@ -633,6 +651,17 @@ def exams_save(
                 except (TypeError, ValueError):
                     continue
 
+        # Mündliche Bemerkungen pro FP (Map fp_id → string). Nur nicht-
+        # leere übernehmen; leere Werte erzeugen keinen Eintrag, damit
+        # das PDF die Bemerkungs-Spalte zuverlässig ausblenden kann.
+        remarks_in = body.get("remarks") or {}
+        cleaned_remarks: dict = {}
+        if isinstance(remarks_in, dict):
+            for k, v in remarks_in.items():
+                if not v:
+                    continue
+                cleaned_remarks[str(k)] = str(v)[:2000]
+
         group_label = body.get("group_label")
         if group_label is not None:
             # Gruppen-Bewertung
@@ -645,6 +674,9 @@ def exams_save(
                 gr = ExamGroupResult(exam_id=ex.id, group_label=gl)
                 db.add(gr)
             gr.erreicht_json = json.dumps(cleaned, ensure_ascii=False)
+            if "remarks" in body:
+                gr.feedback_remarks_json = json.dumps(
+                    cleaned_remarks, ensure_ascii=False)
         else:
             # Einzel-Bewertung
             student_id = body.get("student_id")
@@ -663,6 +695,9 @@ def exams_save(
             r.erreicht_json = json.dumps(cleaned, ensure_ascii=False)
             if "comment" in body:
                 r.comment = (body.get("comment") or "")[:2000]
+            if "remarks" in body:
+                r.feedback_remarks_json = json.dumps(
+                    cleaned_remarks, ensure_ascii=False)
     else:
         raise HTTPException(400, f"Unbekannter Tab: {tab}")
 

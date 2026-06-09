@@ -199,11 +199,11 @@ const INITIAL_FPS = [
 ];
 const SCALE_LABELS = {{ scale_labels|tojson }};
 const WIZ_STUDENTS = [
-  {% for sv in students_view %}{ id:{{ sv.student.id }}, name:{{ (sv.student.nachname ~ ', ' ~ sv.student.vorname)|tojson }}, group:{{ sv.group_label|tojson }}, values:{{ sv.erreicht|tojson }}, comment:{{ sv.comment|tojson }} },
+  {% for sv in students_view %}{ id:{{ sv.student.id }}, name:{{ (sv.student.nachname ~ ', ' ~ sv.student.vorname)|tojson }}, group:{{ sv.group_label|tojson }}, values:{{ sv.erreicht|tojson }}, remarks:{{ sv.remarks|tojson }}, comment:{{ sv.comment|tojson }} },
   {% endfor %}
 ];
 const WIZ_GROUPS = [
-  {% for gv in group_views %}{ label:{{ gv.label|tojson }}, members:{{ gv.members|tojson }}, values:{{ gv.erreicht|tojson }} },
+  {% for gv in group_views %}{ label:{{ gv.label|tojson }}, members:{{ gv.members|tojson }}, values:{{ gv.erreicht|tojson }}, remarks:{{ gv.remarks|tojson }} },
   {% endfor %}
 ];
 const INDIV_FPS = INITIAL_FPS.filter(f=>f.scope!=='group');
@@ -361,12 +361,20 @@ function renderWizStep(){
     const s=WIZ_STUDENTS[wizIdx];
     document.getElementById('wiz-title').textContent=s.name;
     document.getElementById('wiz-sub').textContent='Einzelbewertung · '+(wizIdx+1)+' von '+WIZ_STUDENTS.length+(s.group?(' · Gruppe '+s.group):'');
-    body.innerHTML=(INDIV_FPS.map(fp=>`<div style="margin-bottom:1rem"><div style="font-weight:600;margin-bottom:.3rem">${escapeHtml(fp.name)} <span class="muted" style="font-size:11px">[${fp.eval_type}${fp.weight_pct?(' · '+fp.weight_pct+'%'):''}]</span></div>${widget(fp,(s.values||{})[fp.id]??'')}</div>`).join('') || '<p class="muted">Keine Einzel-Feedbackpunkte.</p>')+`<div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid #eee"><div style="font-weight:600;margin-bottom:.3rem">Gesamtbemerkung <span class="muted" style="font-size:11px">(optional, erscheint im PDF)</span></div><textarea id="wiz-comment" rows="3" style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:13px;resize:vertical">${escapeHtml(s.comment||'')}</textarea></div>`;
+    body.innerHTML=(INDIV_FPS.map(fp=>{
+      const val=(s.values||{})[fp.id]??'';
+      const rem=(s.remarks||{})[fp.id]||'';
+      return `<div style="margin-bottom:1rem"><div style="font-weight:600;margin-bottom:.3rem">${escapeHtml(fp.name)} <span class="muted" style="font-size:11px">[${fp.eval_type}${fp.weight_pct?(' · '+fp.weight_pct+'%'):''}]</span></div>${widget(fp,val)}<div style="margin-top:.4rem"><label class="muted" style="font-size:11px">Mündliche Ergänzung (optional, erscheint nur im PDF wenn ausgefüllt)</label><textarea class="wz-remark" data-fp="${fp.id}" rows="2" style="width:100%;padding:.4rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:12px;resize:vertical">${escapeHtml(rem)}</textarea></div></div>`;
+    }).join('') || '<p class="muted">Keine Einzel-Feedbackpunkte.</p>')+`<div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid #eee"><div style="font-weight:600;margin-bottom:.3rem">Gesamtbemerkung <span class="muted" style="font-size:11px">(optional, erscheint im PDF)</span></div><textarea id="wiz-comment" rows="3" style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:13px;resize:vertical">${escapeHtml(s.comment||'')}</textarea></div>`;
   } else {
     const g=WIZ_GROUPS[wizIdx];
     document.getElementById('wiz-title').textContent='Gruppe '+g.label;
     document.getElementById('wiz-sub').textContent='Gruppenbewertung · '+(wizIdx+1)+' von '+WIZ_GROUPS.length+' · '+(g.members||[]).join(', ');
-    body.innerHTML=GROUP_FPS.map(fp=>`<div style="margin-bottom:1rem"><div style="font-weight:600;margin-bottom:.3rem">${escapeHtml(fp.name)} <span class="muted" style="font-size:11px">[${fp.eval_type}${fp.weight_pct?(' · '+fp.weight_pct+'%'):''}]</span></div>${widget(fp,(g.values||{})[fp.id]??'')}</div>`).join('') || '<p class="muted">Keine Gruppen-Feedbackpunkte.</p>';
+    body.innerHTML=GROUP_FPS.map(fp=>{
+      const val=(g.values||{})[fp.id]??'';
+      const rem=(g.remarks||{})[fp.id]||'';
+      return `<div style="margin-bottom:1rem"><div style="font-weight:600;margin-bottom:.3rem">${escapeHtml(fp.name)} <span class="muted" style="font-size:11px">[${fp.eval_type}${fp.weight_pct?(' · '+fp.weight_pct+'%'):''}]</span></div>${widget(fp,val)}<div style="margin-top:.4rem"><label class="muted" style="font-size:11px">Mündliche Ergänzung (optional)</label><textarea class="wz-remark" data-fp="${fp.id}" rows="2" style="width:100%;padding:.4rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:12px;resize:vertical">${escapeHtml(rem)}</textarea></div></div>`;
+    }).join('') || '<p class="muted">Keine Gruppen-Feedbackpunkte.</p>';
   }
   body.querySelectorAll('.wz-stages').forEach(grp=>grp.querySelectorAll('.wz-stage').forEach(btn=>btn.addEventListener('click',()=>{grp.querySelectorAll('.wz-stage').forEach(b=>{b.style.background='#fff';b.style.color='#333';b.dataset.active='';});btn.style.background='#7B61FF';btn.style.color='#fff';btn.dataset.active='1';})));
   document.getElementById('wiz-prev').disabled = wizIdx===0;
@@ -379,12 +387,18 @@ function collectWiz(){
   document.querySelectorAll('#wiz-body .wz-stages').forEach(g=>{const a=g.querySelector('.wz-stage[data-active="1"]');if(a)er[g.dataset.fp]=a.dataset.points;});
   return er;
 }
+function collectRemarks(){
+  const rm={};
+  document.querySelectorAll('#wiz-body .wz-remark').forEach(t=>{const v=t.value.trim();if(v)rm[t.dataset.fp]=v;});
+  return rm;
+}
 async function saveWizStep(){
   const st=document.getElementById('wiz-status'); st.textContent='speichere …';
   const er=collectWiz();
+  const rm=collectRemarks();
   let payload;
-  if(wizMode==='indiv'){const s=WIZ_STUDENTS[wizIdx];s.values=er;const ct=document.getElementById('wiz-comment');const cv=ct?ct.value.trim():'';s.comment=cv;payload={tab:'bewertung',student_id:s.id,erreicht:er,comment:cv};}
-  else {const g=WIZ_GROUPS[wizIdx];g.values=er;payload={tab:'bewertung',group_label:g.label,erreicht:er};}
+  if(wizMode==='indiv'){const s=WIZ_STUDENTS[wizIdx];s.values=er;s.remarks=rm;const ct=document.getElementById('wiz-comment');const cv=ct?ct.value.trim():'';s.comment=cv;payload={tab:'bewertung',student_id:s.id,erreicht:er,comment:cv,remarks:rm};}
+  else {const g=WIZ_GROUPS[wizIdx];g.values=er;g.remarks=rm;payload={tab:'bewertung',group_label:g.label,erreicht:er,remarks:rm};}
   const d=await postJSON('/exams/'+EXAM_ID+'/save',payload);
   if(d.ok){st.textContent='✓ gespeichert';applyNotes(d.notes);setTimeout(()=>{if(st)st.textContent='';},1000);}
   else st.textContent='✗ Fehler';
