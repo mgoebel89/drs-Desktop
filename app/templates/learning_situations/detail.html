@@ -101,7 +101,12 @@
   {% else %}
   <div id="sync-banner" style="margin-top:1rem;padding:.7rem 1rem;border-radius:8px;display:none"></div>
 
-  <h2 style="margin-top:1.6rem">Lernsituation</h2>
+  <h2 style="margin-top:1.6rem;display:flex;align-items:center;gap:.8rem">
+    Lernsituation
+    <form method="post" action="/ls/{{ ls.id }}/cover-worksheet" style="display:inline">
+      <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:11px">📋 Deckblatt erzeugen</button>
+    </form>
+  </h2>
   <div class="v3-section v3-lernsituation" data-key="lernsituation" style="margin:.8rem 0;overflow:hidden">
     <label style="font-weight:600">Szenario / Lernsituation</label>
     <div id="ls-bild-wrap" style="float:right;margin:0 0 .6rem 1rem;max-width:280px;text-align:center">

@@ -213,6 +213,20 @@ if (CFG.meta.lernsituationBild) {
   document.getElementById('ls-bild-wrap').innerHTML =
     '<div class="lernsituation-bild"><img src="' + CFG.meta.lernsituationBild + '" alt=""></div>';
 }
+// Wenn weder Lernsituationstext noch Bild gesetzt sind, blenden wir
+// die ganze Deckblatt-Seite aus (Arbeitsblatt-Worksheets aus v3 haben
+// keine Lernsituation mehr — die kommt als eigenes Deckblatt-Worksheet).
+const _hasLs = (CFG.meta.lernsituationText || '').trim() || CFG.meta.lernsituationBild;
+if (!_hasLs) {
+  const cover = document.querySelector('.page-cover');
+  if (cover) cover.style.display = 'none';
+}
+// Wenn keine Aufgaben vorhanden sind, blenden wir die Aufgabenseite aus
+// (Lernsituations-Deckblatt-Worksheet).
+if (!(CFG.aufgaben || []).length) {
+  const work = document.querySelector('.page-aufgaben');
+  if (work) work.style.display = 'none';
+}
 
 // Aufgaben rendern (Text bewusst MIT $ ... $, damit MathJax es findet)
 const uploads = {}; // {aufgabeId: [{type, dataUrl, name}]}

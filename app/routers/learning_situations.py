@@ -645,6 +645,23 @@ def ls_bild_delete(
     return JSONResponse({"ok": True})
 
 
+@router.post("/ls/{ls_id}/cover-worksheet")
+def ls_cover_worksheet(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Erzeugt ein Worksheet, das nur die Lernsituation als Deckblatt
+    enthält (ohne Aufgaben)."""
+    ls = _require_v3(db, user, ls_id)
+    ws = worksheet_from_ls.create_worksheet_lernsituation_cover(db, user, ls)
+    audit(db, "worksheet_ls_cover", actor=user, target=str(ws.id),
+          detail=f"ls={ls.id}", request=request)
+    db.commit()
+    return RedirectResponse(f"/worksheets/{ws.id}", status_code=303)
+
+
 @router.post("/ls/{ls_id}/arbeitsblatt/{ab_id}/worksheet")
 def ls_arbeitsblatt_worksheet(
     request: Request,

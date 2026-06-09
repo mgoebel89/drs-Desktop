@@ -144,18 +144,16 @@ def create_worksheet_from_arbeitsblatt(
     label = "lernfeld" if ls.lernfeld else "fach"
     header_value = ls.lernfeld or ls.klassen_key or ""
 
-    # Lernsituationstext = ausschließlich die LS-Beschreibung.
-    # Phase, Bearbeitungshinweis und Arbeitsblatt-Intro werden NICHT
-    # in den Worksheet-Lernsituationsblock übernommen — die gehören
-    # zur Arbeitsblatt-Sicht in der LS-Pflege, nicht zum Schüler-PDF.
-    lernsituation_text = (ls.lernsituation_md or "").strip()
-
+    # Lernsituations-Block bleibt im Arbeitsblatt-Worksheet leer — die
+    # LS-Beschreibung kommt als eigenes Deckblatt (siehe
+    # create_worksheet_lernsituation_cover). Das Arbeitsblatt startet
+    # direkt mit Bearbeitungshinweis und Aufgaben.
     meta = {
         "headerLabel": label,
         "headerValue": header_value,
-        "lernsituationTitel": f"{ls.display_name} · {ab.title}",
-        "lernsituationText": lernsituation_text,
-        "lernsituationBild": ls.lernsituation_bild_path or "",
+        "lernsituationTitel": ab.title or f"{ls.display_name} · Arbeitsblatt",
+        "lernsituationText": "",
+        "lernsituationBild": "",
         "bearbeitungshinweis": (ab.bearbeitungshinweis_md or "").strip(),
         "source": "ls_arbeitsblatt",
         "ls_id": ls.id,
@@ -195,6 +193,44 @@ def create_worksheet_from_arbeitsblatt(
         comment=f"Aus {ab.title}",
         meta_json=json.dumps(meta, ensure_ascii=False),
         aufgaben_json=json.dumps(aufgaben_out, ensure_ascii=False),
+        markdown_source="",
+    )
+    db.add(rev)
+    return ws
+
+
+def create_worksheet_lernsituation_cover(
+    db: Session, user: User, ls: LearningSituation,
+) -> Worksheet:
+    """Erzeugt ein Worksheet, das ausschließlich die Lernsituation als
+    Deckblatt zeigt — ohne Aufgaben. Dient als Übersichtsseite, die der
+    Lehrer separat ausdrucken/teilen kann."""
+    label = "lernfeld" if ls.lernfeld else "fach"
+    header_value = ls.lernfeld or ls.klassen_key or ""
+
+    meta = {
+        "headerLabel": label,
+        "headerValue": header_value,
+        "lernsituationTitel": ls.display_name,
+        "lernsituationText": (ls.lernsituation_md or "").strip(),
+        "lernsituationBild": ls.lernsituation_bild_path or "",
+        "bearbeitungshinweis": "",
+        "source": "ls_cover",
+        "ls_id": ls.id,
+    }
+    ws = Worksheet(
+        owner_user_id=user.id,
+        title=f"{ls.display_name} · Lernsituation"[:200],
+        learning_situation_id=ls.id,
+    )
+    db.add(ws)
+    db.flush()
+    rev = WorksheetRevision(
+        worksheet_id=ws.id,
+        created_by_user_id=user.id,
+        comment="Lernsituations-Deckblatt",
+        meta_json=json.dumps(meta, ensure_ascii=False),
+        aufgaben_json=json.dumps([], ensure_ascii=False),
         markdown_source="",
     )
     db.add(rev)
