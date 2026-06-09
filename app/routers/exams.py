@@ -8,7 +8,7 @@ import zipfile
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -287,7 +287,7 @@ def _add_class_members(db: Session, user: User, ex: Exam, klassen: list[str]) ->
 
 
 @router.post("/exams")
-def exams_create(
+async def exams_create(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
@@ -297,11 +297,11 @@ def exams_create(
     learning_situation_id: str = Form(""),
     grading_scale_key: str = Form("builtin:mss_noten"),
     input_mode: str = Form("numeric"),
+    moodle_json: UploadFile | None = File(default=None),
 ):
     title = title.strip()[:200] or "Neue Prüfung"
     if input_mode not in ("numeric", "stages"):
         input_mode = "numeric"
-    # Skala: builtin akzeptieren oder custom:<id> des Nutzers
     if not _valid_scale_ref(db, user, grading_scale_key):
         grading_scale_key = grading.DEFAULT_SCALE
 
@@ -319,6 +319,26 @@ def exams_create(
         except ValueError:
             pass
 
+    # Moodle-JSON-Pfad: Schüler + Bewertungen kommen aus der Datei,
+    # Klassen-Checkboxen werden ignoriert.
+    moodle_entries: list[dict] = []
+    has_moodle = moodle_json is not None and (moodle_json.filename or "").strip()
+    if has_moodle:
+        try:
+            raw = (await moodle_json.read()).decode("utf-8-sig", errors="replace")
+            moodle_entries = moodle_quiz.parse_moodle_json(raw)
+        except (ValueError, UnicodeDecodeError) as e:
+            raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
+        if not moodle_entries:
+            raise HTTPException(400, "Moodle-JSON enthält keine Schüler.")
+        # Klassen aus den abteilung-Werten der JSON ableiten
+        abteilungen = []
+        for e in moodle_entries:
+            ab = (e.get("abteilung") or "").strip()
+            if ab and ab not in abteilungen:
+                abteilungen.append(ab)
+        klassen_clean = abteilungen or ["Moodle-Import"]
+
     ex = Exam(
         owner_user_id=user.id,
         title=title,
@@ -330,12 +350,63 @@ def exams_create(
     )
     db.add(ex)
     db.flush()
-    # Alle Schüler der gewählten Klassen als Teilnehmer vorauswählen
-    _add_class_members(db, user, ex, klassen_clean)
+
+    if has_moodle:
+        # Auto-FP "Gesamtbewertung" (max 100, eval_type=punkte)
+        fp = ExamFeedbackPoint(
+            exam_id=ex.id, position=0, name="Gesamtbewertung",
+            max_points=100.0, scope="individual",
+            eval_type="punkte", weight_pct=100.0,
+        )
+        db.add(fp)
+        db.flush()
+
+        # Schüler: pro (klassen_key=abteilung, nachname, vorname) wiederverwenden
+        # oder neu anlegen. Damit Mehrfach-Imports keine Duplikate erzeugen.
+        existing_by_key: dict[tuple[str, str, str], Student] = {}
+        for s in db.scalars(
+            select(Student).where(Student.owner_user_id == user.id)
+        ).all():
+            existing_by_key[(s.klassen_key, s.nachname.lower(), s.vorname.lower())] = s
+
+        for entry in moodle_entries:
+            kk = (entry.get("abteilung") or "").strip() or "Moodle-Import"
+            key = (kk, entry["nachname"].lower(), entry["vorname"].lower())
+            s = existing_by_key.get(key)
+            if s is None:
+                s = Student(
+                    owner_user_id=user.id,
+                    klassen_key=kk[:64],
+                    nachname=entry["nachname"][:120],
+                    vorname=entry["vorname"][:120],
+                )
+                db.add(s)
+                db.flush()
+                existing_by_key[key] = s
+            db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+            if entry["percent"] is not None:
+                r = ExamResult(
+                    exam_id=ex.id, student_id=s.id,
+                    erreicht_json=json.dumps(
+                        {str(fp.id): round(float(entry["percent"]), 2)},
+                        ensure_ascii=False,
+                    ),
+                )
+                db.add(r)
+    else:
+        # Klassische Vorauswahl per Klassen-Checkboxen
+        _add_class_members(db, user, ex, klassen_clean)
+
     audit(db, "exam_created", actor=user, target=str(ex.id),
-          detail=f"{title} / {ex.klassen_key}", request=request)
+          detail=f"{title} / {ex.klassen_key}"
+                 + (f" / moodle={len(moodle_entries)}" if has_moodle else ""),
+          request=request)
     db.commit()
-    return RedirectResponse(f"/exams/{ex.id}", status_code=303)
+
+    target = f"/exams/{ex.id}"
+    if has_moodle:
+        target += "?moodle_imported=" + str(len(moodle_entries))
+    return RedirectResponse(target, status_code=303)
 
 
 def _valid_scale_ref(db: Session, user: User, ref: str) -> bool:
@@ -1035,114 +1106,6 @@ async def exams_import_md(
           detail=f"{imported} Schüler-Bewertungen", request=request)
     db.commit()
     return JSONResponse({"ok": True, "imported": imported})
-
-
-@router.post("/exams/{ex_id}/import.moodle.json")
-def exams_import_moodle_json(
-    request: Request,
-    ex_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-    body: dict = Body(...),
-):
-    """Moodle-Quiz-JSON importieren: pro Schüler die Gesamtprozent
-    (`bewertung10000`) in einen 'Moodle-Test'-Feedbackpunkt schreiben.
-    Unbekannte Schüler werden in der Exam-Klasse angelegt."""
-    ex = _get_exam(db, user, ex_id)
-    data_text = body.get("data") or ""
-    try:
-        entries = moodle_quiz.parse_moodle_json(data_text)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    # Feedbackpunkt 'Moodle-Test' sicherstellen
-    target_name = "Moodle-Test"
-    fp = next(
-        (p for p in ex.feedback_points if p.name.strip().lower() == target_name.lower()),
-        None,
-    )
-    created_fp = False
-    if fp is None:
-        max_pos = max((p.position for p in ex.feedback_points), default=-1)
-        fp = ExamFeedbackPoint(
-            exam_id=ex.id,
-            position=max_pos + 1,
-            name=target_name,
-            max_points=100.0,
-            scope="individual",
-            eval_type="punkte",
-            weight_pct=100.0,
-        )
-        db.add(fp)
-        db.flush()
-        created_fp = True
-    fp_id = fp.id
-
-    # Schüler-Sync
-    existing_by_name: dict[tuple[str, str], Student] = {}
-    for s in db.scalars(
-        select(Student).where(Student.owner_user_id == user.id)
-    ).all():
-        existing_by_name[(s.nachname.lower(), s.vorname.lower())] = s
-    first_class = (_exam_classes(ex) or [""])[0]
-    member_ids = {row[0] for row in db.execute(
-        select(ExamStudent.student_id).where(ExamStudent.exam_id == ex.id)
-    ).all()}
-
-    created_students: list[str] = []
-    imported = 0
-    skipped: list[str] = []
-
-    for entry in entries:
-        key = (entry["nachname"].lower(), entry["vorname"].lower())
-        s = existing_by_name.get(key)
-        if s is None:
-            s = Student(
-                owner_user_id=user.id,
-                klassen_key=first_class,
-                nachname=entry["nachname"][:120],
-                vorname=entry["vorname"][:120],
-            )
-            db.add(s)
-            db.flush()
-            existing_by_name[key] = s
-            created_students.append(f"{s.nachname}, {s.vorname}")
-        if s.id not in member_ids:
-            db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
-            member_ids.add(s.id)
-
-        if entry["percent"] is None:
-            skipped.append(f"{s.nachname}, {s.vorname}")
-            continue
-
-        r = db.query(ExamResult).filter(
-            ExamResult.exam_id == ex.id,
-            ExamResult.student_id == s.id,
-        ).first()
-        if not r:
-            r = ExamResult(exam_id=ex.id, student_id=s.id)
-            r.erreicht_json = "{}"
-            db.add(r)
-        # Per-Key-Merge: andere Feedbackpunkte erhalten
-        try:
-            erreicht = json.loads(r.erreicht_json or "{}") or {}
-        except json.JSONDecodeError:
-            erreicht = {}
-        erreicht[str(fp_id)] = round(float(entry["percent"]), 2)
-        r.erreicht_json = json.dumps(erreicht, ensure_ascii=False)
-        imported += 1
-
-    audit(db, "exam_moodle_import", actor=user, target=str(ex_id),
-          detail=f"{imported} importiert · {len(created_students)} neu", request=request)
-    db.commit()
-
-    return JSONResponse({
-        "ok": True,
-        "imported": imported,
-        "created_students": created_students,
-        "created_fp": created_fp,
-        "skipped": skipped,
-    })
 
 
 @router.post("/exams/{ex_id}/delete")

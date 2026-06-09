@@ -5,7 +5,7 @@
   <h1>Neue Prüfung anlegen</h1>
   <p class="muted">Grunddaten setzen, im nächsten Schritt Schüler/Feedbackpunkte zuordnen und bewerten.</p>
 
-  <form method="post" action="/exams"
+  <form method="post" action="/exams" enctype="multipart/form-data"
         style="display:grid;grid-template-columns:1fr 1fr;gap:.9rem;max-width:760px;margin-top:1rem">
     <div style="grid-column:1/3">
       <label>Titel</label>
@@ -73,6 +73,16 @@
         Im Stufen-Modus klickst du beim Bewerten nur auf eine Stufe pro Punkt (z. B.
         „voll erfüllt"). Pro Feedbackpunkt definierst du die Stufen einmalig.
         Kann pro Prüfung jederzeit umgestellt werden.
+      </p>
+    </div>
+    <div style="grid-column:1/3;border:1px dashed #aac6e0;border-radius:8px;padding:.7rem .9rem;background:#f7fbff">
+      <label style="font-weight:600;display:block;margin-bottom:.3rem">Moodle-Quiz-JSON (optional)</label>
+      <input type="file" name="moodle_json" accept=".json,application/json">
+      <p class="muted" style="font-size:11px;margin-top:.4rem;line-height:1.45">
+        Wird eine Datei gewählt, übernimmt der Importer Schüler + Gesamtbewertung direkt aus der JSON:
+        die Klasse wird der <code>abteilung</code>-Spalte der Datei entnommen (Klassen-Auswahl oben wird ignoriert),
+        ein Feedbackpunkt „Gesamtbewertung" (max 100) wird automatisch angelegt und die Noten ergeben sich aus dem
+        gewählten Notenschlüssel. Auf der Detailseite kannst du direkt die PDFs als ZIP herunterladen.
       </p>
     </div>
     <div style="grid-column:1/3;display:flex;gap:.6rem;justify-content:flex-end;margin-top:.6rem">

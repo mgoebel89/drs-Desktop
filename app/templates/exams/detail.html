@@ -11,6 +11,17 @@
     {% if ls %}· LS <a href="/ls/{{ ls.id }}">{{ ls.display_name }}</a>{% endif %}
   </p>
 
+  {% if request.query_params.get('moodle_imported') %}
+  <div style="margin:.8rem 0 1rem;padding:.8rem 1rem;background:#e6f3fa;border:1px solid #00639C;border-radius:8px;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <strong>✓ Moodle-Import abgeschlossen</strong> —
+      {{ request.query_params.get('moodle_imported') }} Schüler übernommen.
+      Noten wurden über den Notenschlüssel berechnet.
+    </div>
+    <a class="btn" href="/exams/{{ exam.id }}/export.zip">📦 PDFs als ZIP herunterladen</a>
+  </div>
+  {% endif %}
+
   <div class="tab-row" style="display:flex;gap:.3rem;border-bottom:2px solid #eee;margin-top:.8rem;flex-wrap:wrap">
     <button type="button" class="tab-btn active" data-target="tab-set">Einstellungen</button>
     <button type="button" class="tab-btn" data-target="tab-part">Teilnehmer</button>
@@ -145,13 +156,6 @@
       {% endfor %}
     </div>
     {% endif %}
-    <h3 style="margin-top:2rem">Moodle-Import</h3>
-    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
-      <label class="btn btn-sec" style="cursor:pointer">⬆ Moodle-JSON importieren<input id="moodle-import-file" type="file" accept=".json,application/json" style="display:none"></label>
-      <span id="moodle-import-status" class="muted" style="align-self:center;font-size:12px"></span>
-    </div>
-    <p class="muted" style="font-size:12px;margin-top:.3rem">Importiert pro Schüler den Moodle-Gesamtprozent in einen Feedbackpunkt „Moodle-Test" (max 100). Unbekannte Schüler werden in der Klasse der Prüfung angelegt.</p>
-
     <h3 style="margin-top:2rem">Notenliste (Excel / Moodle)</h3>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
       <a class="btn" href="/exams/{{ exam.id }}/export.csv">⬇ CSV herunterladen</a>
@@ -407,25 +411,6 @@ if(mdInput)mdInput.addEventListener('change',async ev=>{
   if(d.ok){st.textContent='✓ '+d.imported+' importiert — neu laden …';setTimeout(()=>location.reload(),1000);}else st.textContent='✗ Fehler';
 });
 
-// Moodle-JSON-Import
-const mqInput=document.getElementById('moodle-import-file');
-if(mqInput)mqInput.addEventListener('change',async ev=>{
-  const f=ev.target.files[0]; if(!f)return;
-  const st=document.getElementById('moodle-import-status'); st.textContent='importiere …';
-  try{
-    const d=await postJSON('/exams/'+EXAM_ID+'/import.moodle.json',{data:await f.text()});
-    if(d.ok){
-      const parts=['✓ '+d.imported+' Bewertungen'];
-      if(d.created_students&&d.created_students.length)parts.push(d.created_students.length+' neue Schüler');
-      if(d.created_fp)parts.push("Feedbackpunkt angelegt");
-      if(d.skipped&&d.skipped.length)parts.push(d.skipped.length+' übersprungen (kein Wert)');
-      st.textContent=parts.join(' · ')+' — neu laden …';
-      setTimeout(()=>location.reload(),1500);
-    } else {
-      st.textContent='✗ '+(d.detail||'Fehler');
-    }
-  } catch(e){ st.textContent='✗ '+e; }
-});
 </script>
 
 <style>
