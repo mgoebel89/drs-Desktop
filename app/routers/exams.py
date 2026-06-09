@@ -18,7 +18,7 @@ from app.db import get_db
 from app.models import (Exam, ExamFeedbackPoint, ExamGroupResult, ExamResult,
                         ExamStudent, FeedbackTemplate, LearningSituation,
                         Student, User)
-from app.services import exam_md, grading, obsidian_writer
+from app.services import exam_md, grading, moodle_quiz, obsidian_writer
 from app.services.playwright_pdf import render_pdf
 from app import branding
 from fastapi.responses import PlainTextResponse, Response
@@ -1035,6 +1035,114 @@ async def exams_import_md(
           detail=f"{imported} Schüler-Bewertungen", request=request)
     db.commit()
     return JSONResponse({"ok": True, "imported": imported})
+
+
+@router.post("/exams/{ex_id}/import.moodle.json")
+def exams_import_moodle_json(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Moodle-Quiz-JSON importieren: pro Schüler die Gesamtprozent
+    (`bewertung10000`) in einen 'Moodle-Test'-Feedbackpunkt schreiben.
+    Unbekannte Schüler werden in der Exam-Klasse angelegt."""
+    ex = _get_exam(db, user, ex_id)
+    data_text = body.get("data") or ""
+    try:
+        entries = moodle_quiz.parse_moodle_json(data_text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Feedbackpunkt 'Moodle-Test' sicherstellen
+    target_name = "Moodle-Test"
+    fp = next(
+        (p for p in ex.feedback_points if p.name.strip().lower() == target_name.lower()),
+        None,
+    )
+    created_fp = False
+    if fp is None:
+        max_pos = max((p.position for p in ex.feedback_points), default=-1)
+        fp = ExamFeedbackPoint(
+            exam_id=ex.id,
+            position=max_pos + 1,
+            name=target_name,
+            max_points=100.0,
+            scope="individual",
+            eval_type="punkte",
+            weight_pct=100.0,
+        )
+        db.add(fp)
+        db.flush()
+        created_fp = True
+    fp_id = fp.id
+
+    # Schüler-Sync
+    existing_by_name: dict[tuple[str, str], Student] = {}
+    for s in db.scalars(
+        select(Student).where(Student.owner_user_id == user.id)
+    ).all():
+        existing_by_name[(s.nachname.lower(), s.vorname.lower())] = s
+    first_class = (_exam_classes(ex) or [""])[0]
+    member_ids = {row[0] for row in db.execute(
+        select(ExamStudent.student_id).where(ExamStudent.exam_id == ex.id)
+    ).all()}
+
+    created_students: list[str] = []
+    imported = 0
+    skipped: list[str] = []
+
+    for entry in entries:
+        key = (entry["nachname"].lower(), entry["vorname"].lower())
+        s = existing_by_name.get(key)
+        if s is None:
+            s = Student(
+                owner_user_id=user.id,
+                klassen_key=first_class,
+                nachname=entry["nachname"][:120],
+                vorname=entry["vorname"][:120],
+            )
+            db.add(s)
+            db.flush()
+            existing_by_name[key] = s
+            created_students.append(f"{s.nachname}, {s.vorname}")
+        if s.id not in member_ids:
+            db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+            member_ids.add(s.id)
+
+        if entry["percent"] is None:
+            skipped.append(f"{s.nachname}, {s.vorname}")
+            continue
+
+        r = db.query(ExamResult).filter(
+            ExamResult.exam_id == ex.id,
+            ExamResult.student_id == s.id,
+        ).first()
+        if not r:
+            r = ExamResult(exam_id=ex.id, student_id=s.id)
+            r.erreicht_json = "{}"
+            db.add(r)
+        # Per-Key-Merge: andere Feedbackpunkte erhalten
+        try:
+            erreicht = json.loads(r.erreicht_json or "{}") or {}
+        except json.JSONDecodeError:
+            erreicht = {}
+        erreicht[str(fp_id)] = round(float(entry["percent"]), 2)
+        r.erreicht_json = json.dumps(erreicht, ensure_ascii=False)
+        imported += 1
+
+    audit(db, "exam_moodle_import", actor=user, target=str(ex_id),
+          detail=f"{imported} importiert · {len(created_students)} neu", request=request)
+    db.commit()
+
+    return JSONResponse({
+        "ok": True,
+        "imported": imported,
+        "created_students": created_students,
+        "created_fp": created_fp,
+        "skipped": skipped,
+    })
 
 
 @router.post("/exams/{ex_id}/delete")
