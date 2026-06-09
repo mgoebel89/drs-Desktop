@@ -36,10 +36,13 @@ def _clean_points(raw: list) -> list[dict]:
             except (AttributeError, TypeError, ValueError):
                 continue
         scope = p.get("scope") if p.get("scope") in ("individual", "group") else "individual"
+        eval_type = p.get("eval_type") if p.get("eval_type") in ("punkte", "note", "stufen") else "punkte"
         out.append({
             "name": name[:200],
             "max_points": float(p.get("max_points", 0) or 0),
             "scope": scope,
+            "eval_type": eval_type,
+            "weight_pct": float(p.get("weight_pct", 0) or 0),
             "stages": stages,
         })
     return out

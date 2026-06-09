@@ -64,12 +64,14 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
 
   <table class="bewertung">
     <thead>
-      <tr><th>Feedbackpunkt</th><th class="num">Max</th><th class="num-err">Erreicht</th></tr>
+      <tr><th>Feedbackpunkt</th><th>Art</th><th class="num">Gewicht</th><th class="num">Max</th><th class="num-err">Bewertung</th></tr>
     </thead>
     <tbody>
       {% for row in rows %}
       <tr>
         <td>{{ row.name }}{% if row.scope == 'group' %}<span class="scope-badge">Gruppe</span>{% endif %}</td>
+        <td style="font-size:11px;color:#666">{{ row.typ }}</td>
+        <td class="num">{{ row.weight_str }}</td>
         <td class="num">{{ row.max_str }}</td>
         <td class="num-err">{{ row.erreicht_str }}</td>
       </tr>
@@ -80,8 +82,7 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
   <div class="summary">
     <div class="summary-box">
       <div class="sec-label">Gesamtergebnis</div>
-      <div>Erreichte Punkte: <strong>{{ sum_err_str }} von {{ sum_max_str }}</strong></div>
-      <div>Prozent: <strong>{{ pct_str }} %</strong></div>
+      <div>Gewichtetes Ergebnis: <strong>{{ pct_str }} %</strong></div>
     </div>
     <div class="summary-box note">
       <div class="sec-label">Note</div>

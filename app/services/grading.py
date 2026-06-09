@@ -191,6 +191,32 @@ def grade_for_ref(db, user, ref: str | None, pct: float) -> str:
     return grade_from_stufen(resolve_stufen(db, user, ref), pct)
 
 
+def percent_for_grade(stufen: list, label: str) -> float | None:
+    """Mittelpunkt-Prozent des Stufen-Intervalls mit passendem Label.
+    Für note-Items: eine direkt vergebene Note → vergleichbarer Prozentwert,
+    damit sie in die gewichtete Mittelung einfließen kann."""
+    if not label:
+        return None
+    target = str(label).strip().lower()
+    for lbl, lo, hi in stufen:
+        if str(lbl).strip().lower() == target:
+            return (float(lo) + float(hi)) / 2.0
+    return None
+
+
+def weighted_final(items: list[tuple[float, float]]) -> float:
+    """items = [(percent, weight), …]. Liefert gewichteten Prozent-Schnitt.
+    Gewichte werden auf ihre Summe normiert; Gewicht 0 zählt als 1
+    (Gleichgewichtung), sofern ALLE Gewichte 0 sind."""
+    if not items:
+        return 0.0
+    total_w = sum(max(0.0, w) for _, w in items)
+    if total_w <= 0:
+        # alle 0 → gleichgewichten
+        return sum(p for p, _ in items) / len(items)
+    return sum(p * max(0.0, w) for p, w in items) / total_w
+
+
 # ── Rückwärtskompatible Built-in-only-API (ohne db) ──────────────────────
 
 def list_scales() -> list[tuple[str, str]]:

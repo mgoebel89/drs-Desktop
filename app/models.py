@@ -279,10 +279,14 @@ class ExamFeedbackPoint(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     name: Mapped[str] = mapped_column(String(200), default="")
     max_points: Mapped[float] = mapped_column(default=0.0)
-    # Optional: JSON [{label, points}, ...] für Stufen-Modus
+    # Optional: JSON [{label, points}, ...] für Stufen-Typ
     stages_json: Mapped[str] = mapped_column(Text, default="")
     # "individual" = pro Schüler, "group" = einmal pro Gruppe
     scope: Mapped[str] = mapped_column(String(16), default="individual")
+    # Eingabetyp: "punkte" | "note" | "stufen"
+    eval_type: Mapped[str] = mapped_column(String(16), default="punkte")
+    # Gewicht in % für die gewichtete Endnote (0 = gleichgewichtet)
+    weight_pct: Mapped[float] = mapped_column(default=0.0)
 
     exam: Mapped[Exam] = relationship(back_populates="feedback_points")
 

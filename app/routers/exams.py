@@ -77,16 +77,48 @@ def _scoring_ctx(db: Session, user: User, ex: Exam):
     }
 
 
+def _item_percent(fp, value, stufen) -> float | None:
+    """Prozentwert eines Items je eval_type. None = nicht bewertbar/leer."""
+    if value in (None, ""):
+        return None
+    if fp.eval_type == "note":
+        return grading.percent_for_grade(stufen, str(value))
+    # punkte / stufen → wert / max * 100
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    mx = float(fp.max_points or 0)
+    if mx <= 0:
+        return None
+    return max(0.0, min(100.0, v / mx * 100.0))
+
+
 def _student_total(ctx: dict, student_id: int, group_label: str):
-    """(sum_err, pct, note) für einen Schüler (Einzel- + Gruppenpunkte)."""
+    """(erfasste_items, pct, note) für einen Schüler — gewichteter Schnitt
+    über Einzel- + Gruppen-Items je eval_type."""
     er = ctx["indiv_results"].get(student_id, {})
-    total = sum(float(er.get(str(fp.id), 0) or 0) for fp in ctx["indiv_fps"])
     ger = ctx["group_results"].get(group_label or "", {})
-    total += sum(float(ger.get(str(fp.id), 0) or 0) for fp in ctx["group_fps"])
-    sum_max = ctx["sum_max"]
-    pct = (total / sum_max * 100.0) if sum_max > 0 else 0.0
-    note = grading.grade_from_stufen(ctx["stufen"], pct) if sum_max > 0 else ""
-    return total, pct, note
+    stufen = ctx["stufen"]
+
+    weighted: list[tuple[float, float]] = []  # (percent, weight)
+    n_filled = 0
+    for fp in ctx["indiv_fps"]:
+        p = _item_percent(fp, er.get(str(fp.id), ""), stufen)
+        if p is not None:
+            weighted.append((p, float(fp.weight_pct or 0)))
+            n_filled += 1
+    for fp in ctx["group_fps"]:
+        p = _item_percent(fp, ger.get(str(fp.id), ""), stufen)
+        if p is not None:
+            weighted.append((p, float(fp.weight_pct or 0)))
+            n_filled += 1
+
+    if not weighted:
+        return 0, 0.0, ""
+    pct = grading.weighted_final(weighted)
+    note = grading.grade_from_stufen(stufen, pct)
+    return n_filled, pct, note
 
 
 @router.get("/exams", response_class=HTMLResponse)
@@ -348,11 +380,12 @@ def exams_detail(
     student_views = []
     for s, g in participants:
         er = ctx["indiv_results"].get(s.id, {})
-        total, pct, note = _student_total(ctx, s.id, g)
+        n_filled, pct, note = _student_total(ctx, s.id, g)
         student_views.append({
             "student": s, "group_label": g,
-            "erreicht": er, "sum_err": total, "pct": pct, "note": note,
+            "erreicht": er, "n_filled": n_filled, "pct": pct, "note": note,
         })
+    scale_labels = [lbl for lbl, _, _ in ctx["stufen"]]
 
     # Gruppen + deren Gruppen-Bewertungen
     groups = sorted({g for _, g in participants if g})
@@ -387,6 +420,7 @@ def exams_detail(
         "exam_classes": exam_classes,
         "sum_max": ctx["sum_max"],
         "scales": grading.list_scales_for(db, user),
+        "scale_labels": scale_labels,
     })
 
 
@@ -478,12 +512,15 @@ def exams_save(
         for i, item in enumerate(fps_in):
             stages = item.get("stages") or []
             scope = item.get("scope") if item.get("scope") in ("individual", "group") else "individual"
+            eval_type = item.get("eval_type") if item.get("eval_type") in ("punkte", "note", "stufen") else "punkte"
             fp = ExamFeedbackPoint(
                 exam_id=ex.id,
                 position=i,
                 name=(item.get("name") or "").strip()[:200],
                 max_points=float(item.get("max_points") or 0),
                 scope=scope,
+                eval_type=eval_type,
+                weight_pct=float(item.get("weight_pct") or 0),
                 stages_json=json.dumps(stages, ensure_ascii=False) if stages else "",
             )
             db.add(fp)
@@ -504,12 +541,19 @@ def exams_save(
         erreicht = body.get("erreicht") or {}
         if not isinstance(erreicht, dict):
             raise HTTPException(400, "erreicht muss Dict sein")
-        cleaned: dict[str, float] = {}
+        # eval_type je Feedbackpunkt: note-Items behalten String, sonst Float
+        eval_by_id = {str(fp.id): fp.eval_type for fp in ex.feedback_points}
+        cleaned: dict = {}
         for k, v in erreicht.items():
-            try:
-                cleaned[str(k)] = float(v) if v != "" else 0.0
-            except (TypeError, ValueError):
+            if v in (None, ""):
                 continue
+            if eval_by_id.get(str(k)) == "note":
+                cleaned[str(k)] = str(v)  # Noten-Label
+            else:
+                try:
+                    cleaned[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
 
         group_label = body.get("group_label")
         if group_label is not None:
@@ -551,11 +595,10 @@ def exams_save(
         ctx = _scoring_ctx(db, user, ex)
         notes = []
         for s, g in _exam_participants(db, ex):
-            total, pct, note = _student_total(ctx, s.id, g)
-            notes.append({"student_id": s.id, "sum_err": total,
+            n_filled, pct, note = _student_total(ctx, s.id, g)
+            notes.append({"student_id": s.id, "n_filled": n_filled,
                           "pct": round(pct, 1), "note": note})
         out["notes"] = notes
-        out["sum_max"] = ctx["sum_max"]
     return JSONResponse(out)
 
 
@@ -585,24 +628,43 @@ def _build_student_pdf_html(
     er = ctx["indiv_results"].get(student.id, {})
     ger = ctx["group_results"].get(group_label or "", {})
 
+    stufen = ctx["stufen"]
     rows = []
     for fp in ctx["fps"]:
-        if fp.scope == "group":
-            val = ger.get(str(fp.id), 0)
+        raw = (ger if fp.scope == "group" else er).get(str(fp.id), "")
+        if fp.eval_type == "note":
+            erreicht_str = str(raw) if raw not in (None, "") else "—"
+            max_str = "Note"
+            typ = "Schulnote"
+        elif fp.eval_type == "stufen":
+            # Stufen-Label zum gespeicherten Punktwert finden
+            label = ""
+            try:
+                stages = json.loads(fp.stages_json) if fp.stages_json else []
+                label = next((st.get("label", "") for st in stages
+                              if str(st.get("points", "")) == str(raw)), "")
+            except Exception:
+                pass
+            erreicht_str = label or _format_number(float(raw)) if raw not in (None, "") else "—"
+            max_str = _format_number(fp.max_points)
+            typ = "Stufen"
         else:
-            val = er.get(str(fp.id), 0)
-        try:
-            val_f = float(val) if val != "" else 0.0
-        except (TypeError, ValueError):
-            val_f = 0.0
+            try:
+                val_f = float(raw) if raw not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                val_f = 0.0
+            erreicht_str = _format_number(val_f)
+            max_str = _format_number(fp.max_points)
+            typ = "Punkte"
+        weight_str = (f"{_format_number(fp.weight_pct)} %"
+                      if fp.weight_pct else "—")
         rows.append({
-            "name": fp.name,
-            "scope": fp.scope,
-            "max_str": _format_number(fp.max_points),
-            "erreicht_str": _format_number(val_f),
+            "name": fp.name, "scope": fp.scope, "typ": typ,
+            "max_str": max_str, "erreicht_str": erreicht_str,
+            "weight_str": weight_str,
         })
 
-    total, pct, note = _student_total(ctx, student.id, group_label)
+    n_filled, pct, note = _student_total(ctx, student.id, group_label)
     comment = ""
     r = ctx["indiv_results"].get(student.id)  # nicht das Result-Objekt; Kommentar separat holen
     res_obj = next((x for x in ex.results if x.student_id == student.id), None)
@@ -615,8 +677,6 @@ def _build_student_pdf_html(
         "student": student,
         "group_label": group_label,
         "rows": rows,
-        "sum_err_str": _format_number(total),
-        "sum_max_str": _format_number(ctx["sum_max"]),
         "pct_str": _format_number(round(pct, 1)),
         "note": note,
         "datum_pretty": _datum_pretty(ex.datum),
@@ -637,7 +697,7 @@ def _build_summary_pdf_html(
     rows = []
     verteilung: dict[str, int] = {}
     for s, g in participants:
-        total, pct, note = _student_total(ctx, s.id, g)
+        n_filled, pct, note = _student_total(ctx, s.id, g)
         rows.append({
             "nachname": s.nachname, "vorname": s.vorname,
             "klasse": s.klassen_key, "gruppe": g,
