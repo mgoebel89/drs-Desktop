@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-06-07 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-06-09 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -125,33 +125,52 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 
 ## 3. Aktuell offene Punkte
 
-### Direkt aus letzter Session noch zu klären / zu testen
+### Zuletzt fertiggestellt (Bewertung v3, Commit `403da88`)
 
-- **Migration 0008 + 0009 + 0010** im Container ausrollen (`drs-update`)
-  und Wizard v2 Ende-zu-Ende durchspielen: LS anlegen → Vorlage in Vault
-  schreiben → in Obsidian befüllen → Wizard Schritt 2/3/4 mit Material-Typ
-  „Arbeitsblatt" laufen lassen, Output einfügen, optional als Worksheet
-  anlegen. Vault-MD nach dem Lauf prüfen (WIZARD-BLOCK angehängt?).
-- **OnlyOffice-LXC (CT 501)** über den neuen Installer-Pfad anlegen lassen
-  und DOCX/PPTX-Vorschau im Browser prüfen.
-- **Optik-Check** des durchgehenden Event-Balkens via rowspan
-  (Commit `3075461`, `flex: 1 1 auto` auf `.tt-event`) — vor der Wizard-Arbeit
-  noch nicht final getestet.
-- **Sub-Spalten-Breiten** im Grid evtl. fein-tunen (aktuell 12 % Lessons :
-  6 % Events pro Tag).
+Das **Bewertungs-Modul** ist über drei Iterationen (v1 → v2 → v3) komplett
+umgebaut. Aktueller Stand:
+- **Wizard-Eingabe** (Overlay): getrennte Wizards für Einzel- und
+  Gruppenbewertung, ein Schüler/Gruppe pro Schritt, Weiter/Zurück +
+  Pfeiltasten, Auto-Save je Schritt, Live-Note in der Übersicht.
+- **Pro Feedbackpunkt `eval_type`**: `punkte` (Zahl), `note`
+  (Schulnote direkt aus dem Notenschlüssel), `stufen` (selbst definierte
+  Stufen mit Punktwert). Plus `scope` (individual/group).
+- **Gewicht** nur beim Typ `note` (Feld erscheint nur dort). Punkte/Stufen
+  poolen über ihre Max-Punkte (= Gesamtpunktzahl → Note). Endnote =
+  gewichteter Prozent-Schnitt über alle Items → Note via Schlüssel.
+  Gewichte werden automatisch normiert. Logik in `_item_weight` /
+  `_item_percent` / `_student_total` (`app/routers/exams.py`).
+
+### Direkt zu testen (im Container `drs-update`, dann durchspielen)
+
+- **Migrationen 0008–0014** ausrollen. **Achtung**: in der Test-Session
+  wurde bisher nur lokal verifiziert (Migration up/down, App-Import,
+  Jinja-Parse, Scoring-Mathematik). End-to-End im Browser noch offen.
+- **Bewertung v3 Ende-zu-Ende**: Prüfung anlegen → Feedbackpunkte mit
+  gemischten Typen (Punkte/Schulnote/Stufen) + Gewichten → Einzel-Wizard
+  durchklicken → Übersicht zeigt gewichtete Endnote → Export-Tab:
+  Einzel-PDF + ZIP (inkl. `_Zusammenfassung.pdf`).
+- **Gruppen-Wizard**: Teilnehmer Gruppen A/B zuordnen, Gruppen-Feedbackpunkt
+  anlegen, Gruppenwert eintragen → fließt in Endnote der Mitglieder.
+- **Notenschlüssel-Verwaltung** (`/grading-scales`) + **Feedback-Vorlagen**
+  (`/feedback-templates`) prüfen.
+- **OnlyOffice-LXC (CT 501)** über Installer-Pfad anlegen, DOCX-Vorschau prüfen.
 
 ### Geplant, noch nicht umgesetzt
 
-1. **Worksheet-Anknüpfung im Stundenplan-Panel**: „verknüpfte Aufgabenblätter
-   zu Klasse+Fach" + „Neues Aufgabenblatt für diese Stunde" als Schnellaktion.
-   FK `worksheets.learning_situation_id` ist da, die UI fehlt noch.
-2. **Wizard ↔ Stundenplan-Block**: Button „Wizard für diesen Block öffnen"
-   im Block-Panel, der `lesson_notes.learning_situation_id` setzt und
-   `LessonNote.theme` aus dem Wizard-Output befüllt. Endpunkte und FK stehen
-   schon, nur die Panel-Aktion fehlt.
-3. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80; im Caddyfile
-   als Kommentarblock vorbereitet).
-4. **Visual-Editor für Worksheet-Vorlagen** (GrapesJS) — niedrige Priorität.
+1. **Moodle-Notenexport** (Phase B): Endpoint `/exams/{id}/export.csv?format=moodle`
+   ist als Platzhalter vorgesehen, noch nicht gebaut. `moodle_id` wird beim
+   Schüler-Import bereits gespeichert. Gradebook-CSV-Format mit Test-Instanz
+   iterieren; Doku in `docs/moodle-integration.md`.
+2. **Worksheet-Anknüpfung im Stundenplan-Panel**: „verknüpfte Aufgabenblätter
+   zu Klasse+Fach" + „Neues Aufgabenblatt für diese Stunde". FK
+   `worksheets.learning_situation_id` ist da, die UI fehlt noch.
+3. **Wizard ↔ Stundenplan-Block**: Button „Wizard für diesen Block öffnen"
+   im Block-Panel, der `lesson_notes.learning_situation_id` setzt.
+4. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`
+   ist im Template vorbereitet, aber noch leer — User-Setting fehlt).
+5. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80).
+6. **Visual-Editor für Worksheet-Vorlagen** (GrapesJS) — niedrige Priorität.
 
 ### Bekannte Limits
 
@@ -230,28 +249,31 @@ Login: **`mgoebel`** (Admin)
 
 ## 6. Letzte Commits
 
+Alle Stände sind auf GitHub `mgoebel89/drs-Desktop` @ `main` gepusht.
+Aktuellster Commit: **`403da88`**. Migrations-Stand: **0014**.
+
 | Commit | Was |
 |---|---|
-| _pending_ | **MD-Schema v2 + LS-Delete + Aufgaben-Stundenplan**: Pflichtsektionen, Aufgaben mit Phasen-Tags + Lösungsskizzen, DB-Sync, Block-Picker mit Lösungsanzeige, Grid-Pille. Migration 0011. |
-| _pending_ | **Wizard v2**: Inhalts-MD im Vault, 4 Schritte, 9 Material-Typen, Dual-Prompt (Fobizz + Claude), Worksheet-Übernahme. Migration 0010. |
-| _pending_ | Phase 6+7: Wizard-Flow + Fobizz-Agent-Systemprompt |
-| _pending_ | Phase 5: Obsidian-Writer + Read-Only-Anzeige |
-| _pending_ | Phase 4: Preview-Router (PDF/Bild/OnlyOffice-Iframe) |
-| _pending_ | Phase 3: OnlyOffice CT 501 + Installer-Automation |
-| _pending_ | Phase 2: SMB-Service + Profil-UI |
-| _pending_ | Phase 1: Migration 0008 + LearningSituation-Model |
-| `3075461` | Event-Card flex:1 für durchgehenden Balken |
-| `c1b2b89` | Tagesspalten zweigeteilt (Lessons + Events Subspalten) |
-| `6fefb5e` | Lange Events nicht mehr als rowspan-Lessons-Merge |
-| `3c4248e` | Notizen pro Block (block_start im Key) |
-| `ca75b08` | Prüfung/Notiz live im Grid, kein roter Hintergrund |
-| `0e08cf1` | Fach-Override (Reihe + Sitzung) + Prüfung |
+| `403da88` | fix Bewertung v3: Gewicht nur bei Schulnote, Layout-Überlappung behoben |
+| `450751b` | **Bewertung v3**: Wizard-Eingabe + Item-Typen (Punkte/Note/Stufen) + Gewichtung. Migration 0014 |
+| `15d5671` | Bewertung v2: Multi-Class, Teilnehmer-Auswahl, Gruppen, PDF im DRS-Layout |
+| `22e3dff` | Bewertung v2: Löschen-Fix, Notenskalen-Verwaltung, Feedback-Vorlagen. Migration 0013 |
+| `2cc69f1` | Bewertungs-Modul Phasen 1–5: Schüler, Prüfungen, Stufen-Modus. Migration 0012 |
+| `f72c980` | Arbeitsblatt direkt aus LS-MD ohne Wizard |
+| `da434de` | Burger-Menü mit Drawer + gruppierter Struktur |
+| `fb99498` | Nav-Leiste-Fix (Context-Processor injiziert user) |
+| `7c30b6a` | SyntaxError-Fix in obsidian_writer (502 behoben) |
+| `7614bb0` | LS-Delete + MD-Schema v2 + Aufgaben-Stundenplan. Migration 0011 |
+| `a98c5dd` | Wizard v2: Inhalts-MD im Vault, 9 Material-Typen, Dual-Prompt. Migration 0010 |
+| `747c9f9` | LS + Wizard + SMB + OnlyOffice + Obsidian (Phasen 1–8). Migration 0008/0009 |
 
-**Vor der nächsten Session:** Im Container `drs-update` ausführen (Migration
-0008–0011), Profil → SMB-Zugang eintragen, ggf. OnlyOffice-LXC anlegen
-(Installer-Pfad), Wizard testen. Bestehende v1-LS bleiben funktional —
-beim Öffnen im Wizard bietet die App eine Schema-v2-Vorlage (überschreibt
-v1 — vorher Inhalte sichern).
+**Offline-App** (`Feedbackdatei`, eigenes Repo, Branch `master`, kein Remote):
+letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
+
+**Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
+Migration 0014). Bewertung v3 wurde bisher nur lokal verifiziert (Migration
+up/down, App-Import 104 Routen, Jinja-Parse, Scoring-Mathematik) — der
+**Browser-End-to-End-Test steht noch aus** (siehe Abschnitt 3).
 
 ---
 
