@@ -59,12 +59,32 @@ def ls_detail(
     has_note = bool(obsidian_writer.read_note(user, ls)) if cfg else False
 
     aufgaben = []
-    if cfg and has_note:
+    arbeitsblaetter = []
+    if cfg and has_note and (ls.schema_version or 2) < 3:
         try:
             aufgaben = aufgabe_sync.sync_from_md(db, user, ls)
             db.commit()
         except Exception:
             db.rollback()
+    elif (ls.schema_version or 2) >= 3:
+        # v3: initialer Pull bei leerer DB, danach Arbeitsblätter laden
+        if cfg and has_note and not ls.content_hash:
+            try:
+                ls_sync.load_from_vault(db, user, ls)
+                db.commit()
+            except Exception:
+                db.rollback()
+        arbeitsblaetter = db.query(LsArbeitsblatt).filter(
+            LsArbeitsblatt.learning_situation_id == ls.id
+        ).order_by(LsArbeitsblatt.position).all()
+        aufgaben_by_ab: dict[int, list] = {}
+        for a in db.query(LsAufgabe).filter(
+            LsAufgabe.learning_situation_id == ls.id,
+            LsAufgabe.arbeitsblatt_id.isnot(None),
+        ).order_by(LsAufgabe.arbeitsblatt_id, LsAufgabe.nummer).all():
+            aufgaben_by_ab.setdefault(a.arbeitsblatt_id, []).append(a)
+        for ab in arbeitsblaetter:
+            ab._aufgaben = aufgaben_by_ab.get(ab.id, [])
 
     return templates.TemplateResponse(request, "learning_situations/detail.html", {
         "ls": ls,
@@ -73,6 +93,7 @@ def ls_detail(
         "smb_error": smb_error,
         "has_note": has_note,
         "aufgaben": aufgaben,
+        "arbeitsblaetter": arbeitsblaetter,
     })
 
 
@@ -272,6 +293,68 @@ def _require_v3(db: Session, user: User, ls_id: int) -> LearningSituation:
     if (ls.schema_version or 2) < 3:
         raise HTTPException(409, "Lernsituation ist noch Schema v2 — bitte migrieren")
     return ls
+
+
+@router.post("/ls/{ls_id}/migrate-v3")
+def ls_migrate_v3(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Hebt eine v2-LS auf Schema v3 an. Sicherheitskopie der alten MD
+    wird als <slug>.v2.bak.md im Vault abgelegt. Anschließend wird eine
+    v3-Vorlage geschrieben, befüllt mit den bestehenden Top-Level-
+    Feldern (lernziele/vorwissen aus der DB)."""
+    from app.services import obsidian_writer_v3 as v3
+
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    if (ls.schema_version or 2) >= 3:
+        raise HTTPException(409, "Bereits v3")
+
+    # Sicherheitskopie der vorhandenen MD
+    raw = obsidian_writer.read_note(user, ls) or ""
+    if raw:
+        try:
+            cfg = smb_client.load_config(user)
+            if cfg:
+                bak_name = ls.smb_folder_name + ".v2.bak.md"
+                bak_subpath = smb_client.vault_subpath(cfg, bak_name)
+                smb_client.write_file(user, bak_subpath, raw.encode("utf-8"))
+        except Exception:
+            pass  # Backup-Fehler darf Migration nicht stoppen
+
+    # v3-Skeleton mit bestehenden Inhalten befüllen
+    ls.schema_version = 3
+    if ls.lernziele and not ls.lernsituation_md:
+        ls.lernsituation_md = ls.lernziele.strip()
+    if ls.vorwissen and not ls.lehrer_vorwissen_md:
+        ls.lehrer_vorwissen_md = ls.vorwissen.strip()
+    if not ls.dauer_stunden:
+        ls.dauer_stunden = 8
+    if not ls.version_no:
+        ls.version_no = 1
+    db.flush()
+
+    # MD aus dem (jetzt leeren) DB-Stand bauen + Beispiel-Arbeitsblatt
+    if not db.query(LsArbeitsblatt).filter(
+        LsArbeitsblatt.learning_situation_id == ls.id
+    ).count():
+        db.add(LsArbeitsblatt(
+            learning_situation_id=ls.id, position=1,
+            title="Arbeitsblatt 1", phase="Arbeitsplanung",
+            bearbeitungshinweis_md="Hinweis zur Bearbeitung (Optional)",
+            content_md="",
+        ))
+        db.flush()
+
+    ls_sync.save_to_vault(user, ls, db)
+    audit(db, "ls_migrated_v3", actor=user, target=str(ls.id), request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "schema_version": 3,
+                         "backup": ls.smb_folder_name + ".v2.bak.md"})
 
 
 @router.get("/ls/{ls_id}/sync/status")

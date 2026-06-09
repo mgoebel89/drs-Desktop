@@ -69,6 +69,73 @@
     sie als Quelle für die Material-Generierung.
   </p>
 
+  {% if (ls.schema_version or 2) < 3 %}
+  <div style="margin-top:1rem;padding:.9rem 1.1rem;background:#fff8e1;border:1px solid #f5d56e;border-radius:8px;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <strong>Schema v2</strong> — diese Lernsituation nutzt das alte Schema.
+      Schema v3 strukturiert sie nach Arbeitsblättern und unterstützt Inline-Edit + Zwei-Wege-Sync mit Obsidian.
+      Vor der Migration wird die alte MD als <code>{{ ls.smb_folder_name }}.v2.bak.md</code> gesichert.
+    </div>
+    <button class="btn" id="btn-migrate-v3">Auf Schema v3 migrieren</button>
+  </div>
+  {% else %}
+  <div id="sync-banner" style="margin-top:1rem;padding:.7rem 1rem;border-radius:8px;display:none"></div>
+
+  <h2 style="margin-top:1.6rem">Lernsituation</h2>
+  {% set sections = [
+    ('lernsituation', 'Szenario / Lernsituation', ls.lernsituation_md, 8),
+    ('kompetenzen', 'Kompetenzen (Lehrerinfo)', ls.kompetenzen_md, 5),
+    ('uebergreifende_aspekte', 'Übergreifende Aspekte', ls.uebergreifende_aspekte_md, 4),
+    ('lehrer_vorwissen', 'Vorwissen (Lehrerinfo)', ls.lehrer_vorwissen_md, 4),
+    ('leistungsfeststellung', 'Leistungsfeststellung', ls.leistungsfeststellung_md, 4),
+  ] %}
+  {% for key, label, val, rows in sections %}
+  <div class="v3-section" data-key="{{ key }}" style="margin:.8rem 0">
+    <label style="font-weight:600">{{ label }}</label>
+    <textarea data-input rows="{{ rows }}" style="width:100%;font-family:Consolas,monospace;font-size:13px">{{ val or '' }}</textarea>
+    <div style="display:flex;gap:.6rem;align-items:center;margin-top:.3rem">
+      <button class="btn-sec" data-save style="padding:4px 10px;font-size:12px">Speichern</button>
+      <span class="muted" data-status style="font-size:11px"></span>
+    </div>
+  </div>
+  {% endfor %}
+
+  <h2 style="margin-top:1.6rem;display:flex;align-items:center;gap:.8rem">
+    Arbeitsblätter
+    <button class="btn-sec" id="btn-ab-add" style="padding:4px 10px;font-size:12px">+ Neues Arbeitsblatt</button>
+  </h2>
+  {% if arbeitsblaetter %}
+    {% for ab in arbeitsblaetter %}
+    <div class="v3-ab" data-pos="{{ ab.position }}" style="margin:.8rem 0;padding:.8rem 1rem;border:1px solid #ddd;border-radius:8px">
+      <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.4rem">
+        <strong style="color:var(--blau)">#{{ ab.position }}</strong>
+        <input data-field="title" value="{{ ab.title }}" style="flex:1;font-weight:600">
+        <span class="muted" data-status style="font-size:11px"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.4rem">
+        <div>
+          <label style="font-size:12px">Phase</label>
+          <input data-field="phase" value="{{ ab.phase or '' }}" placeholder="z. B. Arbeitsplanung">
+        </div>
+        <div>
+          <label style="font-size:12px">Bearbeitungshinweis</label>
+          <input data-field="hinweis" value="{{ ab.bearbeitungshinweis_md or '' }}" placeholder="Hinweis (Optional)">
+        </div>
+      </div>
+      <label style="font-size:12px">Aufgabenblock / Intro</label>
+      <textarea data-field="content" rows="5" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ ab.content_md or '' }}</textarea>
+      {% if ab._aufgaben %}
+      <p class="muted" style="font-size:11px;margin-top:.3rem">
+        Aufgaben aus MD: {% for a in ab._aufgaben %}<code>Aufg. {{ a.nummer }}</code> {% if a.titel %}{{ a.titel }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">Noch keine Arbeitsblätter. Lege das erste über den +-Knopf an oder pflege es in Obsidian und nutze „Vault → DB" oben.</p>
+  {% endif %}
+  {% endif %}
+
   {% if aufgaben %}
   <h2 style="margin-top:1.6rem">Aufgaben aus der Inhalts-MD</h2>
   <table>
@@ -134,4 +201,132 @@
 
   {% endif %}
 </div>
+
+<script>
+(function(){
+  const LS_ID = {{ ls.id }};
+  const SCHEMA = {{ ls.schema_version or 2 }};
+
+  async function postJSON(url, payload){
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                               body: payload ? JSON.stringify(payload) : null});
+    if(!r.ok) throw new Error((await r.text()) || r.statusText);
+    return r.json();
+  }
+
+  // ── v2 → v3 Migrations-Button
+  const btnMig = document.getElementById('btn-migrate-v3');
+  if(btnMig) btnMig.addEventListener('click', async () => {
+    if(!confirm('Auf Schema v3 migrieren? Die alte MD wird als .v2.bak.md gesichert.')) return;
+    btnMig.disabled = true; btnMig.textContent = 'migriere …';
+    try{
+      await postJSON(`/ls/${LS_ID}/migrate-v3`);
+      location.reload();
+    }catch(e){ alert('Fehler: ' + e.message); btnMig.disabled = false; btnMig.textContent = 'Auf Schema v3 migrieren'; }
+  });
+
+  if(SCHEMA < 3) return;
+
+  // ── Sektion speichern (Top-Level Felder)
+  document.querySelectorAll('.v3-section').forEach(box => {
+    const key = box.dataset.key;
+    const input = box.querySelector('[data-input]');
+    const btn = box.querySelector('[data-save]');
+    const status = box.querySelector('[data-status]');
+    btn.addEventListener('click', async () => {
+      status.textContent = 'speichere …';
+      try{
+        const d = await postJSON(`/ls/${LS_ID}/section/${key}`, {value: input.value});
+        status.textContent = '✓ gespeichert';
+        setTimeout(() => status.textContent = '', 1500);
+      }catch(e){
+        if(/409/.test(e.message)) status.textContent = '⚠ Konflikt — siehe Banner';
+        else status.textContent = '✗ ' + e.message;
+      }
+    });
+  });
+
+  // ── Arbeitsblatt-Felder (debounced auto-save)
+  document.querySelectorAll('.v3-ab').forEach(box => {
+    const pos = parseInt(box.dataset.pos, 10);
+    const status = box.querySelector('[data-status]');
+    let timer;
+    box.querySelectorAll('[data-field]').forEach(el => {
+      el.addEventListener('input', () => {
+        const field = el.dataset.field;
+        const value = el.value;
+        clearTimeout(timer);
+        status.textContent = '✎';
+        timer = setTimeout(async () => {
+          status.textContent = 'speichere …';
+          try{
+            await postJSON(`/ls/${LS_ID}/section/arbeitsblatt:${pos}`, {field, value});
+            status.textContent = '✓';
+            setTimeout(() => status.textContent = '', 1200);
+          }catch(e){ status.textContent = '✗ ' + e.message; }
+        }, 700);
+      });
+    });
+  });
+
+  // ── + Neues Arbeitsblatt
+  const btnAdd = document.getElementById('btn-ab-add');
+  if(btnAdd) btnAdd.addEventListener('click', async () => {
+    const existing = document.querySelectorAll('.v3-ab').length;
+    const pos = existing + 1;
+    btnAdd.disabled = true;
+    try{
+      await postJSON(`/ls/${LS_ID}/section/arbeitsblatt:${pos}`, {field:'content', value:''});
+      location.reload();
+    }catch(e){ alert('Fehler: ' + e.message); btnAdd.disabled = false; }
+  });
+
+  // ── Sync-Banner aus /sync/status laden
+  const banner = document.getElementById('sync-banner');
+  async function refreshSync(){
+    if(!banner) return;
+    try{
+      const r = await fetch(`/ls/${LS_ID}/sync/status`);
+      if(!r.ok) return;
+      const d = await r.json();
+      if(d.in_sync){
+        banner.style.background = '#e8f5e9';
+        banner.style.border = '1px solid #66bb6a';
+        banner.innerHTML = '✓ Vault &amp; App synchron · <a href="#" data-pull>Vault → DB nachladen</a> · <a href="#" data-push>DB → Vault schreiben</a>';
+        banner.style.display = 'block';
+      } else {
+        const list = (d.sections||[]).map(s => `<li><label><input type="radio" name="ch_${s.key}" value="app" checked> App behalten</label> <label style="margin-left:.6rem"><input type="radio" name="ch_${s.key}" value="vault"> Obsidian holen</label> — <strong>${s.label}</strong></li>`).join('');
+        banner.style.background = '#fde2e2';
+        banner.style.border = '1px solid #f5b5b5';
+        banner.innerHTML = `<strong>⚠ Konflikt — Obsidian wurde extern geändert.</strong>
+          <ul style="margin:.4rem 0 .6rem 1.2rem;padding:0">${list}</ul>
+          <button class="btn" id="btn-resolve">Auswahl anwenden</button>`;
+        banner.style.display = 'block';
+        document.getElementById('btn-resolve').addEventListener('click', async () => {
+          const choices = {};
+          (d.sections||[]).forEach(s => {
+            const r = banner.querySelector(`input[name="ch_${s.key}"]:checked`);
+            choices[s.key] = r ? r.value : 'app';
+          });
+          try{
+            await postJSON(`/ls/${LS_ID}/sync/resolve`, {choices});
+            location.reload();
+          }catch(e){ alert('Fehler: ' + e.message); }
+        });
+      }
+      banner.querySelector('[data-pull]')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await postJSON(`/ls/${LS_ID}/sync/pull`);
+        location.reload();
+      });
+      banner.querySelector('[data-push]')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await postJSON(`/ls/${LS_ID}/sync/push`);
+        refreshSync();
+      });
+    }catch(e){ /* silent */ }
+  }
+  refreshSync();
+})();
+</script>
 {% endblock %}
