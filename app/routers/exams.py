@@ -94,6 +94,16 @@ def _item_percent(fp, value, stufen) -> float | None:
     return max(0.0, min(100.0, v / mx * 100.0))
 
 
+def _item_weight(fp) -> float:
+    """Gewicht eines Items für die gewichtete Endnote.
+    - note: vom Lehrer gesetztes weight_pct (Fallback 100, falls 0).
+    - punkte/stufen: max_points (natürliche Gewichtung = Punkte-Pooling)."""
+    if fp.eval_type == "note":
+        w = float(fp.weight_pct or 0)
+        return w if w > 0 else 100.0
+    return float(fp.max_points or 0) or 1.0
+
+
 def _student_total(ctx: dict, student_id: int, group_label: str):
     """(erfasste_items, pct, note) für einen Schüler — gewichteter Schnitt
     über Einzel- + Gruppen-Items je eval_type."""
@@ -106,12 +116,12 @@ def _student_total(ctx: dict, student_id: int, group_label: str):
     for fp in ctx["indiv_fps"]:
         p = _item_percent(fp, er.get(str(fp.id), ""), stufen)
         if p is not None:
-            weighted.append((p, float(fp.weight_pct or 0)))
+            weighted.append((p, _item_weight(fp)))
             n_filled += 1
     for fp in ctx["group_fps"]:
         p = _item_percent(fp, ger.get(str(fp.id), ""), stufen)
         if p is not None:
-            weighted.append((p, float(fp.weight_pct or 0)))
+            weighted.append((p, _item_weight(fp)))
             n_filled += 1
 
     if not weighted:
@@ -657,7 +667,7 @@ def _build_student_pdf_html(
             max_str = _format_number(fp.max_points)
             typ = "Punkte"
         weight_str = (f"{_format_number(fp.weight_pct)} %"
-                      if fp.weight_pct else "—")
+                      if fp.eval_type == "note" and fp.weight_pct else "—")
         rows.append({
             "name": fp.name, "scope": fp.scope, "typ": typ,
             "max_str": max_str, "erreicht_str": erreicht_str,

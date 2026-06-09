@@ -227,21 +227,22 @@ function renderFPs(){
   fps.forEach((fp,idx)=>{
     const div=document.createElement('div');
     div.style='border:1px solid #e0e0e0;border-radius:6px;padding:.8rem;margin-bottom:.6rem;background:#fafafa';
-    const showMax = fp.eval_type!=='note';
+    const isNote = fp.eval_type==='note';
     const showStages = fp.eval_type==='stufen';
     div.innerHTML=`
-      <div style="display:grid;grid-template-columns:24px 1fr 120px 78px 70px 24px;gap:.5rem;align-items:end">
-        <div style="font-weight:600;color:#666">${idx+1}.</div>
-        <div><label style="font-size:11px">Name</label><input class="fp-name" value="${escapeHtml(fp.name)}"></div>
-        <div><label style="font-size:11px">Typ</label>
-          <select class="fp-type">
+      <div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
+        <div style="font-weight:600;color:#666;padding-bottom:8px">${idx+1}.</div>
+        <div style="flex:1;min-width:160px"><label style="font-size:11px">Name</label><input class="fp-name" value="${escapeHtml(fp.name)}"></div>
+        <div style="width:120px"><label style="font-size:11px">Typ</label>
+          <select class="fp-type" style="width:100%">
             <option value="punkte"${fp.eval_type==='punkte'?' selected':''}>Punkte</option>
             <option value="note"${fp.eval_type==='note'?' selected':''}>Schulnote</option>
             <option value="stufen"${fp.eval_type==='stufen'?' selected':''}>Stufen</option>
           </select></div>
-        <div class="fp-max-wrap" style="${showMax?'':'visibility:hidden'}"><label style="font-size:11px">Max</label><input class="fp-max" type="number" step="0.5" min="0" value="${fp.max_points}"></div>
-        <div><label style="font-size:11px">Gewicht %</label><input class="fp-weight" type="number" step="1" min="0" value="${fp.weight_pct}"></div>
-        <div><button class="btn-sec fp-del" style="padding:5px 8px;color:var(--pink);border-color:var(--pink)">✕</button></div>
+        ${isNote
+          ? `<div style="width:90px"><label style="font-size:11px">Gewicht %</label><input class="fp-weight" type="number" step="1" min="0" value="${fp.weight_pct}" style="width:100%"></div>`
+          : `<div style="width:80px"><label style="font-size:11px">Max</label><input class="fp-max" type="number" step="0.5" min="0" value="${fp.max_points}" style="width:100%"></div>`}
+        <div style="padding-bottom:1px"><button class="btn-sec fp-del" style="padding:6px 9px;color:var(--pink);border-color:var(--pink)">✕</button></div>
       </div>
       <div style="margin-top:.4rem"><label style="font-weight:normal;font-size:11px;display:flex;align-items:center;gap:.3rem">
         <input type="checkbox" class="fp-group" ${fp.scope==='group'?'checked':''}> Gruppenpunkt (einmal pro Gruppe)</label></div>
@@ -257,9 +258,13 @@ function renderFPs(){
       </div>`;
     fpsList.appendChild(div);
     div.querySelector('.fp-name').addEventListener('input',e=>fp.name=e.target.value);
-    div.querySelector('.fp-type').addEventListener('change',e=>{fp.eval_type=e.target.value;renderFPs();});
-    div.querySelector('.fp-max').addEventListener('input',e=>fp.max_points=parseFloat(e.target.value)||0);
-    div.querySelector('.fp-weight').addEventListener('input',e=>fp.weight_pct=parseFloat(e.target.value)||0);
+    div.querySelector('.fp-type').addEventListener('change',e=>{
+      fp.eval_type=e.target.value;
+      if(fp.eval_type==='note' && !(fp.weight_pct>0)) fp.weight_pct=100;
+      renderFPs();
+    });
+    const maxEl=div.querySelector('.fp-max'); if(maxEl)maxEl.addEventListener('input',e=>fp.max_points=parseFloat(e.target.value)||0);
+    const wEl=div.querySelector('.fp-weight'); if(wEl)wEl.addEventListener('input',e=>fp.weight_pct=parseFloat(e.target.value)||0);
     div.querySelector('.fp-group').addEventListener('change',e=>fp.scope=e.target.checked?'group':'individual');
     div.querySelector('.fp-del').addEventListener('click',()=>{if(confirm('Punkt löschen?')){fps.splice(idx,1);renderFPs();}});
     if(showStages){
