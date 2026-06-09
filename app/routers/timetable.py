@@ -63,6 +63,10 @@ def timetable_view(
         grid = webuntis_client.get_week_grid(user, ref, ical_events=ical_events)
         err = None
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Stundenplan %s nicht ladbar: %s", ref.isoformat(), e, exc_info=True,
+        )
         grid = None
         err = f"{type(e).__name__}: {e}"
     if ical_errors and not err:

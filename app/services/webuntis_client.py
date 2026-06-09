@@ -177,9 +177,35 @@ def get_my_timetable(user: User, start: date, end: date) -> list[dict]:
     """Eigene Stundenplan-Lessons zwischen start und end (inkl.)."""
     with session_for(user) as s:
         _warmup(s)
-        periods = list(s.my_timetable(start=start, end=end))
-    return sorted([_period_to_dict(p) for p in periods],
-                  key=lambda d: d["start"] or "")
+        try:
+            periods_iter = s.my_timetable(start=start, end=end)
+        except Exception:
+            log.debug("my_timetable failed", exc_info=True)
+            return []
+        periods: list = []
+        try:
+            for p in periods_iter:
+                try:
+                    periods.append(p)
+                except Exception:
+                    log.debug("period skip", exc_info=True)
+                    continue
+        except IndexError:
+            # Untis-Lib wirft bei leeren Antworten gelegentlich IndexError
+            # innerhalb der Period-Iteration. Wir behandeln das als 'keine
+            # Stunden in diesem Zeitraum' (z. B. Ferien-Woche).
+            log.debug("my_timetable iterator IndexError → leere Woche",
+                      exc_info=True)
+        except Exception:
+            log.debug("my_timetable iteration failed", exc_info=True)
+    out: list[dict] = []
+    for p in periods:
+        try:
+            out.append(_period_to_dict(p))
+        except Exception:
+            log.debug("period_to_dict failed", exc_info=True)
+            continue
+    return sorted(out, key=lambda d: d["start"] or "")
 
 
 def get_current_day(user: User, day: date | None = None) -> list[dict]:
