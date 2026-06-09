@@ -171,14 +171,13 @@ def create_worksheet_from_arbeitsblatt(
 
     aufgaben_out: list[dict] = []
     for a in aufgaben_rows:
-        title = f"Aufgabe {a.nummer}"
-        if a.titel:
-            title += f": {a.titel}"
-        text = f"**{title}**\n\n" + (a.text_md or "").strip()
+        # Nur den reinen Aufgabentext übernehmen — die 'Aufgabe N'-
+        # Überschrift rendert der Worksheet-Editor selbst.
+        text = (a.text_md or "").strip()
         loesung = (a.loesungsskizze_md or "").strip() if role == "teacher" else ""
         aufgaben_out.append({
             "id": a.nummer,
-            "text": text.strip(),
+            "text": text,
             "kriterien": "",
             "musterloesungText": loesung,
             "musterloesungBild": "",
