@@ -29,6 +29,12 @@ class User(Base):
     # SMB-Anbindung an OMV-Share. JSON {host, share, username, password,
     # vault_subpath, material_subpath}, AES-GCM verschlüsselt.
     smb_creds_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Unterschrift (groß, für Einzel-PDFs) und Paraphe (klein, für die
+    # Lehrer-Zusammenfassung). PNG/JPG, max ~500 KB.
+    signature_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    signature_mime: Mapped[str] = mapped_column(String(80), default="")
+    paraphe_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    paraphe_mime: Mapped[str] = mapped_column(String(80), default="")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -312,6 +318,9 @@ class Exam(Base):
     )
     grading_scale_key: Mapped[str] = mapped_column(String(40), default="builtin:mss_noten")
     input_mode: Mapped[str] = mapped_column(String(16), default="numeric")  # "numeric" | "stages"
+    # 'note' = reine Schulnoten-Prüfung, 'punkte' = reine Punkte-Prüfung,
+    # 'mixed' = Altbestand (gemischte FPs, gewichteter Prozent-Schnitt)
+    bewertung_mode: Mapped[str] = mapped_column(String(16), default="mixed")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -367,6 +376,8 @@ class ExamResult(Base):
     # JSON: {feedback_point_id: erreicht_pkt}
     erreicht_json: Mapped[str] = mapped_column(Text, default="{}")
     comment: Mapped[str] = mapped_column(Text, default="")
+    # JSON: {feedback_point_id: bemerkung_string}
+    feedback_remarks_json: Mapped[str] = mapped_column(Text, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     exam: Mapped[Exam] = relationship(back_populates="results")
@@ -399,6 +410,8 @@ class ExamGroupResult(Base):
     group_label: Mapped[str] = mapped_column(String(40), default="")
     # JSON: {feedback_point_id: erreicht_pkt}
     erreicht_json: Mapped[str] = mapped_column(Text, default="{}")
+    # JSON: {feedback_point_id: bemerkung_string}
+    feedback_remarks_json: Mapped[str] = mapped_column(Text, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     exam: Mapped[Exam] = relationship(back_populates="group_results")
@@ -416,6 +429,8 @@ class GradingScale(Base):
     scale_type: Mapped[str] = mapped_column(String(32), default="mss_noten")
     # JSON: [{label, min_pct, max_pct}, ...]
     payload_json: Mapped[str] = mapped_column(Text, default="[]")
+    # JSON: {label: schriftliche_bezeichnung} z.B. {"2+": "gut", "2": "gut"}
+    grade_names_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

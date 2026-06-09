@@ -134,6 +134,58 @@
   });
   </script>
 
+  <h2 id="unterschrift">Unterschrift & Paraphe</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:.6rem">
+    Diese Bilder werden automatisch auf erzeugten Bewertungs-PDFs eingebettet —
+    die <strong>Unterschrift</strong> auf den Einzel-Schüler-PDFs (über der Linie),
+    die <strong>Paraphe</strong> auf der Lehrer-Zusammenfassung. PNG oder JPG,
+    max. 500 KB. Transparenter Hintergrund empfohlen.
+  </p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;margin-bottom:1rem">
+    <div style="border:1px solid var(--border);border-radius:8px;padding:.9rem 1rem">
+      <strong>Unterschrift</strong>
+      <div style="min-height:80px;display:flex;align-items:center;justify-content:center;background:#fafafa;border-radius:6px;margin:.5rem 0;border:1px dashed #ddd">
+        {% if signature_set %}
+        <img src="/profile/signature/image" alt="" style="max-height:90px;max-width:100%">
+        {% else %}
+        <span class="muted" style="font-size:12px">noch keine Unterschrift</span>
+        {% endif %}
+      </div>
+      <form method="post" action="/profile/signature" enctype="multipart/form-data" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="file" name="file" accept="image/png,image/jpeg" required>
+        <button class="btn btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Hochladen</button>
+      </form>
+      {% if signature_set %}
+      <form method="post" action="/profile/signature/delete" style="margin-top:.5rem"
+            onsubmit="return confirm('Unterschrift entfernen?');">
+        <button class="btn-sec" type="submit" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">Entfernen</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div style="border:1px solid var(--border);border-radius:8px;padding:.9rem 1rem">
+      <strong>Paraphe</strong>
+      <div style="min-height:80px;display:flex;align-items:center;justify-content:center;background:#fafafa;border-radius:6px;margin:.5rem 0;border:1px dashed #ddd">
+        {% if paraphe_set %}
+        <img src="/profile/paraphe/image" alt="" style="max-height:60px;max-width:100%">
+        {% else %}
+        <span class="muted" style="font-size:12px">noch keine Paraphe</span>
+        {% endif %}
+      </div>
+      <form method="post" action="/profile/paraphe" enctype="multipart/form-data" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="file" name="file" accept="image/png,image/jpeg" required>
+        <button class="btn btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Hochladen</button>
+      </form>
+      {% if paraphe_set %}
+      <form method="post" action="/profile/paraphe/delete" style="margin-top:.5rem"
+            onsubmit="return confirm('Paraphe entfernen?');">
+        <button class="btn-sec" type="submit" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">Entfernen</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
   <h2>Externe Kalender (iCal)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Termine aus externen Kalendern (z.B. Outlook, Google, Nextcloud) im Stundenplan einblenden.

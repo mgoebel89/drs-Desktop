@@ -3,8 +3,8 @@ import json
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
@@ -62,9 +62,104 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
         "untis_pw_set": bool(untis.get("password")),
         "smb": smb_view,
         "ical_calendars": cal_views,
+        "signature_set": bool(user.signature_data),
+        "paraphe_set": bool(user.paraphe_data),
         "flash": flash,
         "flash_kind": flash_kind,
     }
+
+
+_SIG_ALLOWED_MIME = {"image/png", "image/jpeg", "image/jpg"}
+_SIG_MAX_BYTES = 500 * 1024
+
+
+async def _read_image(file: UploadFile) -> tuple[bytes, str]:
+    if file.content_type not in _SIG_ALLOWED_MIME:
+        raise HTTPException(400, "Nur PNG oder JPG erlaubt.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Leere Datei.")
+    if len(data) > _SIG_MAX_BYTES:
+        raise HTTPException(400, f"Datei zu groß (max. {_SIG_MAX_BYTES // 1024} KB).")
+    return data, file.content_type
+
+
+@router.post("/profile/signature")
+async def profile_signature_upload(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(...),
+):
+    data, mime = await _read_image(file)
+    user.signature_data = data
+    user.signature_mime = mime
+    audit(db, "signature_set", actor=user,
+          detail=f"{mime} {len(data)}B", request=request)
+    db.commit()
+    return RedirectResponse("/profile#unterschrift", status_code=303)
+
+
+@router.post("/profile/signature/delete")
+def profile_signature_delete(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    user.signature_data = None
+    user.signature_mime = ""
+    audit(db, "signature_cleared", actor=user, request=request)
+    db.commit()
+    return RedirectResponse("/profile#unterschrift", status_code=303)
+
+
+@router.post("/profile/paraphe")
+async def profile_paraphe_upload(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(...),
+):
+    data, mime = await _read_image(file)
+    user.paraphe_data = data
+    user.paraphe_mime = mime
+    audit(db, "paraphe_set", actor=user,
+          detail=f"{mime} {len(data)}B", request=request)
+    db.commit()
+    return RedirectResponse("/profile#unterschrift", status_code=303)
+
+
+@router.post("/profile/paraphe/delete")
+def profile_paraphe_delete(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    user.paraphe_data = None
+    user.paraphe_mime = ""
+    audit(db, "paraphe_cleared", actor=user, request=request)
+    db.commit()
+    return RedirectResponse("/profile#unterschrift", status_code=303)
+
+
+@router.get("/profile/signature/image")
+def profile_signature_image(
+    user: Annotated[User, Depends(require_user)],
+):
+    if not user.signature_data:
+        raise HTTPException(404)
+    return Response(content=user.signature_data,
+                    media_type=user.signature_mime or "image/png")
+
+
+@router.get("/profile/paraphe/image")
+def profile_paraphe_image(
+    user: Annotated[User, Depends(require_user)],
+):
+    if not user.paraphe_data:
+        raise HTTPException(404)
+    return Response(content=user.paraphe_data,
+                    media_type=user.paraphe_mime or "image/png")
 
 
 @router.get("/profile", response_class=HTMLResponse)
