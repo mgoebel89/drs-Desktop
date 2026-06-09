@@ -156,6 +156,7 @@ def create_worksheet_from_arbeitsblatt(
         "lernsituationTitel": f"{ls.display_name} · {ab.title}",
         "lernsituationText": lernsituation_text,
         "lernsituationBild": ls.lernsituation_bild_path or "",
+        "bearbeitungshinweis": (ab.bearbeitungshinweis_md or "").strip(),
         "source": "ls_arbeitsblatt",
         "ls_id": ls.id,
         "arbeitsblatt_id": ab.id,

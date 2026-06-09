@@ -63,6 +63,10 @@ body{font-family:'DIN Pro',Calibri,Arial,sans-serif;background:var(--bg);color:v
 .aufg-nr{font-size:12px;font-weight:700;color:var(--blau);white-space:nowrap;}
 .aufg-text{font-size:14px;line-height:1.7;margin-bottom:11px;}
 .aufg-text p{margin-bottom:.5em;}
+.hinweis-box{margin:1rem 0 1.2rem;padding:.8rem 1rem;background:#fff8e1;border-left:4px solid #f5b942;border-radius:0 8px 8px 0;}
+.hinweis-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#a06b00;margin-bottom:4px;}
+.hinweis-text{font-size:13px;line-height:1.55;color:var(--text);}
+.hinweis-text p{margin-bottom:.4em;}
 .musterloesung{margin-top:.7rem;padding:.7rem .9rem;background:#f3f8fc;border-left:4px solid var(--blau);border-radius:0 6px 6px 0;}
 .musterloesung .ml-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--blau);margin-bottom:5px;}
 .musterloesung .ml-text{font-size:13px;line-height:1.6;}
@@ -128,6 +132,11 @@ input[type=file]{display:none;}
     <div class="lernsituation-text" id="ls-text"></div>
   </div>
 
+  <div class="hinweis-box" id="hinweis-box" style="display:none">
+    <div class="hinweis-label">Bearbeitungshinweis</div>
+    <div class="hinweis-text" id="hinweis-text"></div>
+  </div>
+
   <div class="sec-label">Aufgaben</div>
   <div id="aufg-container"></div>
 
@@ -176,6 +185,11 @@ function paragraphs(text) {
 document.getElementById('m-datum').textContent = new Date().toLocaleDateString('de-DE');
 document.getElementById('ls-titel').textContent = CFG.meta.lernsituationTitel || '';
 document.getElementById('ls-text').innerHTML = paragraphs(CFG.meta.lernsituationText);
+const _hinweis = (CFG.meta.bearbeitungshinweis || '').trim();
+if (_hinweis) {
+  document.getElementById('hinweis-text').innerHTML = paragraphs(_hinweis);
+  document.getElementById('hinweis-box').style.display = 'block';
+}
 if (CFG.meta.lernsituationBild) {
   document.getElementById('ls-bild-wrap').innerHTML =
     '<div class="lernsituation-bild"><img src="' + CFG.meta.lernsituationBild + '" alt=""></div>';

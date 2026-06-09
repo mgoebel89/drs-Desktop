@@ -58,6 +58,9 @@
     <input type="hidden" id="m-ls-bild" value="">
   </div>
 
+  <label style="margin-top:1rem">Bearbeitungshinweis (optional, erscheint als gelber Kasten über den Aufgaben)</label>
+  <textarea id="m-ls-hinweis" rows="2" style="width:100%;font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:#fafafa" placeholder="z. B. Bearbeitet die Aufgaben in Partnerarbeit."></textarea>
+
   <h2 style="margin-top:1.8rem">Aufgaben</h2>
   <div id="aufgaben"></div>
   <p style="margin-top:.8rem">
@@ -208,6 +211,7 @@ function loadInitial() {
   $('#m-ls-titel').value = m.lernsituationTitel || '';
   $('#m-ls-text').value = m.lernsituationText || '';
   $('#m-ls-bild').value = m.lernsituationBild || '';
+  $('#m-ls-hinweis').value = m.bearbeitungshinweis || '';
 
   const lsWrap = document.querySelector('[data-target="m-ls-bild"]');
   lsWrap.dataset.value = INITIAL.meta.lernsituationBild || '';
@@ -230,6 +234,7 @@ function collect() {
     lernsituationTitel: $('#m-ls-titel').value.trim(),
     lernsituationText: $('#m-ls-text').value,
     lernsituationBild: document.querySelector('[data-target="m-ls-bild"]').dataset.value || '',
+    bearbeitungshinweis: $('#m-ls-hinweis').value.trim(),
   };
   const aufgaben = $$('#aufgaben .aufgabe-row').map((r, i) => ({
     id: i + 1,
