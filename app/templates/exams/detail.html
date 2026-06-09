@@ -121,7 +121,11 @@
       <button class="btn btn-sec" type="button" id="btn-wiz-group">👥 Gruppenbewertung (Wizard)</button>
       {% endif %}
     </div>
-    <h3 style="margin-top:.4rem">Übersicht</h3>
+    <h3 style="margin-top:.4rem;display:flex;align-items:center;gap:.8rem">
+      Übersicht
+      <button class="btn-sec" type="button" id="btn-recalc" style="padding:4px 10px;font-size:12px">🔄 Bewertung neu berechnen</button>
+      <span id="recalc-status" class="muted" style="font-size:11px"></span>
+    </h3>
     <table id="overview">
       <thead><tr><th>Schüler/in</th><th>Gruppe</th><th style="text-align:center">%</th><th style="text-align:center">Note</th></tr></thead>
       <tbody>
@@ -394,6 +398,19 @@ async function wizGo(delta){
   if(ni>=len){closeWiz();return;}
   wizIdx=ni; renderWizStep();
 }
+const _btnRecalc=document.getElementById('btn-recalc');
+if(_btnRecalc)_btnRecalc.addEventListener('click',async()=>{
+  const st=document.getElementById('recalc-status');
+  _btnRecalc.disabled=true; st.textContent='berechne …';
+  try{
+    const r=await fetch('/exams/'+EXAM_ID+'/notes');
+    if(!r.ok)throw new Error(r.statusText);
+    const d=await r.json();
+    if(d.ok){applyNotes(d.notes);st.textContent='✓ aktualisiert';setTimeout(()=>st.textContent='',1500);}
+    else st.textContent='✗ Fehler';
+  }catch(e){st.textContent='✗ '+e.message;}
+  finally{_btnRecalc.disabled=false;}
+});
 const wbi=document.getElementById('btn-wiz-indiv'); if(wbi)wbi.addEventListener('click',()=>openWiz('indiv'));
 const wbg=document.getElementById('btn-wiz-group'); if(wbg)wbg.addEventListener('click',()=>openWiz('group'));
 document.getElementById('wiz-prev').addEventListener('click',()=>wizGo(-1));

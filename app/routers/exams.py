@@ -681,6 +681,32 @@ def exams_save(
     return JSONResponse(out)
 
 
+@router.get("/exams/{ex_id}/notes")
+def exams_notes_recalc(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Aktuelle Noten pro Teilnehmer berechnen und als JSON liefern.
+
+    Wird vom 'Bewertung neu berechnen'-Knopf aufgerufen, damit der Lehrer
+    Gewichtungen / Punkte ändern und das Ergebnis sofort sehen kann ohne
+    Seiten-Reload."""
+    ex = _get_exam(db, user, ex_id)
+    ctx = _scoring_ctx(db, user, ex)
+    notes = []
+    for s, g in _exam_participants(db, ex):
+        n_filled, pct, note = _student_total(ctx, s.id, g)
+        notes.append({
+            "student_id": s.id,
+            "n_filled": n_filled,
+            "pct": round(pct, 1),
+            "note": note or "",
+        })
+    return JSONResponse({"ok": True, "notes": notes})
+
+
 def _format_number(v: float) -> str:
     """1.0 → '1', 1.5 → '1,5' (deutsche Schreibweise im PDF)."""
     if v is None:
