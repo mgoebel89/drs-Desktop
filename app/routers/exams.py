@@ -246,7 +246,8 @@ def exams_new_form(
     klassen = [
         row[0] for row in db.execute(
             select(Student.klassen_key)
-            .where(Student.owner_user_id == user.id)
+            .where(Student.owner_user_id == user.id,
+                   Student.klassen_key != "")
             .distinct()
         ).all()
     ]
@@ -361,28 +362,21 @@ async def exams_create(
         db.add(fp)
         db.flush()
 
-        # Schüler: pro (klassen_key=abteilung, nachname, vorname) wiederverwenden
-        # oder neu anlegen. Damit Mehrfach-Imports keine Duplikate erzeugen.
-        existing_by_key: dict[tuple[str, str, str], Student] = {}
-        for s in db.scalars(
-            select(Student).where(Student.owner_user_id == user.id)
-        ).all():
-            existing_by_key[(s.klassen_key, s.nachname.lower(), s.vorname.lower())] = s
-
+        # Schüler werden pro Moodle-Import frisch angelegt — KEINE Zuordnung
+        # zu einer bestehenden Klasse (Moodle-Klassenbezeichnungen weichen
+        # ab und ein Moodle-Kurs bündelt oft mehrere Schulklassen).
+        # Sentinel: klassen_key="" und active=False → tauchen weder in der
+        # Klassen-Auswahl noch in der Schülerliste auf.
         for entry in moodle_entries:
-            kk = (entry.get("abteilung") or "").strip() or "Moodle-Import"
-            key = (kk, entry["nachname"].lower(), entry["vorname"].lower())
-            s = existing_by_key.get(key)
-            if s is None:
-                s = Student(
-                    owner_user_id=user.id,
-                    klassen_key=kk[:64],
-                    nachname=entry["nachname"][:120],
-                    vorname=entry["vorname"][:120],
-                )
-                db.add(s)
-                db.flush()
-                existing_by_key[key] = s
+            s = Student(
+                owner_user_id=user.id,
+                klassen_key="",
+                nachname=entry["nachname"][:120],
+                vorname=entry["vorname"][:120],
+                active=False,
+            )
+            db.add(s)
+            db.flush()
             db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
             if entry["percent"] is not None:
                 r = ExamResult(

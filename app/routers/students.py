@@ -28,12 +28,16 @@ def students_list(
     klassen = [
         row[0] for row in db.execute(
             select(Student.klassen_key)
-            .where(Student.owner_user_id == user.id)
+            .where(Student.owner_user_id == user.id,
+                   Student.klassen_key != "")
             .distinct()
             .order_by(Student.klassen_key)
         ).all()
     ]
-    q = select(Student).where(Student.owner_user_id == user.id)
+    # Moodle-Importe haben klassen_key="" und tauchen hier nicht auf —
+    # sie hängen ausschließlich an ihrer jeweiligen Prüfung.
+    q = select(Student).where(Student.owner_user_id == user.id,
+                              Student.klassen_key != "")
     if klasse:
         q = q.where(Student.klassen_key == klasse)
     q = q.order_by(Student.klassen_key, Student.nachname, Student.vorname)
