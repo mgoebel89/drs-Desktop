@@ -36,6 +36,10 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
 .sec-label{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
   color:var(--blau);margin-bottom:6px;}
 .note-big{font-size:30px;font-weight:700;color:var(--blau);}
+.note-text{font-size:13px;font-weight:600;color:var(--blau);margin-top:2px;text-transform:lowercase;}
+.note-text::first-letter{text-transform:uppercase;}
+.remark-row td{background:#fffdf3 !important;border-top:0 !important;padding-top:0 !important;}
+.remark-row .remark-text{font-size:11px;color:#555;font-style:italic;}
 .signature{margin-top:4.5rem;text-align:right;}
 .signature img{max-height:55px;max-width:200px;display:block;margin-left:auto;margin-bottom:2px;}
 .signature .line{display:inline-block;min-width:210px;border-top:1px solid #000;
@@ -64,16 +68,48 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
 
   <table class="bewertung">
     <thead>
-      <tr><th>Feedbackpunkt</th><th>Art</th><th class="num">Gewicht</th><th class="num">Max</th><th class="num-err">Bewertung</th></tr>
+      {% if mode == 'note' %}
+      <tr>
+        <th>Feedbackpunkt</th>
+        <th class="num">Gewichtung</th>
+        <th class="num-err">Note</th>
+        {% if any_remark %}<th>Bemerkung</th>{% endif %}
+      </tr>
+      {% elif mode == 'punkte' %}
+      <tr>
+        <th>Feedbackpunkt</th>
+        <th class="num">Max</th>
+        <th class="num-err">Erreicht</th>
+        {% if any_remark %}<th>Bemerkung</th>{% endif %}
+      </tr>
+      {% else %}
+      <tr>
+        <th>Feedbackpunkt</th>
+        <th>Art</th>
+        <th class="num">Gewicht</th>
+        <th class="num">Max</th>
+        <th class="num-err">Bewertung</th>
+        {% if any_remark %}<th>Bemerkung</th>{% endif %}
+      </tr>
+      {% endif %}
     </thead>
     <tbody>
       {% for row in rows %}
       <tr>
         <td>{{ row.name }}{% if row.scope == 'group' %}<span class="scope-badge">Gruppe</span>{% endif %}</td>
+        {% if mode == 'note' %}
+        <td class="num">{{ row.weight_str }}</td>
+        <td class="num-err">{{ row.erreicht_str }}</td>
+        {% elif mode == 'punkte' %}
+        <td class="num">{{ row.max_str }}</td>
+        <td class="num-err">{{ row.erreicht_str }}</td>
+        {% else %}
         <td style="font-size:11px;color:#666">{{ row.typ }}</td>
         <td class="num">{{ row.weight_str }}</td>
         <td class="num">{{ row.max_str }}</td>
         <td class="num-err">{{ row.erreicht_str }}</td>
+        {% endif %}
+        {% if any_remark %}<td class="remark-text">{{ row.remark }}</td>{% endif %}
       </tr>
       {% endfor %}
     </tbody>
@@ -82,11 +118,17 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
   <div class="summary">
     <div class="summary-box">
       <div class="sec-label">Gesamtergebnis</div>
+      {% if mode == 'punkte' %}
+      <div>Erreicht: <strong>{{ sum_erreicht_str }}</strong> / {{ sum_max_str }} Punkte</div>
+      <div style="margin-top:3px">Prozent: <strong>{{ pct_str }} %</strong></div>
+      {% else %}
       <div>Gewichtetes Ergebnis: <strong>{{ pct_str }} %</strong></div>
+      {% endif %}
     </div>
     <div class="summary-box note">
       <div class="sec-label">Note</div>
       <div class="note-big">{{ note or '—' }}</div>
+      {% if note_text %}<div class="note-text">{{ note_text }}</div>{% endif %}
     </div>
   </div>
 

@@ -90,6 +90,8 @@ def _scoring_ctx(db: Session, user: User, ex: Exam):
         "sum_max": sum_max, "stufen": stufen,
         "indiv_results": indiv_results, "group_results": group_results,
         "indiv_remarks": indiv_remarks, "group_remarks": group_remarks,
+        "bewertung_mode": ex.bewertung_mode or "mixed",
+        "grading_scale_ref": ex.grading_scale_key,
     }
 
 
@@ -121,12 +123,47 @@ def _item_weight(fp) -> float:
 
 
 def _student_total(ctx: dict, student_id: int, group_label: str):
-    """(erfasste_items, pct, note) für einen Schüler — gewichteter Schnitt
-    über Einzel- + Gruppen-Items je eval_type."""
+    """(erfasste_items, pct, note) für einen Schüler.
+
+    Im Punkte-Modus: Endnote = Summe(erreicht) / Summe(max) → Prozent →
+    Note via Notenschlüssel. Sonst (note/mixed): gewichteter Prozent-
+    Schnitt über alle Items je eval_type."""
     er = ctx["indiv_results"].get(student_id, {})
     ger = ctx["group_results"].get(group_label or "", {})
     stufen = ctx["stufen"]
+    mode = ctx.get("bewertung_mode", "mixed")
 
+    if mode == "punkte":
+        sum_erreicht = 0.0
+        sum_max = 0.0
+        n_filled = 0
+        for fp in ctx["indiv_fps"]:
+            raw = er.get(str(fp.id), "")
+            if raw in (None, ""):
+                continue
+            try:
+                sum_erreicht += float(raw)
+            except (TypeError, ValueError):
+                continue
+            sum_max += float(fp.max_points or 0)
+            n_filled += 1
+        for fp in ctx["group_fps"]:
+            raw = ger.get(str(fp.id), "")
+            if raw in (None, ""):
+                continue
+            try:
+                sum_erreicht += float(raw)
+            except (TypeError, ValueError):
+                continue
+            sum_max += float(fp.max_points or 0)
+            n_filled += 1
+        if not n_filled or sum_max <= 0:
+            return 0, 0.0, ""
+        pct = max(0.0, min(100.0, sum_erreicht / sum_max * 100.0))
+        note = grading.grade_from_stufen(stufen, pct)
+        return n_filled, pct, note
+
+    # 'note' und 'mixed' → bestehende gewichtete Logik
     weighted: list[tuple[float, float]] = []  # (percent, weight)
     n_filled = 0
     for fp in ctx["indiv_fps"]:
@@ -313,11 +350,14 @@ async def exams_create(
     learning_situation_id: str = Form(""),
     grading_scale_key: str = Form("builtin:mss_noten"),
     input_mode: str = Form("numeric"),
+    bewertung_mode: str = Form("note"),
     moodle_json: UploadFile | None = File(default=None),
 ):
     title = title.strip()[:200] or "Neue Prüfung"
     if input_mode not in ("numeric", "stages"):
         input_mode = "numeric"
+    if bewertung_mode not in ("note", "punkte"):
+        bewertung_mode = "note"
     if not _valid_scale_ref(db, user, grading_scale_key):
         grading_scale_key = grading.DEFAULT_SCALE
 
@@ -363,6 +403,7 @@ async def exams_create(
         learning_situation_id=ls_id,
         grading_scale_key=grading_scale_key,
         input_mode=input_mode,
+        bewertung_mode="punkte" if has_moodle else bewertung_mode,
     )
     db.add(ex)
     db.flush()
@@ -604,11 +645,18 @@ def exams_save(
         for ofp in old_fps:
             db.delete(ofp)
         db.flush()
+        # Im reinen Schulnoten- oder Punkte-Modus erzwingen wir den
+        # eval_type aller FPs auf den Prüfungs-Modus.
+        forced_eval = None
+        if ex.bewertung_mode == "note":
+            forced_eval = "note"
+        elif ex.bewertung_mode == "punkte":
+            forced_eval = "punkte"
         new_fps: list[ExamFeedbackPoint] = []
         for i, item in enumerate(fps_in):
             stages = item.get("stages") or []
             scope = item.get("scope") if item.get("scope") in ("individual", "group") else "individual"
-            eval_type = item.get("eval_type") if item.get("eval_type") in ("punkte", "note", "stufen") else "punkte"
+            eval_type = forced_eval or (item.get("eval_type") if item.get("eval_type") in ("punkte", "note", "stufen") else "punkte")
             fp = ExamFeedbackPoint(
                 exam_id=ex.id,
                 position=i,
@@ -760,24 +808,46 @@ def _datum_pretty(datum: str) -> str:
         return datum
 
 
+def _image_data_url(data: bytes | None, mime: str) -> str:
+    if not data:
+        return ""
+    import base64 as _b64
+    return f"data:{mime or 'image/png'};base64,{_b64.b64encode(data).decode('ascii')}"
+
+
 def _build_student_pdf_html(
     request: Request, db: Session, user: User, ex: Exam,
     student: Student, group_label: str, ctx: dict,
 ) -> str:
-    """Rendert das HTML für ein Schüler-PDF (Einzel- + Gruppenpunkte)."""
+    """Rendert das HTML für ein Schüler-PDF (Einzel- + Gruppenpunkte).
+
+    Spalten richten sich nach ex.bewertung_mode:
+      • note  → Feedbackpunkt | Gewichtung | Note (+ optional Bemerkung)
+      • punkte → Feedbackpunkt | Max | Erreicht (+ optional Bemerkung)
+      • mixed → wie bisher (Art, Gewichtung, Max, Erreicht)
+    Mündliche Ergänzungen erscheinen pro FP nur wenn ausgefüllt.
+    """
     er = ctx["indiv_results"].get(student.id, {})
     ger = ctx["group_results"].get(group_label or "", {})
+    remarks = ctx["indiv_remarks"].get(student.id, {})
+    grem = ctx["group_remarks"].get(group_label or "", {})
+    mode = ctx.get("bewertung_mode", "mixed")
 
     stufen = ctx["stufen"]
     rows = []
+    sum_max = 0.0
+    sum_erreicht = 0.0
+    any_remark = False
     for fp in ctx["fps"]:
         raw = (ger if fp.scope == "group" else er).get(str(fp.id), "")
+        rem = (grem if fp.scope == "group" else remarks).get(str(fp.id), "")
+        if rem:
+            any_remark = True
         if fp.eval_type == "note":
             erreicht_str = str(raw) if raw not in (None, "") else "—"
             max_str = "Note"
             typ = "Schulnote"
         elif fp.eval_type == "stufen":
-            # Stufen-Label zum gespeicherten Punktwert finden
             label = ""
             try:
                 stages = json.loads(fp.stages_json) if fp.stages_json else []
@@ -793,23 +863,28 @@ def _build_student_pdf_html(
                 val_f = float(raw) if raw not in (None, "") else 0.0
             except (TypeError, ValueError):
                 val_f = 0.0
-            erreicht_str = _format_number(val_f)
+            erreicht_str = _format_number(val_f) if raw not in (None, "") else "—"
             max_str = _format_number(fp.max_points)
             typ = "Punkte"
+            if raw not in (None, ""):
+                sum_erreicht += val_f
+                sum_max += float(fp.max_points or 0)
         weight_str = (f"{_format_number(fp.weight_pct)} %"
                       if fp.eval_type == "note" and fp.weight_pct else "—")
         rows.append({
             "name": fp.name, "scope": fp.scope, "typ": typ,
             "max_str": max_str, "erreicht_str": erreicht_str,
-            "weight_str": weight_str,
+            "weight_str": weight_str, "remark": rem or "",
         })
 
     n_filled, pct, note = _student_total(ctx, student.id, group_label)
     comment = ""
-    r = ctx["indiv_results"].get(student.id)  # nicht das Result-Objekt; Kommentar separat holen
     res_obj = next((x for x in ex.results if x.student_id == student.id), None)
     if res_obj:
         comment = res_obj.comment or ""
+
+    note_text = grading.grade_text_for_label(
+        db, user, ctx.get("grading_scale_ref"), note) if note else ""
 
     return templates.get_template("exams/student_pdf.html").render({
         "request": request,
@@ -817,14 +892,21 @@ def _build_student_pdf_html(
         "student": student,
         "group_label": group_label,
         "rows": rows,
+        "mode": mode,
+        "any_remark": any_remark,
         "pct_str": _format_number(round(pct, 1)),
         "note": note,
+        "note_text": note_text,
+        "sum_max_str": _format_number(sum_max) if mode == "punkte" else "",
+        "sum_erreicht_str": _format_number(round(sum_erreicht, 2))
+                            if mode == "punkte" else "",
         "datum_pretty": _datum_pretty(ex.datum),
         "lehrer_name": user.full_name or user.username,
         "klassen_key": ex.klassen_key,
         "school_logo_data_url": branding.logo_data_url(db),
         "school_name_value": branding.get_school_name(db),
-        "signature_data_url": "",  # später aus User-Setting
+        "signature_data_url": _image_data_url(user.signature_data,
+                                              user.signature_mime),
         "comment": comment,
     })
 
@@ -868,6 +950,8 @@ def _build_summary_pdf_html(
         "n": len(rows),
         "school_logo_data_url": branding.logo_data_url(db),
         "school_name_value": branding.get_school_name(db),
+        "paraphe_data_url": _image_data_url(user.paraphe_data,
+                                            user.paraphe_mime),
     })
 
 

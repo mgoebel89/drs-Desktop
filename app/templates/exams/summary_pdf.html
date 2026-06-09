@@ -39,6 +39,9 @@ td.c{text-align:center;}
       {% if datum_pretty %}<div>{{ datum_pretty }}</div>{% endif %}
       {% if lehrer_name %}<div>{{ lehrer_name }}</div>{% endif %}
       {% if exam.klassen_key %}<div>Klasse(n): <strong>{{ exam.klassen_key }}</strong></div>{% endif %}
+      {% if paraphe_data_url %}
+      <div style="margin-top:.4rem"><img src="{{ paraphe_data_url }}" alt="" style="max-height:30px;max-width:120px;display:inline-block"></div>
+      {% endif %}
     </div>
   </div>
 

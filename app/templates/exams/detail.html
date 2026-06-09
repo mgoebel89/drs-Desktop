@@ -97,11 +97,23 @@
       <button type="button" class="btn btn-sec" id="btn-tmpl-load">Übernehmen</button>
       <span id="tmpl-status" class="muted" style="font-size:12px"></span>
     </div>
+    {% if exam.bewertung_mode == 'note' %}
+    <div style="background:#e6f3fa;border:1px solid #00639C;border-radius:6px;padding:.6rem .9rem;margin-bottom:.8rem;font-size:12px">
+      <strong>Modus: Schulnoten.</strong> Alle Feedbackpunkte werden als Schulnote vergeben.
+      Gewichte in % bestimmen den Anteil an der Endnote.
+    </div>
+    {% elif exam.bewertung_mode == 'punkte' %}
+    <div style="background:#e6f3fa;border:1px solid #00639C;border-radius:6px;padding:.6rem .9rem;margin-bottom:.8rem;font-size:12px">
+      <strong>Modus: Punkte.</strong> Alle Feedbackpunkte werden mit Max-Punkten gepflegt.
+      Endnote = erreichte Gesamtpunkte / Max-Gesamtpunkte → Notenschlüssel.
+    </div>
+    {% else %}
     <p class="muted" style="font-size:12px">
       Typ je Punkt: <strong>Punkte</strong> (Zahl), <strong>Schulnote</strong> (Note direkt),
       <strong>Stufen</strong> (selbst definierte Stufen, z. B. „teilweise/voll erfüllt").
       Gewicht in % bestimmt den Anteil an der Endnote (wird automatisch normiert).
     </p>
+    {% endif %}
     <div id="fps-list"></div>
     <button type="button" class="btn btn-sec" id="btn-fps-add" style="margin-top:.8rem">+ Punkt hinzufügen</button>
     <div style="display:flex;justify-content:flex-end;margin-top:1rem"><button class="btn" type="button" id="btn-fps-save">Speichern</button></div>
@@ -241,7 +253,10 @@ if(bps) bps.addEventListener('click',async()=>{
 });
 
 // ── Feedbackpunkte-Editor ──
-let fps=INITIAL_FPS.map(f=>({...f,stages:f.stages||[],scope:f.scope||'individual',eval_type:f.eval_type||'punkte',weight_pct:f.weight_pct||0}));
+const BEWERTUNG_MODE = {{ exam.bewertung_mode|tojson }};
+const MODE_FORCED = BEWERTUNG_MODE === 'note' || BEWERTUNG_MODE === 'punkte';
+const FORCED_TYPE = BEWERTUNG_MODE === 'note' ? 'note' : (BEWERTUNG_MODE === 'punkte' ? 'punkte' : null);
+let fps=INITIAL_FPS.map(f=>({...f,stages:f.stages||[],scope:f.scope||'individual',eval_type:(FORCED_TYPE||f.eval_type||'punkte'),weight_pct:f.weight_pct||0}));
 const fpsList=document.getElementById('fps-list');
 function renderFPs(){
   fpsList.innerHTML='';
@@ -254,12 +269,12 @@ function renderFPs(){
       <div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
         <div style="font-weight:600;color:#666;padding-bottom:8px">${idx+1}.</div>
         <div style="flex:1;min-width:160px"><label style="font-size:11px">Name</label><input class="fp-name" value="${escapeHtml(fp.name)}"></div>
-        <div style="width:120px"><label style="font-size:11px">Typ</label>
+        ${MODE_FORCED ? '' : `<div style="width:120px"><label style="font-size:11px">Typ</label>
           <select class="fp-type" style="width:100%">
             <option value="punkte"${fp.eval_type==='punkte'?' selected':''}>Punkte</option>
             <option value="note"${fp.eval_type==='note'?' selected':''}>Schulnote</option>
             <option value="stufen"${fp.eval_type==='stufen'?' selected':''}>Stufen</option>
-          </select></div>
+          </select></div>`}
         ${isNote
           ? `<div style="width:90px"><label style="font-size:11px">Gewicht %</label><input class="fp-weight" type="number" step="1" min="0" value="${fp.weight_pct}" style="width:100%"></div>`
           : `<div style="width:80px"><label style="font-size:11px">Max</label><input class="fp-max" type="number" step="0.5" min="0" value="${fp.max_points}" style="width:100%"></div>`}
@@ -279,7 +294,8 @@ function renderFPs(){
       </div>`;
     fpsList.appendChild(div);
     div.querySelector('.fp-name').addEventListener('input',e=>fp.name=e.target.value);
-    div.querySelector('.fp-type').addEventListener('change',e=>{
+    const typeSel=div.querySelector('.fp-type');
+    if(typeSel)typeSel.addEventListener('change',e=>{
       fp.eval_type=e.target.value;
       if(fp.eval_type==='note' && !(fp.weight_pct>0)) fp.weight_pct=100;
       renderFPs();
@@ -309,7 +325,11 @@ function renderFPs(){
     }
   });
 }
-document.getElementById('btn-fps-add').addEventListener('click',()=>{fps.push({name:'',max_points:10,scope:'individual',eval_type:'punkte',weight_pct:0,stages:[]});renderFPs();});
+document.getElementById('btn-fps-add').addEventListener('click',()=>{
+  const et = FORCED_TYPE || 'punkte';
+  fps.push({name:'',max_points: et==='note'?0:10, scope:'individual', eval_type:et, weight_pct: et==='note'?100:0, stages:[]});
+  renderFPs();
+});
 document.getElementById('btn-fps-save').addEventListener('click',async()=>{
   const st=document.getElementById('fps-status'); st.textContent='speichere …';
   const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'feedbackpunkte',feedback_points:fps});

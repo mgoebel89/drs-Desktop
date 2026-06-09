@@ -60,6 +60,23 @@
       </select>
     </div>
     <div style="grid-column:1/3">
+      <label>Bewertungsmodus</label>
+      <div style="display:flex;gap:.8rem;margin-top:.3rem">
+        <label style="font-weight:normal;display:flex;align-items:center;gap:.4rem">
+          <input type="radio" name="bewertung_mode" value="note" checked> Schulnoten
+        </label>
+        <label style="font-weight:normal;display:flex;align-items:center;gap:.4rem">
+          <input type="radio" name="bewertung_mode" value="punkte"> Punkte
+        </label>
+      </div>
+      <p class="muted" style="font-size:11px;margin-top:.3rem">
+        Im Schulnoten-Modus pflegst du pro Feedbackpunkt eine Gewichtung
+        und vergibst direkt eine Note — Endnote = gewichteter Schnitt.
+        Im Punkte-Modus pflegst du Max-Punkte und vergibst erreichte
+        Punkte — Endnote = Gesamtpunkte / Max-Gesamtpunkte → Notenschlüssel.
+      </p>
+    </div>
+    <div style="grid-column:1/3">
       <label>Eingabemodus</label>
       <div style="display:flex;gap:.8rem;margin-top:.3rem">
         <label style="font-weight:normal;display:flex;align-items:center;gap:.4rem">
