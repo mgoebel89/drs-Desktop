@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Zusammenfassung — {{ exam.title }}</title>
+<style>
+:root{ --blau:#00639C; --blau-hell:#E6F3FA; --border:#ddd; --text:#1a1a1a; --muted:#666; }
+@page{ size:A4; margin:18mm; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DIN Pro',Calibri,Arial,sans-serif;color:var(--text);font-size:12px;}
+.drs-header{display:flex;justify-content:space-between;align-items:flex-start;
+  margin-bottom:1.2rem;padding-bottom:.8rem;border-bottom:2px solid var(--blau);}
+.brand{font-weight:700;color:var(--blau);font-size:15px;display:flex;align-items:center;gap:.6rem;}
+.brand img{height:40px;width:auto;}
+.meta{text-align:right;font-size:11px;color:var(--muted);line-height:1.7;}
+h1{font-size:18px;color:var(--blau);margin:.4rem 0;}
+.sub{color:var(--muted);margin-bottom:1rem;font-size:12px;}
+.sec-label{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--blau);margin:1.2rem 0 .5rem;}
+table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
+th,td{border:1px solid var(--border);padding:5px 9px;text-align:left;}
+th{background:var(--blau-hell);color:var(--blau);}
+td.c{text-align:center;}
+.vert{display:flex;flex-wrap:wrap;gap:.5rem;}
+.vert .item{border:1px solid var(--border);border-radius:6px;padding:.4rem .8rem;font-size:12px;}
+.vert .item strong{color:var(--blau);font-size:15px;}
+.kpi{display:flex;gap:1rem;margin:.4rem 0 1rem;}
+.kpi .box{border:1px solid var(--border);border-radius:8px;padding:.6rem 1rem;}
+.kpi .box strong{font-size:16px;color:var(--blau);}
+</style>
+</head>
+<body>
+  <div class="drs-header">
+    <div class="brand">
+      {% if school_logo_data_url %}<img src="{{ school_logo_data_url }}" alt="">{% endif %}
+      <span>{{ school_name_value }}</span>
+    </div>
+    <div class="meta">
+      {% if datum_pretty %}<div>{{ datum_pretty }}</div>{% endif %}
+      {% if lehrer_name %}<div>{{ lehrer_name }}</div>{% endif %}
+      {% if exam.klassen_key %}<div>Klasse(n): <strong>{{ exam.klassen_key }}</strong></div>{% endif %}
+    </div>
+  </div>
+
+  <h1>{{ exam.title }} — Zusammenfassung</h1>
+  <div class="sub">Lehrer-Übersicht (nicht zur Schüler-Ausgabe)</div>
+
+  <div class="kpi">
+    <div class="box">Teilnehmer: <strong>{{ n }}</strong></div>
+    {% if schnitt_pct %}<div class="box">Durchschnitt: <strong>{{ schnitt_pct }} %</strong></div>{% endif %}
+  </div>
+
+  <div class="sec-label">Notenverteilung</div>
+  {% if verteilung %}
+  <div class="vert">
+    {% for v in verteilung %}
+      <div class="item"><strong>{{ v.note }}</strong> &times; {{ v.count }}</div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="sub">Noch keine bewerteten Teilnehmer.</p>
+  {% endif %}
+
+  <div class="sec-label">Namensliste mit Endnote</div>
+  <table>
+    <thead><tr><th>Nachname</th><th>Vorname</th><th>Klasse</th><th>Gruppe</th><th class="c">%</th><th class="c">Note</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.nachname }}</td>
+        <td>{{ r.vorname }}</td>
+        <td>{{ r.klasse }}</td>
+        <td class="c">{{ r.gruppe or '—' }}</td>
+        <td class="c">{{ r.pct_str }}</td>
+        <td class="c"><strong>{{ r.note or '—' }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

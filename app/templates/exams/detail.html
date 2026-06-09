@@ -1,18 +1,41 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.title }}{% endblock %}
 {% block content %}
+{# ── Makro: eine Bewertungs-Zelle (numeric oder stages) ── #}
+{% macro _cell(fp, val) %}
+  {% set stages = fp_stages.get(fp.id) %}
+  {% if exam.input_mode == 'stages' and stages %}
+    <div class="stage-btns" data-fp-id="{{ fp.id }}">
+      {% for st in stages %}
+        <button type="button" class="stage-btn{% if val|string == st.points|string %} active{% endif %}"
+                data-points="{{ st.points }}" title="{{ st.label }}: {{ st.points }}"
+                style="display:block;width:100%;padding:3px 6px;margin:1px 0;font-size:11px;
+                       border:1px solid #ddd;border-radius:3px;cursor:pointer;
+                       background:{% if val|string == st.points|string %}#7B61FF{% else %}#fff{% endif %};
+                       color:{% if val|string == st.points|string %}#fff{% else %}#333{% endif %}">
+          {{ st.label }}
+        </button>
+      {% endfor %}
+    </div>
+  {% else %}
+    <input type="number" class="num-input" step="0.5" min="0" max="{{ fp.max_points }}"
+           value="{{ val }}" data-fp-id="{{ fp.id }}" data-fp-max="{{ fp.max_points }}"
+           style="width:65px;text-align:center">
+  {% endif %}
+{% endmacro %}
 <div class="card">
   <div style="display:flex;align-items:center;gap:1rem">
     <h1 style="margin:0;flex:1">{{ exam.title }}</h1>
     <a class="btn btn-sec" href="/exams">← Übersicht</a>
   </div>
   <p class="muted">
-    {{ exam.datum or 'kein Datum' }} · Klasse {{ exam.klassen_key or '—' }}
+    {{ exam.datum or 'kein Datum' }} · Klasse(n) {{ exam.klassen_key or '—' }}
     {% if ls %}· LS <a href="/ls/{{ ls.id }}">{{ ls.display_name }}</a>{% endif %}
   </p>
 
-  <div class="tab-row" style="display:flex;gap:.3rem;border-bottom:2px solid #eee;margin-top:.8rem">
+  <div class="tab-row" style="display:flex;gap:.3rem;border-bottom:2px solid #eee;margin-top:.8rem;flex-wrap:wrap">
     <button type="button" class="tab-btn active" data-target="tab-set">Einstellungen</button>
+    <button type="button" class="tab-btn" data-target="tab-part">Teilnehmer</button>
     <button type="button" class="tab-btn" data-target="tab-fps">Feedbackpunkte</button>
     <button type="button" class="tab-btn" data-target="tab-eval">Bewertung</button>
     <button type="button" class="tab-btn" data-target="tab-exp">Export</button>
@@ -30,16 +53,29 @@
         <input id="f-datum" type="date" value="{{ exam.datum }}">
       </div>
       <div>
-        <label>Klasse</label>
-        <input id="f-klasse" value="{{ exam.klassen_key }}">
-      </div>
-      <div>
         <label>Notenskala</label>
         <select id="f-scale">
-          {% for k, lbl in scales %}
-          <option value="{{ k }}" {% if k == exam.grading_scale_key %}selected{% endif %}>{{ lbl }}</option>
+          {% for ref, lbl in scales %}
+          <option value="{{ ref }}" {% if ref == exam.grading_scale_key %}selected{% endif %}>{{ lbl }}</option>
           {% endfor %}
         </select>
+      </div>
+      <div style="grid-column:1/3">
+        <label>Klasse(n)</label>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.3rem">
+          {% for k in all_klassen %}
+          <label style="font-weight:normal;display:flex;align-items:center;gap:.35rem;
+                        padding:.3rem .6rem;border:1px solid #ddd;border-radius:6px;cursor:pointer">
+            <input type="checkbox" class="cls-cb" value="{{ k }}"
+                   {% if k in exam_classes %}checked{% endif %}>
+            {{ k }}
+          </label>
+          {% endfor %}
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:.3rem">
+          Neu hinzugefügte Klassen: alle Schüler werden als Teilnehmer vorausgewählt.
+          Im Teilnehmer-Tab feinjustieren.
+        </p>
       </div>
       <div>
         <label>Eingabemodus</label>
@@ -52,8 +88,7 @@
         <form method="post" action="/exams/{{ exam.id }}/delete"
               onsubmit="return confirm('Prüfung „{{ exam.title }}" wirklich löschen? Alle Bewertungen gehen verloren.');">
           <input type="hidden" name="confirm" value="1">
-          <button class="btn-sec" type="submit"
-                  style="color:#c62828;border-color:#c62828">🗑 Löschen</button>
+          <button class="btn-sec" type="submit" style="color:#c62828;border-color:#c62828">🗑 Löschen</button>
         </form>
         <button class="btn" type="button" id="btn-set-save">Speichern</button>
       </div>
@@ -61,8 +96,45 @@
     </div>
   </div>
 
+  <!-- ── TEILNEHMER ── -->
+  <div id="tab-part" class="tab-pane" style="padding:1rem 0;display:none">
+    {% if roster %}
+    <p class="muted" style="font-size:12px">Häkchen = nimmt teil. Gruppe optional (z.B. A, B) für Gruppenarbeiten.</p>
+    <table>
+      <thead><tr><th>Teilnahme</th><th>Klasse</th><th>Nachname</th><th>Vorname</th><th>Gruppe</th></tr></thead>
+      <tbody>
+      {% for r in roster %}
+        <tr data-student-id="{{ r.student.id }}">
+          <td style="text-align:center"><input type="checkbox" class="part-cb" {% if r.member %}checked{% endif %}></td>
+          <td style="font-size:12px;color:#666">{{ r.student.klassen_key }}</td>
+          <td><strong>{{ r.student.nachname }}</strong></td>
+          <td>{{ r.student.vorname }}</td>
+          <td><input type="text" class="part-group" value="{{ r.group_label }}" maxlength="40" style="width:70px" placeholder="—"></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div style="display:flex;justify-content:flex-end;margin-top:1rem">
+      <button class="btn" type="button" id="btn-part-save">Teilnehmer speichern</button>
+    </div>
+    <div><span id="part-status" class="muted" style="font-size:12px"></span></div>
+    {% else %}
+    <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem">
+      Keine Klasse gewählt oder keine Schüler vorhanden. Im Einstellungen-Tab Klasse(n) wählen
+      bzw. unter <a href="/students">Schüler</a> anlegen.
+    </div>
+    {% endif %}
+  </div>
+
   <!-- ── FEEDBACKPUNKTE ── -->
   <div id="tab-fps" class="tab-pane" style="padding:1rem 0;display:none">
+    <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.8rem;flex-wrap:wrap">
+      <label style="margin:0">Aus Vorlage laden:</label>
+      <select id="tmpl-select" style="min-width:200px"><option value="">— wählen —</option></select>
+      <button type="button" class="btn btn-sec" id="btn-tmpl-load">Übernehmen</button>
+      <span id="tmpl-status" class="muted" style="font-size:12px"></span>
+    </div>
+
     <div id="quick-stages-row"
          style="display:{% if exam.input_mode == 'stages' %}flex{% else %}none{% endif %};
                 gap:.4rem;margin-bottom:.8rem;padding:.6rem .9rem;background:#f5f3ff;border-radius:6px;
@@ -83,56 +155,63 @@
 
   <!-- ── BEWERTUNG ── -->
   <div id="tab-eval" class="tab-pane" style="padding:1rem 0;display:none">
-    {% if students_view %}
-    <p class="muted" style="font-size:12px">
-      Tabellen-Modus: alle Schüler × alle Punkte. Auto-Save pro Eingabe.
-      {% if exam.input_mode == 'stages' %}
-        Im Stufen-Modus pro Punkt einen der Buttons klicken (oder Ziffern 1–9 auf der Tastatur).
-      {% endif %}
-    </p>
+    {% if not students_view %}
+      <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem">
+        Keine Teilnehmer. Bitte im Teilnehmer-Tab Schüler auswählen.
+      </div>
+    {% else %}
+
+    {% if group_fps and group_views %}
+    <h3 style="margin-top:0">Gruppen-Bewertung</h3>
+    <p class="muted" style="font-size:12px">Gilt für alle Mitglieder der Gruppe.</p>
+    <div style="overflow:auto;margin-bottom:1.6rem">
+      <table id="group-table" style="width:auto;min-width:60%">
+        <thead><tr>
+          <th style="position:sticky;left:0;background:#f5f5f5">Gruppe</th>
+          {% for fp in group_fps %}
+            <th style="text-align:center;min-width:100px">{{ fp.name }}<br><span class="muted" style="font-size:10px">max {{ fp.max_points }}</span></th>
+          {% endfor %}
+        </tr></thead>
+        <tbody>
+        {% for gv in group_views %}
+          <tr data-group-label="{{ gv.label }}">
+            <td style="position:sticky;left:0;background:#fff;font-weight:600">
+              {{ gv.label }}<br><span class="muted" style="font-size:10px">{{ gv.members|join(', ') }}</span>
+            </td>
+            {% for fp in group_fps %}
+              {% set val = gv.erreicht.get(fp.id|string, '') %}
+              <td style="text-align:center" data-fp-id="{{ fp.id }}" data-fp-max="{{ fp.max_points }}">
+                {{ _cell(fp, val) }}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <h3 style="margin-top:0">Einzel-Bewertung</h3>
     <div style="overflow:auto">
       <table id="eval-table" style="width:auto;min-width:100%">
         <thead><tr>
           <th style="position:sticky;left:0;background:#f5f5f5;z-index:1">Schüler/in</th>
-          {% for fpv in feedback_points %}
-            <th style="text-align:center;min-width:100px">
-              {{ fpv.fp.name }}<br>
-              <span class="muted" style="font-size:10px">max {{ fpv.fp.max_points }}</span>
-            </th>
+          {% for fp in indiv_fps %}
+            <th style="text-align:center;min-width:100px">{{ fp.name }}<br><span class="muted" style="font-size:10px">max {{ fp.max_points }}</span></th>
           {% endfor %}
-          <th style="text-align:center">Σ</th>
-          <th style="text-align:center">%</th>
-          <th style="text-align:center">Note</th>
+          <th style="text-align:center">Σ</th><th style="text-align:center">%</th><th style="text-align:center">Note</th>
         </tr></thead>
         <tbody>
         {% for sv in students_view %}
           <tr data-student-id="{{ sv.student.id }}">
             <td style="position:sticky;left:0;background:#fff;font-weight:600">
               {{ sv.student.nachname }}, {{ sv.student.vorname }}
+              {% if sv.group_label %}<span style="font-size:10px;color:#5e3fc0"> [{{ sv.group_label }}]</span>{% endif %}
             </td>
-            {% for fpv in feedback_points %}
-              {% set fp = fpv.fp %}
+            {% for fp in indiv_fps %}
               {% set val = sv.erreicht.get(fp.id|string, '') %}
               <td style="text-align:center" data-fp-id="{{ fp.id }}" data-fp-max="{{ fp.max_points }}">
-                {% if exam.input_mode == 'stages' and fpv.stages %}
-                  <div class="stage-btns" data-fp-id="{{ fp.id }}">
-                    {% for st in fpv.stages %}
-                      <button type="button" class="stage-btn{% if val|string == st.points|string %} active{% endif %}"
-                              data-points="{{ st.points }}"
-                              title="{{ st.label }}: {{ st.points }} Pkt"
-                              style="display:block;width:100%;padding:3px 6px;margin:1px 0;
-                                     font-size:11px;border:1px solid #ddd;border-radius:3px;
-                                     cursor:pointer;background:{% if val|string == st.points|string %}#7B61FF{% else %}#fff{% endif %};
-                                     color:{% if val|string == st.points|string %}#fff{% else %}#333{% endif %}">
-                        {{ st.label }}
-                      </button>
-                    {% endfor %}
-                  </div>
-                {% else %}
-                  <input type="number" class="num-input" step="0.5" min="0" max="{{ fp.max_points }}"
-                         value="{{ val }}" data-fp-id="{{ fp.id }}" data-fp-max="{{ fp.max_points }}"
-                         style="width:65px;text-align:center">
-                {% endif %}
+                {{ _cell(fp, val) }}
               </td>
             {% endfor %}
             <td style="text-align:center;font-weight:600" class="cell-sum">{{ sv.sum_err }}</td>
@@ -144,27 +223,19 @@
       </table>
     </div>
     <div><span id="eval-status" class="muted" style="font-size:12px;margin-top:.5rem;display:block"></span></div>
-    {% else %}
-    <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem">
-      Keine Schüler in Klasse <strong>{{ exam.klassen_key }}</strong>. Bitte zuerst
-      <a href="/students?klasse={{ exam.klassen_key }}">Schüler anlegen oder importieren</a>.
-    </div>
     {% endif %}
   </div>
 
   <!-- ── EXPORT ── -->
   <div id="tab-exp" class="tab-pane" style="padding:1rem 0;display:none">
     <h3 style="margin-top:0">PDF-Export</h3>
-    <p class="muted" style="font-size:12px">PDF wird serverseitig per Playwright/Chromium gerendert — gleiches S/W-Layout wie die Offline-App.</p>
-
     <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.4rem">
-      <a class="btn" href="/exams/{{ exam.id }}/export.zip">
-        📦 Alle als ZIP herunterladen
-      </a>
+      <a class="btn" href="/exams/{{ exam.id }}/export.zip">📦 Alle als ZIP (inkl. Zusammenfassung)</a>
+      <a class="btn btn-sec" href="/exams/{{ exam.id }}/summary.pdf">📊 Nur Zusammenfassung (PDF)</a>
     </div>
 
     {% if students_view %}
-    <h4 style="margin-top:1rem">Einzel-PDF pro Schüler</h4>
+    <h4>Einzel-PDF pro Schüler</h4>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.4rem">
       {% for sv in students_view %}
         <a class="btn btn-sec" style="text-align:left;font-size:12px"
@@ -177,294 +248,243 @@
     {% endif %}
 
     <h3 style="margin-top:2rem">Markdown-Export / -Import</h3>
-    <p class="muted" style="font-size:12px">
-      Vollständige Prüfungs-MD inkl. Bewertungen — für die Offline-App
-      (USB-Stick) oder Pflege in Obsidian. Re-Import schreibt die
-      Bewertungen aus der MD zurück.
-    </p>
+    <p class="muted" style="font-size:12px">Vollständige Prüfungs-MD für Offline-App / Obsidian. Re-Import schreibt Bewertungen zurück.</p>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap">
       <a class="btn" href="/exams/{{ exam.id }}/export.md">⬇ MD herunterladen</a>
       <label class="btn btn-sec" style="cursor:pointer">
-        ⬆ MD hochladen + Bewertungen importieren
+        ⬆ MD hochladen + importieren
         <input id="md-import-file" type="file" accept=".md,text/markdown" style="display:none">
       </label>
       <span id="md-import-status" class="muted" style="align-self:center;font-size:12px"></span>
     </div>
-    <script>
-    document.getElementById('md-import-file').addEventListener('change', async (ev) => {
-      const f = ev.target.files[0];
-      if (!f) return;
-      const status = document.getElementById('md-import-status');
-      status.textContent = 'lese Datei …';
-      const text = await f.text();
-      status.textContent = 'importiere …';
-      try {
-        const r = await fetch('/exams/' + EXAM_ID + '/import.md', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({md: text}),
-        });
-        const d = await r.json();
-        if (d.ok) {
-          status.textContent = '✓ ' + d.imported + ' Bewertung(en) importiert — Seite wird neu geladen …';
-          setTimeout(() => location.reload(), 1200);
-        } else {
-          status.textContent = '✗ Fehler';
-        }
-      } catch (e) {
-        status.textContent = '✗ ' + e.message;
-      }
-    });
-    </script>
   </div>
 </div>
 
 <script>
 const EXAM_ID = {{ exam.id }};
 const INITIAL_FPS = [
-  {% for fpv in feedback_points %}{ id: {{ fpv.fp.id }}, name: {{ fpv.fp.name|tojson }}, max_points: {{ fpv.fp.max_points }}, stages: {{ fpv.stages|tojson }} },
+  {% for fpv in feedback_points %}{ id: {{ fpv.fp.id }}, name: {{ fpv.fp.name|tojson }}, max_points: {{ fpv.fp.max_points }}, scope: {{ fpv.fp.scope|tojson }}, stages: {{ fpv.stages|tojson }} },
   {% endfor %}
 ];
-const SCALE_KEY = {{ exam.grading_scale_key|tojson }};
 
 // ── Tabs ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => {
-      b.classList.remove('active');
-      b.style.borderBottom = '3px solid transparent';
-      b.style.fontWeight = '400'; b.style.color = '#666';
+      b.classList.remove('active'); b.style.borderBottom='3px solid transparent';
+      b.style.fontWeight='400'; b.style.color='#666';
     });
-    document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-    btn.classList.add('active');
-    btn.style.borderBottom = '3px solid #7B61FF';
-    btn.style.fontWeight = '600'; btn.style.color = '';
-    document.getElementById(btn.dataset.target).style.display = '';
+    document.querySelectorAll('.tab-pane').forEach(p => p.style.display='none');
+    btn.classList.add('active'); btn.style.borderBottom='3px solid #7B61FF';
+    btn.style.fontWeight='600'; btn.style.color='';
+    document.getElementById(btn.dataset.target).style.display='';
   });
 });
-// Aktive Tab-Optik initial setzen
 const initBtn = document.querySelector('.tab-btn.active');
-if (initBtn) {
-  initBtn.style.borderBottom = '3px solid #7B61FF';
-  initBtn.style.fontWeight = '600';
+if (initBtn){initBtn.style.borderBottom='3px solid #7B61FF';initBtn.style.fontWeight='600';}
+
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function postJSON(url, payload){
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  return r.json();
 }
 
 // ── Einstellungen-Save ──
 document.getElementById('btn-set-save').addEventListener('click', async () => {
   const status = document.getElementById('set-status');
   status.textContent = 'speichere …';
-  const r = await fetch('/exams/' + EXAM_ID + '/save', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      tab: 'einstellungen',
-      title: document.getElementById('f-title').value,
-      datum: document.getElementById('f-datum').value,
-      klassen_key: document.getElementById('f-klasse').value,
-      grading_scale_key: document.getElementById('f-scale').value,
-      input_mode: document.getElementById('f-mode').value,
-    }),
+  const klassen = Array.from(document.querySelectorAll('.cls-cb:checked')).map(c=>c.value);
+  const d = await postJSON('/exams/'+EXAM_ID+'/save', {
+    tab:'einstellungen',
+    title:document.getElementById('f-title').value,
+    datum:document.getElementById('f-datum').value,
+    grading_scale_key:document.getElementById('f-scale').value,
+    input_mode:document.getElementById('f-mode').value,
+    klassen: klassen,
   });
-  const d = await r.json();
-  status.textContent = d.ok ? '✓ gespeichert (Seite neu laden, um Modus-Wechsel zu sehen)' : '✗ Fehler';
+  status.textContent = d.ok ? '✓ gespeichert — Seite neu laden für aktualisierte Teilnehmer/Modus' : '✗ Fehler';
+});
+
+// ── Teilnehmer-Save ──
+const btnPartSave = document.getElementById('btn-part-save');
+if (btnPartSave) btnPartSave.addEventListener('click', async () => {
+  const status = document.getElementById('part-status');
+  status.textContent = 'speichere …';
+  const members = Array.from(document.querySelectorAll('#tab-part tbody tr')).map(tr => ({
+    student_id: parseInt(tr.dataset.studentId,10),
+    selected: tr.querySelector('.part-cb').checked,
+    group_label: tr.querySelector('.part-group').value.trim(),
+  }));
+  const d = await postJSON('/exams/'+EXAM_ID+'/save', {tab:'teilnehmer', members});
+  status.textContent = d.ok ? '✓ gespeichert — Seite neu laden für Bewertungs-Tabelle' : '✗ Fehler';
 });
 
 // ── Feedbackpunkte-Editor ──
+let fps = INITIAL_FPS.map(f => ({...f, stages: f.stages||[], scope: f.scope||'individual'}));
 const fpsList = document.getElementById('fps-list');
-let fps = INITIAL_FPS.map(f => ({...f, stages: f.stages || []}));
+const showStages = {{ 'true' if exam.input_mode == 'stages' else 'false' }};
 
-function renderFPs() {
-  fpsList.innerHTML = '';
-  const showStages = document.getElementById('f-mode')?.value === 'stages'
-                  || {{ 'true' if exam.input_mode == 'stages' else 'false' }};
+function renderFPs(){
+  fpsList.innerHTML='';
   fps.forEach((fp, idx) => {
-    const div = document.createElement('div');
-    div.style = 'border:1px solid #e0e0e0;border-radius:6px;padding:.8rem;margin-bottom:.6rem;background:#fafafa';
-    div.innerHTML = `
-      <div style="display:grid;grid-template-columns:30px 1fr 100px 30px;gap:.5rem;align-items:end">
+    const div=document.createElement('div');
+    div.style='border:1px solid #e0e0e0;border-radius:6px;padding:.8rem;margin-bottom:.6rem;background:#fafafa';
+    div.innerHTML=`
+      <div style="display:grid;grid-template-columns:28px 1fr 90px 130px 28px;gap:.5rem;align-items:end">
         <div style="font-weight:600;color:#666">${idx+1}.</div>
         <div><label style="font-size:11px">Name</label><input class="fp-name" value="${escapeHtml(fp.name)}"></div>
-        <div><label style="font-size:11px">Max-Punkte</label><input class="fp-max" type="number" step="0.5" min="0" value="${fp.max_points}"></div>
+        <div><label style="font-size:11px">Max</label><input class="fp-max" type="number" step="0.5" min="0" value="${fp.max_points}"></div>
+        <div><label style="font-size:11px">Wertung</label>
+          <select class="fp-scope">
+            <option value="individual"${fp.scope==='individual'?' selected':''}>Einzel</option>
+            <option value="group"${fp.scope==='group'?' selected':''}>Gruppe</option>
+          </select></div>
         <div><button class="btn-sec fp-del" style="padding:5px 8px;color:var(--pink);border-color:var(--pink)">✕</button></div>
       </div>
-      ${showStages ? `
-        <div class="stages-editor" style="margin-top:.6rem;padding-top:.6rem;border-top:1px dashed #ddd">
-          <div style="font-size:11px;color:#666;margin-bottom:.3rem">Stufen für diesen Punkt:</div>
-          <div class="stages-list"></div>
-          <button type="button" class="btn-sec stage-add" style="padding:3px 8px;font-size:11px;margin-top:.3rem">+ Stufe</button>
-        </div>
-      ` : ''}
-    `;
+      ${showStages?`<div style="margin-top:.6rem;padding-top:.6rem;border-top:1px dashed #ddd">
+        <div style="font-size:11px;color:#666;margin-bottom:.3rem">Stufen:</div>
+        <div class="stages-list"></div>
+        <button type="button" class="btn-sec stage-add" style="padding:3px 8px;font-size:11px;margin-top:.3rem">+ Stufe</button></div>`:''}`;
     fpsList.appendChild(div);
-    div.querySelector('.fp-name').addEventListener('input', e => fp.name = e.target.value);
-    div.querySelector('.fp-max').addEventListener('input', e => {
-      fp.max_points = parseFloat(e.target.value) || 0;
-    });
-    div.querySelector('.fp-del').addEventListener('click', () => {
-      if (confirm('Punkt löschen?')) { fps.splice(idx, 1); renderFPs(); }
-    });
-
-    if (showStages) {
-      const stagesList = div.querySelector('.stages-list');
-      function renderStages() {
-        stagesList.innerHTML = '';
-        fp.stages.forEach((st, si) => {
-          const r = document.createElement('div');
-          r.style = 'display:grid;grid-template-columns:1fr 90px 30px;gap:.3rem;margin-bottom:.2rem';
-          r.innerHTML = `
-            <input class="st-label" value="${escapeHtml(st.label)}" placeholder="Label">
+    div.querySelector('.fp-name').addEventListener('input',e=>fp.name=e.target.value);
+    div.querySelector('.fp-max').addEventListener('input',e=>fp.max_points=parseFloat(e.target.value)||0);
+    div.querySelector('.fp-scope').addEventListener('change',e=>fp.scope=e.target.value);
+    div.querySelector('.fp-del').addEventListener('click',()=>{if(confirm('Punkt löschen?')){fps.splice(idx,1);renderFPs();}});
+    if(showStages){
+      const sl=div.querySelector('.stages-list');
+      function rs(){
+        sl.innerHTML='';
+        fp.stages.forEach((st,si)=>{
+          const r=document.createElement('div');
+          r.style='display:grid;grid-template-columns:1fr 90px 28px;gap:.3rem;margin-bottom:.2rem';
+          r.innerHTML=`<input class="st-label" value="${escapeHtml(st.label)}" placeholder="Label">
             <input class="st-pts" type="number" step="0.5" value="${st.points}" placeholder="Pkt">
-            <button class="btn-sec st-del" style="padding:3px 6px;color:var(--pink);border-color:var(--pink);font-size:11px">✕</button>
-          `;
-          stagesList.appendChild(r);
-          r.querySelector('.st-label').addEventListener('input', e => st.label = e.target.value);
-          r.querySelector('.st-pts').addEventListener('input', e => st.points = parseFloat(e.target.value) || 0);
-          r.querySelector('.st-del').addEventListener('click', () => {
-            fp.stages.splice(si, 1); renderStages();
-          });
+            <button class="btn-sec st-del" style="padding:3px 6px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>`;
+          sl.appendChild(r);
+          r.querySelector('.st-label').addEventListener('input',e=>st.label=e.target.value);
+          r.querySelector('.st-pts').addEventListener('input',e=>st.points=parseFloat(e.target.value)||0);
+          r.querySelector('.st-del').addEventListener('click',()=>{fp.stages.splice(si,1);rs();});
         });
       }
-      renderStages();
-      div.querySelector('.stage-add').addEventListener('click', () => {
-        fp.stages.push({label: '', points: 0}); renderStages();
-      });
+      rs();
+      div.querySelector('.stage-add').addEventListener('click',()=>{fp.stages.push({label:'',points:0});rs();});
     }
   });
 }
+document.getElementById('btn-fps-add').addEventListener('click',()=>{fps.push({name:'',max_points:10,scope:'individual',stages:[]});renderFPs();});
 
-document.getElementById('btn-fps-add').addEventListener('click', () => {
-  fps.push({name: '', max_points: 10, stages: []});
-  renderFPs();
-});
-
-// Stufen-Schnellzuweisung
-const PRESETS = {
-  3: [
-    {label: 'ja',         pct: 100},
-    {label: 'teilweise',  pct: 50},
-    {label: 'nein',       pct: 0},
-  ],
-  4: [
-    {label: 'voll erfüllt',   pct: 100},
-    {label: 'überwiegend',    pct: 75},
-    {label: 'teilweise',      pct: 40},
-    {label: 'nicht erfüllt',  pct: 0},
-  ],
-  5: [
-    {label: 'sehr gut',    pct: 100},
-    {label: 'gut',         pct: 80},
-    {label: 'mittel',      pct: 60},
-    {label: 'schwach',     pct: 40},
-    {label: 'sehr schwach',pct: 0},
-  ],
-};
-document.querySelectorAll('[data-stages]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (!confirm('Bestehende Stufen für ' + fps.length + ' Punkt(e) überschreiben?')) return;
-    const preset = PRESETS[parseInt(btn.dataset.stages, 10)];
-    fps.forEach(fp => {
-      fp.stages = preset.map(p => ({
-        label: p.label,
-        points: Math.round(fp.max_points * p.pct) / 100,
-      }));
-    });
+const PRESETS={3:[['ja',100],['teilweise',50],['nein',0]],
+  4:[['voll erfüllt',100],['überwiegend',75],['teilweise',40],['nicht erfüllt',0]],
+  5:[['sehr gut',100],['gut',80],['mittel',60],['schwach',40],['sehr schwach',0]]};
+document.querySelectorAll('[data-stages]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    if(!confirm('Bestehende Stufen für '+fps.length+' Punkt(e) überschreiben?'))return;
+    const p=PRESETS[parseInt(btn.dataset.stages,10)];
+    fps.forEach(fp=>{fp.stages=p.map(([l,pct])=>({label:l,points:Math.round(fp.max_points*pct)/100}));});
     renderFPs();
   });
 });
-
-document.getElementById('btn-fps-save').addEventListener('click', async () => {
-  const status = document.getElementById('fps-status');
-  status.textContent = 'speichere …';
-  const r = await fetch('/exams/' + EXAM_ID + '/save', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      tab: 'feedbackpunkte',
-      feedback_points: fps,
-    }),
-  });
-  const d = await r.json();
-  status.textContent = d.ok ? '✓ gespeichert (Seite neu laden für aktualisierte Bewertungs-Tabelle)' : '✗ Fehler';
+document.getElementById('btn-fps-save').addEventListener('click',async()=>{
+  const status=document.getElementById('fps-status');
+  status.textContent='speichere …';
+  const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'feedbackpunkte',feedback_points:fps});
+  status.textContent=d.ok?'✓ gespeichert — Seite neu laden für Bewertungs-Tabelle':'✗ Fehler';
 });
-
 renderFPs();
 
-// ── Bewertungs-Tab: Auto-Save ──
-function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// ── Aus Vorlage laden ──
+(async () => {
+  const sel = document.getElementById('tmpl-select');
+  try {
+    const r = await fetch('/api/feedback-templates');
+    const d = await r.json();
+    (d.templates||[]).forEach(t => {
+      const o=document.createElement('option'); o.value=t.id; o.textContent=t.name;
+      o._points=t.points; sel.appendChild(o);
+    });
+    document.getElementById('btn-tmpl-load').addEventListener('click', () => {
+      const opt = sel.options[sel.selectedIndex];
+      if (!opt || !opt.value){return;}
+      const pts = opt._points || [];
+      if (!confirm('Feedbackpunkte aus Vorlage übernehmen? Bestehende werden ersetzt.'))return;
+      fps = pts.map(p=>({name:p.name||'',max_points:p.max_points||0,scope:p.scope||'individual',stages:p.stages||[]}));
+      renderFPs();
+      document.getElementById('tmpl-status').textContent='✓ übernommen — noch speichern';
+    });
+  } catch(e){}
+})();
+
+// ── Bewertung Auto-Save ──
+let saveTimer=null;
+function scheduleEvalSave(fn){ if(saveTimer)clearTimeout(saveTimer); saveTimer=setTimeout(fn,700); }
+
+function applyNotes(notes){
+  (notes||[]).forEach(n=>{
+    const row=document.querySelector('#eval-table tbody tr[data-student-id="'+n.student_id+'"]');
+    if(!row)return;
+    row.querySelector('.cell-sum').textContent=n.sum_err;
+    row.querySelector('.cell-pct').textContent=n.pct.toFixed(1)+'%';
+    row.querySelector('.cell-note').textContent=n.note||'';
+  });
 }
 
-let saveTimer = null;
-function scheduleEvalSave(row) {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => doEvalSave(row), 700);
+async function saveIndividual(row){
+  const status=document.getElementById('eval-status');
+  const erreicht={};
+  row.querySelectorAll('.num-input').forEach(i=>{if(i.value!=='')erreicht[i.dataset.fpId]=i.value;});
+  row.querySelectorAll('.stage-btns').forEach(g=>{const a=g.querySelector('.stage-btn.active');if(a)erreicht[g.dataset.fpId]=a.dataset.points;});
+  status.textContent='speichere …';
+  const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'bewertung',student_id:parseInt(row.dataset.studentId,10),erreicht});
+  if(d.ok){applyNotes(d.notes);status.textContent='✓ gespeichert';setTimeout(()=>status.textContent='',1200);}
+  else status.textContent='✗ Fehler';
+}
+async function saveGroup(row){
+  const status=document.getElementById('eval-status');
+  const erreicht={};
+  row.querySelectorAll('.num-input').forEach(i=>{if(i.value!=='')erreicht[i.dataset.fpId]=i.value;});
+  row.querySelectorAll('.stage-btns').forEach(g=>{const a=g.querySelector('.stage-btn.active');if(a)erreicht[g.dataset.fpId]=a.dataset.points;});
+  const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'bewertung',group_label:row.dataset.groupLabel,erreicht});
+  if(d.ok){applyNotes(d.notes);if(status)status.textContent='✓ Gruppe gespeichert';setTimeout(()=>{if(status)status.textContent='';},1200);}
 }
 
-async function doEvalSave(row) {
-  const status = document.getElementById('eval-status');
-  const studentId = row.dataset.studentId;
-  const erreicht = {};
-  row.querySelectorAll('.num-input').forEach(inp => {
-    if (inp.value !== '') erreicht[inp.dataset.fpId] = inp.value;
-  });
-  row.querySelectorAll('.stage-btns').forEach(grp => {
-    const active = grp.querySelector('.stage-btn.active');
-    if (active) erreicht[grp.dataset.fpId] = active.dataset.points;
-  });
-  status.textContent = 'speichere …';
-  const r = await fetch('/exams/' + EXAM_ID + '/save', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({tab: 'bewertung', student_id: studentId, erreicht: erreicht}),
-  });
-  const d = await r.json();
-  if (d.ok) {
-    row.querySelector('.cell-sum').textContent = d.sum_err;
-    row.querySelector('.cell-pct').textContent = d.pct.toFixed(1) + '%';
-    row.querySelector('.cell-note').textContent = d.note || '';
-    status.textContent = '✓ gespeichert';
-    setTimeout(() => status.textContent = '', 1500);
-  } else {
-    status.textContent = '✗ Fehler';
-  }
-}
-
-document.querySelectorAll('#eval-table tbody tr').forEach(row => {
-  row.querySelectorAll('.num-input').forEach(inp => {
-    inp.addEventListener('input', () => {
-      const max = parseFloat(inp.dataset.fpMax);
-      inp.style.background = (parseFloat(inp.value) > max) ? '#ffebee' : '';
-      scheduleEvalSave(row);
+function wireRow(row, saver){
+  row.querySelectorAll('.num-input').forEach(inp=>{
+    inp.addEventListener('input',()=>{
+      const max=parseFloat(inp.dataset.fpMax);
+      inp.style.background=(parseFloat(inp.value)>max)?'#ffebee':'';
+      scheduleEvalSave(()=>saver(row));
     });
   });
-  row.querySelectorAll('.stage-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const grp = btn.closest('.stage-btns');
-      grp.querySelectorAll('.stage-btn').forEach(b => {
-        b.classList.remove('active');
-        b.style.background = '#fff'; b.style.color = '#333';
-      });
-      btn.classList.add('active');
-      btn.style.background = '#7B61FF'; btn.style.color = '#fff';
-      doEvalSave(row);
+  row.querySelectorAll('.stage-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const grp=btn.closest('.stage-btns');
+      grp.querySelectorAll('.stage-btn').forEach(b=>{b.classList.remove('active');b.style.background='#fff';b.style.color='#333';});
+      btn.classList.add('active');btn.style.background='#7B61FF';btn.style.color='#fff';
+      saver(row);
     });
   });
-});
+}
+document.querySelectorAll('#eval-table tbody tr').forEach(r=>wireRow(r,saveIndividual));
+document.querySelectorAll('#group-table tbody tr').forEach(r=>wireRow(r,saveGroup));
 
-// Tastatur-Shortcut im Stufen-Modus: 1–9 wählt N-te Stufe der fokussierten Spalte
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  const n = parseInt(e.key, 10);
-  if (!n || n < 1 || n > 9) return;
-  const focused = document.activeElement;
-  // Wenn nichts fokussiert, ignorieren
+// ── MD-Import ──
+const mdInput=document.getElementById('md-import-file');
+if(mdInput) mdInput.addEventListener('change',async ev=>{
+  const f=ev.target.files[0]; if(!f)return;
+  const status=document.getElementById('md-import-status');
+  status.textContent='importiere …';
+  const text=await f.text();
+  const d=await postJSON('/exams/'+EXAM_ID+'/import.md',{md:text});
+  if(d.ok){status.textContent='✓ '+d.imported+' importiert — neu laden …';setTimeout(()=>location.reload(),1000);}
+  else status.textContent='✗ Fehler';
 });
 </script>
 
 <style>
-  .tab-btn {
-    border:none; background:transparent; padding:.6rem 1rem;
-    font-size:14px; cursor:pointer; border-bottom:3px solid transparent;
-    font-family:inherit; color:#666;
-  }
-  .tab-btn:hover { color:#333; }
-  .tab-btn.active { color:var(--blau); font-weight:600; }
-  .stage-btn:hover { background:#f5f3ff !important; }
+  .tab-btn{border:none;background:transparent;padding:.6rem 1rem;font-size:14px;cursor:pointer;
+           border-bottom:3px solid transparent;font-family:inherit;color:#666;}
+  .tab-btn:hover{color:#333;}
+  .tab-btn.active{color:var(--blau);font-weight:600;}
+  .stage-btn:hover{background:#f5f3ff !important;}
 </style>
 {% endblock %}

@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import (Exam, ExamFeedbackPoint, ExamResult, LearningSituation,
+from app.models import (Exam, ExamFeedbackPoint, ExamGroupResult, ExamResult,
+                        ExamStudent, FeedbackTemplate, LearningSituation,
                         Student, User)
 from app.services import exam_md, grading, obsidian_writer
 from app.services.playwright_pdf import render_pdf
@@ -36,6 +37,58 @@ def _get_exam(db: Session, user: User, ex_id: int) -> Exam:
     return ex
 
 
+def _loadjson(s: str | None) -> dict:
+    try:
+        return json.loads(s) if s else {}
+    except Exception:
+        return {}
+
+
+def _exam_classes(ex: Exam) -> list[str]:
+    return [c.strip() for c in (ex.klassen_key or "").split(",") if c.strip()]
+
+
+def _exam_participants(db: Session, ex: Exam) -> list[tuple[Student, str]]:
+    """Teilnehmer (Member) der Prüfung + group_label, sortiert."""
+    rows = db.execute(
+        select(Student, ExamStudent.group_label)
+        .join(ExamStudent, ExamStudent.student_id == Student.id)
+        .where(ExamStudent.exam_id == ex.id)
+        .order_by(ExamStudent.group_label, Student.nachname, Student.vorname)
+    ).all()
+    return [(s, g or "") for s, g in rows]
+
+
+def _scoring_ctx(db: Session, user: User, ex: Exam):
+    """Vorberechnung für Noten: Feedbackpunkte nach Scope, Summen, Stufen,
+    Ergebnis-Maps."""
+    fps = list(ex.feedback_points)
+    indiv_fps = [fp for fp in fps if fp.scope != "group"]
+    group_fps = [fp for fp in fps if fp.scope == "group"]
+    sum_max = sum(float(fp.max_points or 0) for fp in fps)
+    stufen = grading.resolve_stufen(db, user, ex.grading_scale_key)
+    indiv_results = {r.student_id: _loadjson(r.erreicht_json) for r in ex.results}
+    group_results = {gr.group_label or "": _loadjson(gr.erreicht_json)
+                     for gr in ex.group_results}
+    return {
+        "fps": fps, "indiv_fps": indiv_fps, "group_fps": group_fps,
+        "sum_max": sum_max, "stufen": stufen,
+        "indiv_results": indiv_results, "group_results": group_results,
+    }
+
+
+def _student_total(ctx: dict, student_id: int, group_label: str):
+    """(sum_err, pct, note) für einen Schüler (Einzel- + Gruppenpunkte)."""
+    er = ctx["indiv_results"].get(student_id, {})
+    total = sum(float(er.get(str(fp.id), 0) or 0) for fp in ctx["indiv_fps"])
+    ger = ctx["group_results"].get(group_label or "", {})
+    total += sum(float(ger.get(str(fp.id), 0) or 0) for fp in ctx["group_fps"])
+    sum_max = ctx["sum_max"]
+    pct = (total / sum_max * 100.0) if sum_max > 0 else 0.0
+    note = grading.grade_from_stufen(ctx["stufen"], pct) if sum_max > 0 else ""
+    return total, pct, note
+
+
 @router.get("/exams", response_class=HTMLResponse)
 def exams_list(
     request: Request,
@@ -53,11 +106,8 @@ def exams_list(
             select(ExamResult.id).where(ExamResult.exam_id == e.id).limit(1)
         )
         n_students = db.scalar(
-            select(Student.id)
-            .where(Student.owner_user_id == user.id,
-                   Student.klassen_key == e.klassen_key,
-                   Student.active.is_(True))
-            .limit(1)
+            select(ExamStudent.student_id)
+            .where(ExamStudent.exam_id == e.id).limit(1)
         )
         summary.append({"exam": e, "has_results": bool(n_results),
                         "has_students": bool(n_students)})
@@ -166,10 +216,31 @@ def exams_new_form(
         "ls_options": ls_options,
         "klassen": klassen,
         "today": date.today().isoformat(),
-        "scales": grading.list_scales(),
+        "scales": grading.list_scales_for(db, user),
         "default_scale": grading.DEFAULT_SCALE,
         "prefill_ls": prefill_ls,
     })
+
+
+def _add_class_members(db: Session, user: User, ex: Exam, klassen: list[str]) -> None:
+    """Fügt alle aktiven Schüler der genannten Klassen als Teilnehmer hinzu
+    (preselected), sofern noch nicht Mitglied."""
+    existing = {row[0] for row in db.execute(
+        select(ExamStudent.student_id).where(ExamStudent.exam_id == ex.id)
+    ).all()}
+    for kk in klassen:
+        if not kk:
+            continue
+        for s in db.scalars(
+            select(Student).where(
+                Student.owner_user_id == user.id,
+                Student.klassen_key == kk,
+                Student.active.is_(True),
+            )
+        ).all():
+            if s.id not in existing:
+                db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+                existing.add(s.id)
 
 
 @router.post("/exams")
@@ -179,16 +250,19 @@ def exams_create(
     db: Annotated[Session, Depends(get_db)],
     title: str = Form(...),
     datum: str = Form(""),
-    klassen_key: str = Form(""),
+    klassen: list[str] = Form(default=[]),
     learning_situation_id: str = Form(""),
-    grading_scale_key: str = Form("mss_noten"),
+    grading_scale_key: str = Form("builtin:mss_noten"),
     input_mode: str = Form("numeric"),
 ):
     title = title.strip()[:200] or "Neue Prüfung"
     if input_mode not in ("numeric", "stages"):
         input_mode = "numeric"
-    if not grading.is_known_scale(grading_scale_key):
+    # Skala: builtin akzeptieren oder custom:<id> des Nutzers
+    if not _valid_scale_ref(db, user, grading_scale_key):
         grading_scale_key = grading.DEFAULT_SCALE
+
+    klassen_clean = [k.strip() for k in klassen if k.strip()]
 
     ls_id: int | None = None
     if learning_situation_id.strip():
@@ -197,8 +271,8 @@ def exams_create(
             ls = db.get(LearningSituation, cand)
             if ls and ls.user_id == user.id:
                 ls_id = cand
-                if not klassen_key.strip():
-                    klassen_key = ls.klassen_key
+                if not klassen_clean and ls.klassen_key:
+                    klassen_clean = [ls.klassen_key]
         except ValueError:
             pass
 
@@ -206,17 +280,32 @@ def exams_create(
         owner_user_id=user.id,
         title=title,
         datum=datum.strip()[:10],
-        klassen_key=klassen_key.strip()[:255],
+        klassen_key=", ".join(klassen_clean)[:255],
         learning_situation_id=ls_id,
         grading_scale_key=grading_scale_key,
         input_mode=input_mode,
     )
     db.add(ex)
     db.flush()
+    # Alle Schüler der gewählten Klassen als Teilnehmer vorauswählen
+    _add_class_members(db, user, ex, klassen_clean)
     audit(db, "exam_created", actor=user, target=str(ex.id),
-          detail=f"{title} / {klassen_key}", request=request)
+          detail=f"{title} / {ex.klassen_key}", request=request)
     db.commit()
     return RedirectResponse(f"/exams/{ex.id}", status_code=303)
+
+
+def _valid_scale_ref(db: Session, user: User, ref: str) -> bool:
+    if grading.is_known_scale(ref):
+        return True
+    if ref and ref.startswith("custom:"):
+        try:
+            from app.models import GradingScale
+            gs = db.get(GradingScale, int(ref.split(":", 1)[1]))
+            return bool(gs and gs.owner_user_id == user.id)
+        except Exception:
+            return False
+    return False
 
 
 @router.get("/exams/{ex_id}", response_class=HTMLResponse)
@@ -227,56 +316,77 @@ def exams_detail(
     db: Annotated[Session, Depends(get_db)],
 ):
     ex = _get_exam(db, user, ex_id)
-    fps = list(ex.feedback_points)
-    students = db.scalars(
-        select(Student).where(
-            Student.owner_user_id == user.id,
-            Student.klassen_key == ex.klassen_key,
-            Student.active.is_(True),
-        ).order_by(Student.nachname, Student.vorname)
-    ).all()
-    results = {r.student_id: r for r in ex.results}
     ls = db.get(LearningSituation, ex.learning_situation_id) if ex.learning_situation_id else None
+    ctx = _scoring_ctx(db, user, ex)
+    participants = _exam_participants(db, ex)
 
-    # Bewertungen aufbereiten + Live-Note berechnen
+    # Teilnehmer-Tab: alle Schüler der beteiligten Klassen + Member-Status
+    exam_classes = _exam_classes(ex)
+    member_ids = {s.id for s, _ in participants}
+    member_group = {s.id: g for s, g in participants}
+    all_klassen = [
+        row[0] for row in db.execute(
+            select(Student.klassen_key).where(Student.owner_user_id == user.id).distinct()
+        ).all()
+    ]
+    roster = []  # Schüler der beteiligten Klassen (für Checkboxen)
+    if exam_classes:
+        for s in db.scalars(
+            select(Student).where(
+                Student.owner_user_id == user.id,
+                Student.klassen_key.in_(exam_classes),
+                Student.active.is_(True),
+            ).order_by(Student.klassen_key, Student.nachname, Student.vorname)
+        ).all():
+            roster.append({
+                "student": s,
+                "member": s.id in member_ids,
+                "group_label": member_group.get(s.id, ""),
+            })
+
+    # Bewertungs-Tab: Teilnehmer mit Live-Note
     student_views = []
-    sum_max = sum(fp.max_points for fp in fps)
-    for s in students:
-        r = results.get(s.id)
-        erreicht = json.loads(r.erreicht_json) if r and r.erreicht_json else {}
-        sum_err = sum(float(erreicht.get(str(fp.id), 0) or 0) for fp in fps)
-        pct = (sum_err / sum_max * 100.0) if sum_max > 0 else 0.0
-        note = grading.grade_for_percent(ex.grading_scale_key, pct) if sum_max > 0 else ""
+    for s, g in participants:
+        er = ctx["indiv_results"].get(s.id, {})
+        total, pct, note = _student_total(ctx, s.id, g)
         student_views.append({
-            "student": s,
-            "erreicht": erreicht,
-            "sum_err": sum_err,
-            "pct": pct,
-            "note": note,
-            "comment": r.comment if r else "",
+            "student": s, "group_label": g,
+            "erreicht": er, "sum_err": total, "pct": pct, "note": note,
         })
 
-    # Stages aufbereiten
-    fp_views = []
-    for fp in fps:
-        stages = []
-        if fp.stages_json:
-            try:
-                stages = json.loads(fp.stages_json)
-            except Exception:
-                stages = []
-        fp_views.append({
-            "fp": fp,
-            "stages": stages,
+    # Gruppen + deren Gruppen-Bewertungen
+    groups = sorted({g for _, g in participants if g})
+    group_views = []
+    for g in groups:
+        group_views.append({
+            "label": g,
+            "erreicht": ctx["group_results"].get(g, {}),
+            "members": [s.nachname for s, gg in participants if gg == g],
         })
+
+    # Feedbackpunkte mit Stages + Scope
+    fp_views = []
+    fp_stages: dict[int, list] = {}
+    for fp in ctx["fps"]:
+        stages = _loadjson(fp.stages_json) if fp.stages_json else []
+        fp_views.append({"fp": fp, "stages": stages})
+        fp_stages[fp.id] = stages
 
     return templates.TemplateResponse(request, "exams/detail.html", {
         "exam": ex,
         "ls": ls,
         "feedback_points": fp_views,
+        "fp_stages": fp_stages,
+        "indiv_fps": ctx["indiv_fps"],
+        "group_fps": ctx["group_fps"],
         "students_view": student_views,
-        "sum_max": sum_max,
-        "scales": grading.list_scales(),
+        "group_views": group_views,
+        "groups": groups,
+        "roster": roster,
+        "all_klassen": all_klassen,
+        "exam_classes": exam_classes,
+        "sum_max": ctx["sum_max"],
+        "scales": grading.list_scales_for(db, user),
     })
 
 
@@ -289,19 +399,29 @@ def exams_save(
     body: dict = Body(...),
 ):
     """JSON-Endpoint für Auto-Save aus den Tabs.
-    body.tab = 'einstellungen' | 'feedbackpunkte' | 'bewertung'."""
+    body.tab = 'einstellungen' | 'teilnehmer' | 'feedbackpunkte' | 'bewertung'."""
     ex = _get_exam(db, user, ex_id)
     tab = body.get("tab") or ""
 
     if tab == "einstellungen":
         ex.title = (body.get("title") or "").strip()[:200] or ex.title
         ex.datum = (body.get("datum") or "").strip()[:10]
-        ex.klassen_key = (body.get("klassen_key") or "").strip()[:255]
         scale = body.get("grading_scale_key") or ""
-        ex.grading_scale_key = scale if grading.is_known_scale(scale) else ex.grading_scale_key
+        if _valid_scale_ref(db, user, scale):
+            ex.grading_scale_key = scale
         mode = body.get("input_mode") or ""
         if mode in ("numeric", "stages"):
             ex.input_mode = mode
+        # Klassen-Mehrfachauswahl
+        klassen = body.get("klassen")
+        if isinstance(klassen, list):
+            old_classes = set(_exam_classes(ex))
+            new_clean = [k.strip() for k in klassen if k.strip()]
+            ex.klassen_key = ", ".join(new_clean)[:255]
+            # Neu hinzugekommene Klassen: Schüler vorauswählen
+            added = [k for k in new_clean if k not in old_classes]
+            if added:
+                _add_class_members(db, user, ex, added)
         ls_raw = body.get("learning_situation_id")
         if ls_raw in (None, "", 0):
             ex.learning_situation_id = None
@@ -314,12 +434,42 @@ def exams_save(
             except Exception:
                 pass
 
+    elif tab == "teilnehmer":
+        # body.members = [{student_id, selected, group_label}, …]
+        members = body.get("members") or []
+        if not isinstance(members, list):
+            raise HTTPException(400, "members muss Liste sein")
+        # owner-Schüler-IDs für Sicherheit
+        valid_ids = {row[0] for row in db.execute(
+            select(Student.id).where(Student.owner_user_id == user.id)
+        ).all()}
+        existing = {es.student_id: es for es in db.scalars(
+            select(ExamStudent).where(ExamStudent.exam_id == ex.id)
+        ).all()}
+        seen = set()
+        for m in members:
+            try:
+                sid = int(m.get("student_id"))
+            except (TypeError, ValueError):
+                continue
+            if sid not in valid_ids:
+                continue
+            selected = bool(m.get("selected"))
+            group_label = (m.get("group_label") or "").strip()[:40]
+            if not selected:
+                if sid in existing:
+                    db.delete(existing[sid])
+                continue
+            seen.add(sid)
+            if sid in existing:
+                existing[sid].group_label = group_label
+            else:
+                db.add(ExamStudent(exam_id=ex.id, student_id=sid, group_label=group_label))
+
     elif tab == "feedbackpunkte":
         fps_in = body.get("feedback_points") or []
         if not isinstance(fps_in, list):
             raise HTTPException(400, "feedback_points muss Liste sein")
-        # Komplett ersetzen — IDs neu vergeben. Bewertungen werden bei
-        # ID-Wechsel ungültig — wir mappen daher bestehende per Position.
         old_fps = list(ex.feedback_points)
         for ofp in old_fps:
             db.delete(ofp)
@@ -327,77 +477,85 @@ def exams_save(
         new_fps: list[ExamFeedbackPoint] = []
         for i, item in enumerate(fps_in):
             stages = item.get("stages") or []
+            scope = item.get("scope") if item.get("scope") in ("individual", "group") else "individual"
             fp = ExamFeedbackPoint(
                 exam_id=ex.id,
                 position=i,
                 name=(item.get("name") or "").strip()[:200],
                 max_points=float(item.get("max_points") or 0),
+                scope=scope,
                 stages_json=json.dumps(stages, ensure_ascii=False) if stages else "",
             )
             db.add(fp)
             new_fps.append(fp)
         db.flush()
-        # Bewertungen: alte erreicht_json-Keys (alte IDs) auf neue IDs nach Position mappen
+        # Bestehende Bewertungen per Position auf neue IDs mappen (Einzel + Gruppe)
         new_id_by_pos = [fp.id for fp in new_fps]
         old_id_by_pos = [fp.id for fp in old_fps]
         if new_id_by_pos and old_id_by_pos:
             id_map = {str(old_id_by_pos[i]): str(new_id_by_pos[i])
                       for i in range(min(len(old_id_by_pos), len(new_id_by_pos)))}
-            for r in ex.results:
-                try:
-                    erreicht = json.loads(r.erreicht_json) if r.erreicht_json else {}
-                except Exception:
-                    erreicht = {}
-                mapped = {}
-                for k, v in erreicht.items():
-                    new_k = id_map.get(str(k))
-                    if new_k is not None:
-                        mapped[new_k] = v
+            for r in list(ex.results) + list(ex.group_results):
+                erreicht = _loadjson(r.erreicht_json)
+                mapped = {id_map[k]: v for k, v in erreicht.items() if k in id_map}
                 r.erreicht_json = json.dumps(mapped, ensure_ascii=False)
 
     elif tab == "bewertung":
-        student_id = body.get("student_id")
         erreicht = body.get("erreicht") or {}
-        comment = body.get("comment") or ""
         if not isinstance(erreicht, dict):
             raise HTTPException(400, "erreicht muss Dict sein")
-        if not student_id:
-            raise HTTPException(400, "student_id fehlt")
-        s = db.get(Student, int(student_id))
-        if not s or s.owner_user_id != user.id:
-            raise HTTPException(404, "Schüler nicht gefunden")
-        r = db.query(ExamResult).filter(
-            ExamResult.exam_id == ex.id,
-            ExamResult.student_id == s.id,
-        ).first()
-        if not r:
-            r = ExamResult(exam_id=ex.id, student_id=s.id)
-            db.add(r)
-        # Werte als Float casten, leere Strings → 0
         cleaned: dict[str, float] = {}
         for k, v in erreicht.items():
             try:
                 cleaned[str(k)] = float(v) if v != "" else 0.0
             except (TypeError, ValueError):
                 continue
-        r.erreicht_json = json.dumps(cleaned, ensure_ascii=False)
-        r.comment = (comment or "")[:2000]
 
+        group_label = body.get("group_label")
+        if group_label is not None:
+            # Gruppen-Bewertung
+            gl = (group_label or "").strip()[:40]
+            gr = db.query(ExamGroupResult).filter(
+                ExamGroupResult.exam_id == ex.id,
+                ExamGroupResult.group_label == gl,
+            ).first()
+            if not gr:
+                gr = ExamGroupResult(exam_id=ex.id, group_label=gl)
+                db.add(gr)
+            gr.erreicht_json = json.dumps(cleaned, ensure_ascii=False)
+        else:
+            # Einzel-Bewertung
+            student_id = body.get("student_id")
+            if not student_id:
+                raise HTTPException(400, "student_id oder group_label fehlt")
+            s = db.get(Student, int(student_id))
+            if not s or s.owner_user_id != user.id:
+                raise HTTPException(404, "Schüler nicht gefunden")
+            r = db.query(ExamResult).filter(
+                ExamResult.exam_id == ex.id,
+                ExamResult.student_id == s.id,
+            ).first()
+            if not r:
+                r = ExamResult(exam_id=ex.id, student_id=s.id)
+                db.add(r)
+            r.erreicht_json = json.dumps(cleaned, ensure_ascii=False)
+            r.comment = (body.get("comment") or "")[:2000]
     else:
         raise HTTPException(400, f"Unbekannter Tab: {tab}")
 
     db.commit()
 
-    # Live-Note nach Speichern für Bewertungs-Tab zurückgeben
+    # Nach Bewertungs-Save: aktualisierte Live-Noten zurückgeben
     out: dict = {"ok": True}
     if tab == "bewertung":
-        sum_max = sum(fp.max_points for fp in ex.feedback_points)
-        sum_err = sum(float(cleaned.get(str(fp.id), 0) or 0) for fp in ex.feedback_points)
-        pct = (sum_err / sum_max * 100.0) if sum_max > 0 else 0.0
-        out["note"] = grading.grade_for_percent(ex.grading_scale_key, pct) if sum_max > 0 else ""
-        out["pct"] = round(pct, 1)
-        out["sum_err"] = sum_err
-        out["sum_max"] = sum_max
+        ctx = _scoring_ctx(db, user, ex)
+        notes = []
+        for s, g in _exam_participants(db, ex):
+            total, pct, note = _student_total(ctx, s.id, g)
+            notes.append({"student_id": s.id, "sum_err": total,
+                          "pct": round(pct, 1), "note": note})
+        out["notes"] = notes
+        out["sum_max"] = ctx["sum_max"]
     return JSONResponse(out)
 
 
@@ -410,61 +568,106 @@ def _format_number(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
+def _datum_pretty(datum: str) -> str:
+    if not datum:
+        return ""
+    try:
+        return datetime.fromisoformat(datum).strftime("%d.%m.%Y")
+    except Exception:
+        return datum
+
+
 def _build_student_pdf_html(
-    request: Request, db: Session, user: User, ex: Exam, student: Student,
+    request: Request, db: Session, user: User, ex: Exam,
+    student: Student, group_label: str, ctx: dict,
 ) -> str:
-    """Rendert das HTML für ein Schüler-PDF."""
-    fps = list(ex.feedback_points)
-    result = db.query(ExamResult).filter(
-        ExamResult.exam_id == ex.id,
-        ExamResult.student_id == student.id,
-    ).first()
-    erreicht = json.loads(result.erreicht_json) if result and result.erreicht_json else {}
-    comment = (result.comment if result else "") or ""
+    """Rendert das HTML für ein Schüler-PDF (Einzel- + Gruppenpunkte)."""
+    er = ctx["indiv_results"].get(student.id, {})
+    ger = ctx["group_results"].get(group_label or "", {})
 
     rows = []
-    sum_err = 0.0
-    sum_max = 0.0
-    for fp in fps:
-        val = erreicht.get(str(fp.id), 0)
+    for fp in ctx["fps"]:
+        if fp.scope == "group":
+            val = ger.get(str(fp.id), 0)
+        else:
+            val = er.get(str(fp.id), 0)
         try:
             val_f = float(val) if val != "" else 0.0
         except (TypeError, ValueError):
             val_f = 0.0
-        sum_err += val_f
-        sum_max += float(fp.max_points or 0)
         rows.append({
             "name": fp.name,
+            "scope": fp.scope,
             "max_str": _format_number(fp.max_points),
             "erreicht_str": _format_number(val_f),
         })
 
-    pct = (sum_err / sum_max * 100.0) if sum_max > 0 else 0.0
-    note = grading.grade_for_percent(ex.grading_scale_key, pct) if sum_max > 0 else ""
-
-    # Datum hübsch
-    datum_pretty = ""
-    if ex.datum:
-        try:
-            datum_pretty = datetime.fromisoformat(ex.datum).strftime("%d.%m.%Y")
-        except Exception:
-            datum_pretty = ex.datum
+    total, pct, note = _student_total(ctx, student.id, group_label)
+    comment = ""
+    r = ctx["indiv_results"].get(student.id)  # nicht das Result-Objekt; Kommentar separat holen
+    res_obj = next((x for x in ex.results if x.student_id == student.id), None)
+    if res_obj:
+        comment = res_obj.comment or ""
 
     return templates.get_template("exams/student_pdf.html").render({
         "request": request,
         "exam": ex,
         "student": student,
+        "group_label": group_label,
         "rows": rows,
-        "sum_err_str": _format_number(sum_err),
-        "sum_max_str": _format_number(sum_max),
+        "sum_err_str": _format_number(total),
+        "sum_max_str": _format_number(ctx["sum_max"]),
         "pct_str": _format_number(round(pct, 1)),
         "note": note,
-        "datum_pretty": datum_pretty,
+        "datum_pretty": _datum_pretty(ex.datum),
         "lehrer_name": user.full_name or user.username,
         "klassen_key": ex.klassen_key,
         "school_logo_data_url": branding.logo_data_url(db),
+        "school_name_value": branding.get_school_name(db),
         "signature_data_url": "",  # später aus User-Setting
         "comment": comment,
+    })
+
+
+def _build_summary_pdf_html(
+    request: Request, db: Session, user: User, ex: Exam, ctx: dict,
+) -> str:
+    """Lehrer-Zusammenfassung: Notenverteilung + Namensliste mit Endnote."""
+    participants = _exam_participants(db, ex)
+    rows = []
+    verteilung: dict[str, int] = {}
+    for s, g in participants:
+        total, pct, note = _student_total(ctx, s.id, g)
+        rows.append({
+            "nachname": s.nachname, "vorname": s.vorname,
+            "klasse": s.klassen_key, "gruppe": g,
+            "pct_str": _format_number(round(pct, 1)),
+            "note": note,
+        })
+        if note:
+            verteilung[note] = verteilung.get(note, 0) + 1
+    rows.sort(key=lambda r: (r["nachname"].lower(), r["vorname"].lower()))
+    # Verteilung in Skalen-Reihenfolge
+    verteilung_ordered = [
+        {"note": lbl, "count": verteilung.get(lbl, 0)}
+        for lbl, _, _ in ctx["stufen"] if verteilung.get(lbl, 0) > 0
+    ]
+    schnitt = ""
+    pcts = [float(r["pct_str"].replace(",", ".")) for r in rows if r["note"]]
+    if pcts:
+        schnitt = _format_number(round(sum(pcts) / len(pcts), 1))
+
+    return templates.get_template("exams/summary_pdf.html").render({
+        "request": request,
+        "exam": ex,
+        "rows": rows,
+        "verteilung": verteilung_ordered,
+        "datum_pretty": _datum_pretty(ex.datum),
+        "lehrer_name": user.full_name or user.username,
+        "schnitt_pct": schnitt,
+        "n": len(rows),
+        "school_logo_data_url": branding.logo_data_url(db),
+        "school_name_value": branding.get_school_name(db),
     })
 
 
@@ -480,8 +683,11 @@ async def exams_export_pdf_single(
     student = db.get(Student, student_id)
     if not student or student.owner_user_id != user.id:
         raise HTTPException(404, "Schüler nicht gefunden")
+    es = db.get(ExamStudent, {"exam_id": ex.id, "student_id": student.id})
+    group_label = es.group_label if es else ""
 
-    html = _build_student_pdf_html(request, db, user, ex, student)
+    ctx = _scoring_ctx(db, user, ex)
+    html = _build_student_pdf_html(request, db, user, ex, student, group_label, ctx)
     pdf_bytes = await render_pdf(html)
 
     audit(db, "exam_pdf_single", actor=user, target=str(ex_id),
@@ -505,36 +711,37 @@ async def exams_export_zip(
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    """ZIP mit einem PDF pro Schüler dieser Klasse."""
+    """ZIP mit einem PDF pro Teilnehmer + Lehrer-Zusammenfassung."""
     ex = _get_exam(db, user, ex_id)
-    students = db.scalars(
-        select(Student).where(
-            Student.owner_user_id == user.id,
-            Student.klassen_key == ex.klassen_key,
-            Student.active.is_(True),
-        ).order_by(Student.nachname, Student.vorname)
-    ).all()
-    if not students:
-        raise HTTPException(400, "Keine Schüler in dieser Klasse")
+    participants = _exam_participants(db, ex)
+    if not participants:
+        raise HTTPException(400, "Keine Teilnehmer in dieser Prüfung")
 
-    # ZIP im RAM bauen — pro Schüler ein PDF
+    ctx = _scoring_ctx(db, user, ex)
+
+    # ZIP im RAM bauen — pro Teilnehmer ein PDF + Zusammenfassung
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for s in students:
+        for s, g in participants:
             try:
-                html = _build_student_pdf_html(request, db, user, ex, s)
+                html = _build_student_pdf_html(request, db, user, ex, s, g, ctx)
                 pdf_bytes = await render_pdf(html)
             except Exception as e:
-                # Einen fehlerhaften Datensatz nicht den ganzen ZIP-Bau abbrechen lassen
                 err_text = f"Fehler beim Rendern für {s.nachname}, {s.vorname}: {e}"
                 zf.writestr(f"_FEHLER_{slugify(s.nachname)}.txt", err_text)
                 continue
             filename = f"{slugify(s.nachname)}_{slugify(s.vorname)}.pdf"
             zf.writestr(filename, pdf_bytes)
+        # Lehrer-Zusammenfassung
+        try:
+            summary_html = _build_summary_pdf_html(request, db, user, ex, ctx)
+            zf.writestr("_Zusammenfassung.pdf", await render_pdf(summary_html))
+        except Exception as e:
+            zf.writestr("_Zusammenfassung_FEHLER.txt", str(e))
     buf.seek(0)
 
     audit(db, "exam_pdf_zip", actor=user, target=str(ex_id),
-          detail=f"{len(students)} Schüler", request=request)
+          detail=f"{len(participants)} Teilnehmer", request=request)
     db.commit()
 
     zip_name = f"{slugify(ex.title)}_{ex.datum or 'ohne_datum'}.zip"
@@ -547,6 +754,25 @@ async def exams_export_zip(
     )
 
 
+@router.get("/exams/{ex_id}/summary.pdf")
+async def exams_summary_pdf(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Nur die Lehrer-Zusammenfassung als PDF."""
+    ex = _get_exam(db, user, ex_id)
+    ctx = _scoring_ctx(db, user, ex)
+    html = _build_summary_pdf_html(request, db, user, ex, ctx)
+    pdf_bytes = await render_pdf(html)
+    filename = f"{slugify(ex.title)}_Zusammenfassung.pdf"
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
+    )
+
+
 @router.get("/exams/{ex_id}/export.md")
 def exams_export_md(
     request: Request,
@@ -556,12 +782,7 @@ def exams_export_md(
 ):
     """Komplette Prüfungs-MD inkl. Bewertungen (für Offline-App / Obsidian)."""
     ex = _get_exam(db, user, ex_id)
-    students = db.scalars(
-        select(Student).where(
-            Student.owner_user_id == user.id,
-            Student.klassen_key == ex.klassen_key,
-        ).order_by(Student.nachname, Student.vorname)
-    ).all()
+    students = [s for s, _ in _exam_participants(db, ex)]
     results_by_sid = {r.student_id: r for r in ex.results}
     md = exam_md.build_from_exam(ex, students, results_by_sid)
     filename = f"{slugify(ex.title)}_{ex.datum or 'export'}.md"
@@ -597,29 +818,35 @@ async def exams_import_md(
         fp.name.strip().lower(): fp.id for fp in ex.feedback_points
     }
 
-    # Schüler-Sync: existierende mappen, neue anlegen
+    # Schüler-Sync: existierende mappen (alle eigenen), neue anlegen
     existing_by_name: dict[tuple[str, str], Student] = {}
     for s in db.scalars(
-        select(Student).where(
-            Student.owner_user_id == user.id,
-            Student.klassen_key == ex.klassen_key,
-        )
+        select(Student).where(Student.owner_user_id == user.id)
     ).all():
         existing_by_name[(s.nachname.lower(), s.vorname.lower())] = s
+    first_class = (_exam_classes(ex) or [""])[0]
+    member_ids = {row[0] for row in db.execute(
+        select(ExamStudent.student_id).where(ExamStudent.exam_id == ex.id)
+    ).all()}
     for sd in parsed.students:
         key = (sd["nachname"].lower(), sd["vorname"].lower())
-        if key not in existing_by_name:
-            ns = Student(
+        s = existing_by_name.get(key)
+        if s is None:
+            s = Student(
                 owner_user_id=user.id,
-                klassen_key=ex.klassen_key,
+                klassen_key=first_class,
                 nachname=sd["nachname"][:120],
                 vorname=sd["vorname"][:120],
                 email=sd.get("email", "")[:255],
                 moodle_id=sd.get("moodle_id", "")[:64],
             )
-            db.add(ns)
+            db.add(s)
             db.flush()
-            existing_by_name[key] = ns
+            existing_by_name[key] = s
+        # Als Teilnehmer aufnehmen, falls noch nicht Mitglied
+        if s.id not in member_ids:
+            db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+            member_ids.add(s.id)
 
     # Bewertungen schreiben
     imported = 0

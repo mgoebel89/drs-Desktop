@@ -16,16 +16,30 @@
       <label>Datum</label>
       <input name="datum" type="date" value="{{ today }}">
     </div>
-    <div>
-      <label>Klasse</label>
-      <input name="klassen_key" list="klassen-list"
-             value="{% if prefill_ls %}{{ prefill_ls.klassen_key }}{% endif %}"
-             placeholder="MTA22">
-      <datalist id="klassen-list">
-        {% for k in klassen %}<option value="{{ k }}">{% endfor %}
-      </datalist>
+    <div style="grid-column:1/3">
+      <label>Klasse(n) — Mehrfachauswahl</label>
+      {% if klassen %}
+      <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.3rem">
+        {% for k in klassen %}
+        <label style="font-weight:normal;display:flex;align-items:center;gap:.35rem;
+                      padding:.3rem .6rem;border:1px solid #ddd;border-radius:6px;cursor:pointer">
+          <input type="checkbox" name="klassen" value="{{ k }}"
+                 {% if prefill_ls and k == prefill_ls.klassen_key %}checked{% endif %}>
+          {{ k }}
+        </label>
+        {% endfor %}
+      </div>
+      <p class="muted" style="font-size:11px;margin-top:.3rem">
+        Alle Schüler der gewählten Klassen werden als Teilnehmer vorausgewählt
+        (im nächsten Schritt einzeln abwählbar).
+      </p>
+      {% else %}
+      <p class="muted" style="margin-top:.3rem">
+        Noch keine Klassen mit Schülern. Erst <a href="/students">Schüler anlegen</a>.
+      </p>
+      {% endif %}
     </div>
-    <div>
+    <div style="grid-column:1/3">
       <label>Verknüpfte Lernsituation (optional)</label>
       <select name="learning_situation_id">
         <option value="">— keine —</option>

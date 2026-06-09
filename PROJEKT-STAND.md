@@ -44,11 +44,12 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 | **PDF-Export Bewertung** | ✓ | Pro Schüler ein S/W-PDF (Playwright), ZIP aller PDFs einer Klasse |
 | **Prüfungs-MD Export+Import** | ✓ | Brücke zur Offline-App / Obsidian. Bewertungen als Markdown-Tabelle, Stufen als Labels oder Zahlen |
 | **Stundenplan ↔ Prüfungen** | ✓ | Block-Panel zeigt Klassen-Prüfungen; Schnellaktion „Neue Prüfung" |
+| **Bewertung v2** | ✓ | Klassenübergreifende Teilnehmer-Auswahl (Checkbox), Gruppenarbeit (Gruppen- + Einzel-Blöcke, Scope je Feedbackpunkt), verwaltete Notenschlüssel (Burger-Menü), Feedback-Vorlagen, PDF im Aufgabenblatt-Layout, ZIP + Lehrer-Zusammenfassung. Migration 0013 |
 | **SMB-Material-Share** | ✓ | OMV-Share pro Nutzer, smbprotocol-Client, Upload + Vorschau |
 | **OnlyOffice Office-Vorschau** | ✓ | Separater LXC CT 501, JWT-gesichert, Iframe-Editor (View-Mode) |
 | **Obsidian-Vault-Schreiber** | ✓ | Pro LS eine .md im Vault, YAML-Frontmatter, App-Read-Only-Anzeige (KaTeX + Mermaid) |
 
-### Datenmodell (SQLite, Stand Migration 0012)
+### Datenmodell (SQLite, Stand Migration 0013)
 
 - `users` — jetzt zusätzlich `smb_creds_enc` (AES-GCM)
 - `user_sessions`, `audit_log`
@@ -65,6 +66,12 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 - **`exams`** — pro Prüfung. Felder: `title, datum, klassen_key, learning_situation_id (FK SET NULL), lesson_note_id (FK SET NULL), grading_scale_key ('mss_noten'|'mss_punkte'), input_mode ('numeric'|'stages')`.
 - **`exam_feedback_points`** — pro Prüfung mehrere. `name, max_points, position, stages_json` (JSON-Liste `[{label, points}]` für Stufen-Modus).
 - **`exam_results`** — pro `(exam_id, student_id)` eine Zeile. `erreicht_json` als JSON-Blob `{feedback_point_id: erreicht_pkt}`, `comment` freitext.
+- **`exam_students`** (v2) — Teilnehmer-Membership pro Prüfung (klassenübergreifend) + `group_label` für Gruppenarbeit. PK `(exam_id, student_id)`.
+- **`exam_group_results`** (v2) — Gruppen-Bewertung für `scope='group'`-Feedbackpunkte, unique `(exam_id, group_label)`.
+- **`exam_feedback_points`** — jetzt zusätzlich `scope` ('individual'|'group').
+- **`grading_scales`** (v2) — benutzerdefinierte Notenskalen (`scale_type` mss_noten/mss_punkte, `payload_json`-Stufen). `exams.grading_scale_key` referenziert `builtin:<key>` oder `custom:<id>`.
+- **`feedback_templates`** (v2) — wiederverwendbare Feedbackpunkt-Sets (`payload_json`).
+- Hinweis: `exams.klassen_key` ist seit v2 eine **Anzeige-Liste** (komma-getrennt); Teilnehmer-Wahrheit ist `exam_students`. MSS-Noten-Built-in korrigiert: 1+ entfällt, Top-Note 1.
 
 ---
 
