@@ -13,8 +13,17 @@
     <input id="f-name" value="{{ name }}" maxlength="120" placeholder="z.B. Klassenarbeit 50%">
 
     <h3 style="margin-top:1.2rem">Stufen</h3>
+    <p class="muted" style="font-size:12px">
+      Eingabereihenfolge: <strong>Label</strong> → <strong>max %</strong> → <strong>min %</strong> → <strong>Bezeichnung</strong>.
+      Die Bezeichnung erscheint auf den Schüler-PDFs neben der Note (z. B. „2+ · gut").
+    </p>
     <table id="stufen-table">
-      <thead><tr><th>Note/Punkte</th><th>min %</th><th>max %</th></tr></thead>
+      <thead><tr>
+        <th>Note/Punkte</th>
+        <th>max %</th>
+        <th>min %</th>
+        <th>Bezeichnung</th>
+      </tr></thead>
       <tbody></tbody>
     </table>
 
@@ -37,14 +46,17 @@ function render() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>${escapeHtml(st.label)}</strong></td>
-      <td><input type="number" step="1" min="0" max="100" value="${st.min_pct}" data-i="${i}" data-f="min_pct" style="width:80px"></td>
       <td><input type="number" step="1" min="0" max="100" value="${st.max_pct}" data-i="${i}" data-f="max_pct" style="width:80px"></td>
+      <td><input type="number" step="1" min="0" max="100" value="${st.min_pct}" data-i="${i}" data-f="min_pct" style="width:80px"></td>
+      <td><input type="text" maxlength="80" value="${escapeHtml(st.name_text || '')}" data-i="${i}" data-f="name_text" style="width:160px" placeholder="z. B. gut"></td>
     `;
     tbody.appendChild(tr);
   });
   tbody.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('input', () => {
-      STUFEN[inp.dataset.i][inp.dataset.f] = parseFloat(inp.value) || 0;
+      const f = inp.dataset.f;
+      if (f === 'name_text') STUFEN[inp.dataset.i][f] = inp.value;
+      else STUFEN[inp.dataset.i][f] = parseFloat(inp.value) || 0;
     });
   });
 }

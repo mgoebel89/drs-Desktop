@@ -78,6 +78,76 @@ SCALES = BUILTINS
 DEFAULT_SCALE = "builtin:mss_noten"
 
 
+# ── Schriftliche Notenbezeichnungen (Standard) ──────────────────────────
+# Pro Tendenz dieselbe Bezeichnung (User-Entscheidung: ohne Tendenz-Klammer).
+_NOTE_NAME_BASE = {
+    "1": "sehr gut", "2": "gut", "3": "befriedigend",
+    "4": "ausreichend", "5": "mangelhaft", "6": "ungenügend",
+}
+
+
+def default_grade_names_for(scale_type: str) -> dict[str, str]:
+    """Defaults der schriftlichen Bezeichnungen pro Skalentyp.
+
+    Für mss_noten: jede Tendenz (1, 1-, 2+, 2, 2-, …) bekommt die
+    Hauptnoten-Bezeichnung (z. B. '2+' → 'gut').
+    Für mss_punkte (15..0): Mapping über die Punkte-zu-Note-Tabelle.
+    """
+    t = SCALE_TYPES.get(scale_type) or SCALE_TYPES["mss_noten"]
+    out: dict[str, str] = {}
+    if scale_type == "mss_noten":
+        for lbl, _, _ in t["default_stufen"]:
+            base = lbl.rstrip("+-")  # '2+' → '2', '5-' → '5'
+            out[lbl] = _NOTE_NAME_BASE.get(base, "")
+    elif scale_type == "mss_punkte":
+        # 15-13 = sehr gut · 12-10 = gut · 9-7 = befriedigend ·
+        # 6-4 = ausreichend · 3-1 = mangelhaft · 0 = ungenügend
+        punkte_to_text = {
+            15: "sehr gut", 14: "sehr gut", 13: "sehr gut",
+            12: "gut", 11: "gut", 10: "gut",
+            9: "befriedigend", 8: "befriedigend", 7: "befriedigend",
+            6: "ausreichend", 5: "ausreichend", 4: "ausreichend",
+            3: "mangelhaft", 2: "mangelhaft", 1: "mangelhaft",
+            0: "ungenügend",
+        }
+        for lbl, _, _ in t["default_stufen"]:
+            try:
+                out[lbl] = punkte_to_text.get(int(lbl), "")
+            except ValueError:
+                out[lbl] = ""
+    return out
+
+
+def resolve_grade_names(db, user, ref: str | None) -> dict[str, str]:
+    """Liefert die {label: bezeichnung}-Map. Für Built-ins die Defaults,
+    für Custom-Skalen den gespeicherten Wert (mit Default-Fallback je
+    fehlendem Label)."""
+    ref = _normalize_ref(ref)
+    if ref.startswith("builtin:"):
+        key = ref.split(":", 1)[1]
+        scale_type = BUILTINS.get(key, BUILTINS["mss_noten"])["type"]
+        return default_grade_names_for(scale_type)
+    try:
+        scale_id = int(ref.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return default_grade_names_for("mss_noten")
+    from app.models import GradingScale
+    gs = db.get(GradingScale, scale_id)
+    if not gs or (user is not None and gs.owner_user_id != user.id):
+        return default_grade_names_for("mss_noten")
+    base = default_grade_names_for(gs.scale_type)
+    try:
+        stored = json.loads(gs.grade_names_json or "{}") or {}
+    except Exception:
+        stored = {}
+    base.update({str(k): str(v) for k, v in stored.items() if v})
+    return base
+
+
+def grade_text_for_label(db, user, ref: str | None, label: str) -> str:
+    return resolve_grade_names(db, user, ref).get(str(label), "")
+
+
 # ── Typ-Helfer (für den Skalen-Editor) ───────────────────────────────────
 
 def list_scale_types() -> list[tuple[str, str]]:
