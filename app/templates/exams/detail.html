@@ -228,22 +228,28 @@ function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;',
 async function postJSON(u,p){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});return r.json();}
 
 // Tabs
+function activateTab(targetId){
+  const btn=document.querySelector('.tab-btn[data-target="'+targetId+'"]');
+  if(!btn)return;
+  document.querySelectorAll('.tab-btn').forEach(b=>{b.classList.remove('active');b.style.borderBottom='3px solid transparent';b.style.fontWeight='400';b.style.color='#666';});
+  document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
+  btn.classList.add('active');btn.style.borderBottom='3px solid #7B61FF';btn.style.fontWeight='600';btn.style.color='';
+  document.getElementById(targetId).style.display='';
+}
 document.querySelectorAll('.tab-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('.tab-btn').forEach(b=>{b.classList.remove('active');b.style.borderBottom='3px solid transparent';b.style.fontWeight='400';b.style.color='#666';});
-    document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
-    btn.classList.add('active');btn.style.borderBottom='3px solid #7B61FF';btn.style.fontWeight='600';btn.style.color='';
-    document.getElementById(btn.dataset.target).style.display='';
-  });
+  btn.addEventListener('click',()=>{activateTab(btn.dataset.target);history.replaceState(null,'','#'+btn.dataset.target);});
 });
 const ib=document.querySelector('.tab-btn.active'); if(ib){ib.style.borderBottom='3px solid #7B61FF';ib.style.fontWeight='600';}
+// Beim Laden: Tab aus URL-Hash wiederherstellen (#tab-eval u. ä.)
+if(location.hash && location.hash.startsWith('#tab-')){activateTab(location.hash.substring(1));}
 
 // Einstellungen-Save
 document.getElementById('btn-set-save').addEventListener('click',async()=>{
   const st=document.getElementById('set-status'); st.textContent='speichere …';
   const klassen=Array.from(document.querySelectorAll('.cls-cb:checked')).map(c=>c.value);
   const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'einstellungen',title:document.getElementById('f-title').value,datum:document.getElementById('f-datum').value,grading_scale_key:document.getElementById('f-scale').value,klassen});
-  st.textContent=d.ok?'✓ gespeichert — Seite neu laden für aktualisierte Teilnehmer':'✗ Fehler';
+  if(d.ok){st.textContent='✓ gespeichert — lade neu …';location.hash='#tab-set';setTimeout(()=>location.reload(),500);}
+  else st.textContent='✗ Fehler';
 });
 
 // Teilnehmer-Save
@@ -252,7 +258,8 @@ if(bps) bps.addEventListener('click',async()=>{
   const st=document.getElementById('part-status'); st.textContent='speichere …';
   const members=Array.from(document.querySelectorAll('#tab-part tbody tr')).map(tr=>({student_id:parseInt(tr.dataset.studentId,10),selected:tr.querySelector('.part-cb').checked,group_label:tr.querySelector('.part-group').value.trim()}));
   const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'teilnehmer',members});
-  st.textContent=d.ok?'✓ gespeichert — Seite neu laden':'✗ Fehler';
+  if(d.ok){st.textContent='✓ gespeichert — lade neu …';location.hash='#tab-part';setTimeout(()=>location.reload(),500);}
+  else st.textContent='✗ Fehler';
 });
 
 // ── Feedbackpunkte-Editor ──
@@ -351,7 +358,8 @@ document.getElementById('btn-fps-save').addEventListener('click',async()=>{
   const sum=fps.filter(f=>f.eval_type==='note').reduce((s,f)=>s+(parseFloat(f.weight_pct)||0),0);
   if(sum>100.0001){st.textContent='✗ Summe der Gewichte über 100 %';return;}
   const d=await postJSON('/exams/'+EXAM_ID+'/save',{tab:'feedbackpunkte',feedback_points:fps});
-  st.textContent=d.ok?'✓ gespeichert — Seite neu laden für Bewertung':'✗ '+(d.detail||'Fehler');
+  if(d.ok){st.textContent='✓ gespeichert — öffne Bewertung …';location.hash='#tab-eval';setTimeout(()=>location.reload(),500);}
+  else st.textContent='✗ '+(d.detail||'Fehler');
 });
 renderFPs();
 
