@@ -134,6 +134,12 @@ class LsAufgabe(Base):
     learning_situation_id: Mapped[int] = mapped_column(
         ForeignKey("learning_situations.id", ondelete="CASCADE"), index=True
     )
+    # Schema v3: Aufgabe gehört zu einem konkreten Arbeitsblatt.
+    # v2-Bestandsdaten haben arbeitsblatt_id = NULL und bleiben gültig.
+    arbeitsblatt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ls_arbeitsblaetter.id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
     nummer: Mapped[int] = mapped_column(Integer)
     titel: Mapped[str] = mapped_column(String(500), default="")
     anchor: Mapped[str] = mapped_column(String(120), default="")
@@ -180,7 +186,42 @@ class LearningSituation(Base):
     last_material_type: Mapped[str] = mapped_column(String(32), default="")
     last_extras: Mapped[str] = mapped_column(Text, default="")
     content_md_present: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Schema v3 (Migration 0015): 2 = Wizard v2, 3 = neue Vorlage mit
+    # Arbeitsblättern, Lehrerinformationen, Leistungsfeststellung.
+    schema_version: Mapped[int] = mapped_column(Integer, default=2)
+    dauer_stunden: Mapped[int] = mapped_column(Integer, default=0)
+    version_no: Mapped[int] = mapped_column(Integer, default=1)
+    lernsituation_md: Mapped[str] = mapped_column(Text, default="")
+    lernsituation_bild_path: Mapped[str] = mapped_column(String(500), default="")
+    kompetenzen_md: Mapped[str] = mapped_column(Text, default="")
+    uebergreifende_aspekte_md: Mapped[str] = mapped_column(Text, default="")
+    lehrer_vorwissen_md: Mapped[str] = mapped_column(Text, default="")
+    leistungsfeststellung_md: Mapped[str] = mapped_column(Text, default="")
+    # Sync-Tracking für die Zwei-Wege-Sync App ↔ Obsidian.
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    content_mtime: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LsArbeitsblatt(Base):
+    """Arbeitsblatt innerhalb einer Lernsituation (Schema v3).
+
+    Eine LS hat 0..n Arbeitsblätter. Jedes Arbeitsblatt hat einen Titel
+    ('Arbeitsblatt 1'), eine freie Phasen-Bezeichnung (z. B.
+    'Arbeitsplanung'), einen Bearbeitungshinweis-Callout und enthält
+    seinerseits Aufgaben (ls_aufgaben.arbeitsblatt_id)."""
+    __tablename__ = "ls_arbeitsblaetter"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    learning_situation_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    phase: Mapped[str] = mapped_column(String(255), default="")
+    bearbeitungshinweis_md: Mapped[str] = mapped_column(Text, default="")
+    content_md: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
