@@ -92,10 +92,16 @@ def upgrade() -> None:
 
     aufg_existing = _existing_columns(insp, "ls_aufgaben")
     if "arbeitsblatt_id" not in aufg_existing:
+        # In SQLite-batch-Mode muss jeder FK-Constraint einen Namen haben,
+        # damit alembic die Tabelle korrekt neu aufbauen kann.
         with op.batch_alter_table("ls_aufgaben") as batch:
             batch.add_column(sa.Column(
                 "arbeitsblatt_id", sa.Integer(),
-                sa.ForeignKey("ls_arbeitsblaetter.id", ondelete="CASCADE"),
+                sa.ForeignKey(
+                    "ls_arbeitsblaetter.id",
+                    name="fk_ls_aufgaben_arbeitsblatt_id",
+                    ondelete="CASCADE",
+                ),
                 nullable=True, index=True,
             ))
 
