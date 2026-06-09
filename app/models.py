@@ -204,6 +204,22 @@ class LearningSituation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class AppFile(Base):
+    """Vom Lehrer hochgeladene Datei (Bild, Anhang) für die App-File-Bridge.
+    Pfad in der MD: /api/files/<file_uuid>/<filename>."""
+    __tablename__ = "app_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_uuid: Mapped[str] = mapped_column(String(32), unique=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255))
+    mime: Mapped[str] = mapped_column(String(120), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class LsArbeitsblatt(Base):
     """Arbeitsblatt innerhalb einer Lernsituation (Schema v3).
 

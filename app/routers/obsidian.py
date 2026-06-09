@@ -46,6 +46,9 @@ def ls_note(
         # der Renderer sie als Links darstellt (Ziel bleibt funktionslos in
         # der Web-Anzeige — ist für Obsidian Desktop gedacht).
         body = _wikilinks_to_md(body)
+        # Vault-relative Bilder durch die Vault-Image-Bridge proxen.
+        # /api/files/<uuid>/<name>-Pfade bleiben unangetastet (laden direkt).
+        body = _rewrite_vault_images(body, ls.id)
         body_html = _md.render(body)
 
     return templates.TemplateResponse(request, "obsidian_note.html", {
@@ -65,3 +68,26 @@ def _wikilinks_to_md(text: str) -> str:
             tgt, label = inner, inner
         return f"[{label.strip()}]({tgt.strip()})"
     return re.sub(r"\[\[([^\]]+)\]\]", repl, text)
+
+
+def _rewrite_vault_images(text: str, ls_id: int) -> str:
+    """`![alt](rel/oder/abs/pfad)` umschreiben: vault-relative Pfade auf
+    `/api/vault-image/<ls_id>?p=<pfad>` lenken, /api/files-, http(s)- und
+    data-URLs bleiben unangetastet."""
+    import re
+    from urllib.parse import quote
+
+    def repl(m):
+        alt, src = m.group(1), m.group(2).strip()
+        low = src.lower()
+        if (
+            low.startswith("/api/files/")
+            or low.startswith("http://")
+            or low.startswith("https://")
+            or low.startswith("data:")
+        ):
+            return m.group(0)
+        rel = src.lstrip("/")
+        return f"![{alt}](/api/vault-image/{ls_id}?p={quote(rel)})"
+
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", repl, text)
