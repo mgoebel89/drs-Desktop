@@ -573,6 +573,138 @@ def api_forward_done(
     })
 
 
+# ── Reihen-Planung: LS auf Block-Set verteilen ───────────────────────────
+
+
+@router.get("/api/timetable/week-preview")
+def api_week_preview(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    week: str,
+):
+    """Kompakte Grid-Daten für das Reihen-Modal: pro Block der Woche
+    Klasse, Fach, bereits zugeordnete LS (Name)."""
+    ref = _parse_iso_date(week)
+    monday = ref - timedelta(days=ref.weekday())
+    try:
+        grid = webuntis_client.get_week_grid(user, ref, ical_events=[])
+    except Exception:
+        grid = None
+    if not grid:
+        return JSONResponse({"ok": True, "monday": monday.isoformat(),
+                             "slots": [], "blocks": []})
+
+    # LS-Map aus LessonNote für die Woche
+    friday = monday + timedelta(days=4)
+    ls_by_key: dict[tuple[str, str, str, str], int] = {}
+    for n in db.query(LessonNote).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.lesson_date >= monday.isoformat(),
+        LessonNote.lesson_date <= friday.isoformat(),
+        LessonNote.learning_situation_id.is_not(None),
+    ).all():
+        ls_by_key[(n.lesson_date, n.klassen_key or "",
+                   n.subjects_key or "", n.block_start or "")] = (
+            n.learning_situation_id
+        )
+
+    ls_names: dict[int, str] = {}
+    if ls_by_key:
+        for ls in db.query(LearningSituation).filter(
+            LearningSituation.id.in_(set(ls_by_key.values()))
+        ).all():
+            ls_names[ls.id] = ls.display_name
+
+    slots_out = [{"name": s["name"], "start": s["start"], "end": s["end"]}
+                 for s in grid["slots"]]
+    blocks_out: list[dict] = []
+    for sl in grid["slots"]:
+        for day_idx in range(5):
+            d = (monday + timedelta(days=day_idx)).isoformat()
+            lessons = grid["cells"].get((sl["start"], day_idx)) or []
+            for l in lessons:
+                kk, sk = webuntis_client.lesson_key_parts(l)
+                existing_id = ls_by_key.get((d, kk, sk, sl["start"]))
+                blocks_out.append({
+                    "date": d, "day_idx": day_idx,
+                    "block_start": sl["start"], "block_name": sl["name"],
+                    "klassen": kk, "subjects": sk,
+                    "klassen_long": ", ".join(l.get("klassen") or []),
+                    "subjects_short": ", ".join(l.get("subjects") or []),
+                    "existing_ls_id": existing_id,
+                    "existing_ls_name": ls_names.get(existing_id, "")
+                                         if existing_id else "",
+                })
+    return JSONResponse({
+        "ok": True,
+        "monday": monday.isoformat(),
+        "slots": slots_out,
+        "blocks": blocks_out,
+    })
+
+
+@router.post("/api/ls/distribute")
+def api_ls_distribute(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Verteilt eine LS auf eine Liste von Blöcken.
+
+    Body: {ls_id: int, blocks: [{date, klassen, subjects, block_start}],
+           conflicts: {block_key: 'keep'|'replace'}}
+    Block-Key-Format für conflicts-Dict: 'date|klassen|subjects|block_start'
+    Default für Konflikt-Blöcke ohne Eintrag: 'replace'.
+    """
+    from app.auth import audit
+    ls_id = body.get("ls_id")
+    if not ls_id:
+        raise HTTPException(400, "ls_id fehlt")
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404, "Lernsituation nicht gefunden")
+    blocks = body.get("blocks") or []
+    if not isinstance(blocks, list) or not blocks:
+        raise HTTPException(400, "blocks fehlt oder leer")
+    conflicts = body.get("conflicts") or {}
+    if not isinstance(conflicts, dict):
+        conflicts = {}
+
+    written = 0
+    skipped = 0
+    for b in blocks:
+        d = (b.get("date") or "")[:10]
+        kk = (b.get("klassen") or "")[:255]
+        sk = (b.get("subjects") or "")[:255]
+        bs = (b.get("block_start") or "")[:5]
+        if len(d) != 10:
+            continue
+        block_key = f"{d}|{kk}|{sk}|{bs}"
+        n = db.query(LessonNote).filter(
+            LessonNote.user_id == user.id, LessonNote.lesson_date == d,
+            LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+            LessonNote.block_start == bs,
+        ).first()
+        if not n:
+            n = LessonNote(
+                user_id=user.id, lesson_date=d, klassen_key=kk,
+                subjects_key=sk, block_start=bs,
+            )
+            db.add(n)
+        elif n.learning_situation_id and n.learning_situation_id != ls_id:
+            if conflicts.get(block_key, "replace") == "keep":
+                skipped += 1
+                continue
+        n.learning_situation_id = ls_id
+        n.updated_at = datetime.utcnow()
+        written += 1
+    audit(db, "ls_distributed", actor=user, target=str(ls_id),
+          detail=f"{written} Blöcke · {skipped} übersprungen", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "written": written, "skipped": skipped})
+
+
 # ── Reihen-Override (Fach-Bezeichnung pro Klassen+Fach-Kombi) ─────────────
 @router.get("/api/lesson-series-override")
 def api_get_series(
