@@ -251,6 +251,100 @@ window.MathJax = {
   }
   .forward-banner button:hover { background: #e36e00; }
 
+  /* Reihen-Modal (Lernfeld-Reihe verteilen) */
+  .series-modal-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.5); z-index: 1190;
+  }
+  .series-modal-backdrop.open { display: block; }
+  .series-modal {
+    display: none; position: fixed; z-index: 1195;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(880px, 96vw); max-height: 92vh; overflow: auto;
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 14px 48px rgba(0,0,0,.3);
+    padding: 1.2rem 1.4rem;
+  }
+  .series-modal.open { display: block; }
+  .series-modal h3 { margin: 0 0 .4rem; color: var(--blau); font-size: 16px; }
+  .series-modal .sm-sub { font-size: 12px; color: var(--muted); margin-bottom: 1rem; }
+  .series-modal .sm-row {
+    display: flex; gap: .8rem; align-items: center; margin-bottom: .6rem;
+    flex-wrap: wrap;
+  }
+  .series-modal .sm-row label {
+    font-size: 12px; color: var(--blau); font-weight: 600; min-width: 90px;
+  }
+  .series-modal select, .series-modal input[type=week], .series-modal input[type=date] {
+    padding: .35rem .5rem; border: 1px solid #ccc; border-radius: 6px;
+    font-family: inherit; font-size: 13px;
+  }
+  .series-modal select { min-width: 280px; }
+  .series-modal .sm-week-nav {
+    display: flex; gap: .3rem; align-items: center; margin: .8rem 0 .4rem;
+  }
+  .series-modal .sm-week-nav button {
+    padding: 3px 8px; font-size: 12px;
+    background: #f0f4ff; border: 1px solid #ccd; border-radius: 4px; cursor: pointer;
+  }
+  .series-modal .sm-grid {
+    width: 100%; border-collapse: collapse; font-size: 11px;
+    margin-bottom: .8rem;
+  }
+  .series-modal .sm-grid th, .series-modal .sm-grid td {
+    border: 1px solid #e0e0e0; padding: 3px; vertical-align: top;
+    width: 18%;
+  }
+  .series-modal .sm-grid th { background: #f6f8fc; color: var(--blau);
+    font-size: 11px; padding: 4px; }
+  .series-modal .sm-grid th.slot-h { width: 10%; background: #eef2f9; }
+  .series-modal .sm-grid td.slot-h { background: #eef2f9; color: var(--blau);
+    font-weight: 600; text-align: center; font-size: 11px; }
+  .series-modal .sm-block {
+    padding: 4px 5px; margin: 2px 0; border-radius: 4px;
+    background: #fff; border: 1px solid #ddd;
+    cursor: pointer; user-select: none; line-height: 1.25;
+  }
+  .series-modal .sm-block:hover { background: #f0f4ff; border-color: #99b; }
+  .series-modal .sm-block.picked {
+    background: #d4edda; border-color: #5ec27a; box-shadow: inset 0 0 0 1px #5ec27a;
+  }
+  .series-modal .sm-block.has-ls {
+    background: #f0ecff; border-color: #9982d0;
+  }
+  .series-modal .sm-block.has-ls.picked {
+    background: #d4edda; border-color: #5ec27a;
+  }
+  .series-modal .sm-block .sm-b-klasse { font-weight: 700; }
+  .series-modal .sm-block .sm-b-fach { color: var(--muted); font-size: 10px; }
+  .series-modal .sm-block .sm-b-ls {
+    color: #5e3fc0; font-size: 10px; font-style: italic;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .series-modal .sm-conflicts {
+    background: #fff3e0; border: 1px solid #f5b942;
+    border-radius: 6px; padding: .6rem .8rem; margin-bottom: .8rem;
+    font-size: 12px;
+  }
+  .series-modal .sm-conflicts h4 {
+    margin: 0 0 .4rem; color: #b85b00; font-size: 13px;
+  }
+  .series-modal .sm-conflicts table {
+    width: 100%; border-collapse: collapse; font-size: 11px;
+  }
+  .series-modal .sm-conflicts th, .series-modal .sm-conflicts td {
+    padding: 3px 6px; border-bottom: 1px solid #f5d999; text-align: left;
+  }
+  .series-modal .sm-conflicts label { font-weight: normal; min-width: auto; }
+  .series-modal .sm-summary {
+    font-size: 12px; color: var(--text); margin: .4rem 0;
+    padding: .4rem .6rem; background: #f6f8fc; border-radius: 5px;
+  }
+  .series-modal .sm-actions {
+    display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem;
+    border-top: 1px solid #eee; padding-top: .8rem;
+  }
+
   .prev-note-box {
     background: var(--blau-hell); border-radius: 6px; padding: .7rem .9rem;
     font-size: 12px; margin-bottom: 1rem;
@@ -460,6 +554,72 @@ window.MathJax = {
   <div class="mm-actions">
     <button type="button" class="btn btn-sec" id="mm-forward-cancel">Abbrechen</button>
     <button type="button" class="btn" id="mm-forward-save">Speichern</button>
+  </div>
+</div>
+
+<!-- Reihen-Modal: Lernfeld auf mehrere Blöcke verteilen -->
+<div class="series-modal-backdrop" id="sm-backdrop"></div>
+<div class="series-modal" id="series-modal" role="dialog" aria-modal="true">
+  <h3>📚 Lernfeld-Reihe verteilen</h3>
+  <div class="sm-sub">
+    Lernsituation wählen, KW-Bereich festlegen, dann im Wochen-Raster die Blöcke
+    anklicken (das Muster wird auf alle Wochen im Bereich angewendet).
+  </div>
+
+  <div class="sm-row">
+    <label for="sm-ls">Lernsituation</label>
+    <select id="sm-ls"><option value="">— bitte wählen —</option></select>
+  </div>
+  <div class="sm-row">
+    <label for="sm-week-from">Von KW</label>
+    <input type="date" id="sm-week-from">
+    <label for="sm-week-to" style="min-width:60px">Bis KW</label>
+    <input type="date" id="sm-week-to">
+    <span class="muted" style="font-size:11px">(Datum innerhalb der Start-/End-Woche)</span>
+  </div>
+
+  <div class="sm-week-nav">
+    <button type="button" id="sm-week-prev">← Woche</button>
+    <span id="sm-week-label" style="font-size:12px;color:var(--blau);font-weight:600"></span>
+    <button type="button" id="sm-week-next">Woche →</button>
+    <span class="muted" style="font-size:11px;margin-left:.6rem">
+      Vorschau-Woche (Slot-Pattern gilt für alle Wochen im KW-Bereich)
+    </span>
+  </div>
+
+  <table class="sm-grid" id="sm-grid">
+    <thead>
+      <tr>
+        <th class="slot-h">Stunde</th>
+        <th>Mo</th><th>Di</th><th>Mi</th><th>Do</th><th>Fr</th>
+      </tr>
+    </thead>
+    <tbody id="sm-grid-body">
+      <tr><td colspan="6" class="muted" style="text-align:center;padding:1rem">
+        Lade Wochen-Vorschau …
+      </td></tr>
+    </tbody>
+  </table>
+
+  <div class="sm-summary" id="sm-summary">
+    Noch keine Blöcke gewählt.
+  </div>
+
+  <div class="sm-conflicts" id="sm-conflicts" style="display:none">
+    <h4>⚠ Konflikte: bereits zugeordnete Lernsituationen</h4>
+    <div style="margin-bottom:.4rem">
+      <label style="font-weight:normal"><input type="radio" name="sm-global" value="replace" checked> alle ersetzen</label>
+      &nbsp;
+      <label style="font-weight:normal"><input type="radio" name="sm-global" value="keep"> alle behalten</label>
+      &nbsp;
+      <label style="font-weight:normal"><input type="radio" name="sm-global" value="per-block"> einzeln entscheiden</label>
+    </div>
+    <table id="sm-conflicts-table"></table>
+  </div>
+
+  <div class="sm-actions">
+    <button type="button" class="btn btn-sec" id="sm-cancel">Abbrechen</button>
+    <button type="button" class="btn" id="sm-apply">Verteilen</button>
   </div>
 </div>
 
@@ -1061,8 +1221,7 @@ _blockMenu.querySelectorAll('button[data-act]').forEach(btn => {
     } else if (act === 'forward') {
       miniForwardOpen(key, el);
     } else if (act === 'series') {
-      // Phase 4: Reihen-Modal — Platzhalter, kommt im nächsten Schritt
-      alert('Lernfeld-Reihe planen — folgt in der nächsten Phase.');
+      seriesModalOpen({ klassen: key.klassen, date: key.date });
     } else if (act === 'prev') {
       quickPrevOpen(key);
     } else if (act === 'exam') {
@@ -1211,6 +1370,271 @@ async function toggleExamForBlock(key, el) {
     alert('Fehler: ' + e.message);
   }
 }
+// ── Reihen-Modal: Lernfeld auf mehrere Blöcke verteilen ─────────────────
+const _smBackdrop = document.getElementById('sm-backdrop');
+const _smModal = document.getElementById('series-modal');
+const _smLs = document.getElementById('sm-ls');
+const _smWeekFrom = document.getElementById('sm-week-from');
+const _smWeekTo = document.getElementById('sm-week-to');
+const _smGridBody = document.getElementById('sm-grid-body');
+const _smWeekLabel = document.getElementById('sm-week-label');
+const _smSummary = document.getElementById('sm-summary');
+const _smConflicts = document.getElementById('sm-conflicts');
+const _smConflictsTable = document.getElementById('sm-conflicts-table');
+
+let _smPreviewWeek = null;     // ISO-Datum (Montag) der angezeigten Vorschau-Woche
+let _smSlots = [];             // [{name, start, end}]
+let _smBlocksByWeek = {};      // { 'YYYY-MM-DD': [block,...] } (Montag des week-preview)
+let _smPicked = new Set();     // Pattern-Keys: 'day_idx|block_start|klassen|subjects'
+let _smCtxKlassen = '';        // optional Kontext-Klasse für LS-Vorfilterung
+
+function _isoMonday(d) {
+  const dt = (d instanceof Date) ? new Date(d) : new Date(d + 'T00:00:00');
+  const day = (dt.getDay() + 6) % 7;  // Mo=0
+  dt.setDate(dt.getDate() - day);
+  return dt.toISOString().slice(0, 10);
+}
+function _addDaysISO(iso, n) {
+  const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function _fmtDayMon(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return ('0'+d.getDate()).slice(-2) + '.' + ('0'+(d.getMonth()+1)).slice(-2) + '.';
+}
+
+async function seriesModalOpen(prefill) {
+  prefill = prefill || {};
+  _smCtxKlassen = prefill.klassen || '';
+  _smPicked = new Set();
+  _smConflicts.style.display = 'none';
+  _smConflictsTable.innerHTML = '';
+
+  // LS-Liste laden
+  _smLs.innerHTML = '<option value="">— lade …</option>';
+  try {
+    const r = await fetch('/api/ls/list?klassen=' + encodeURIComponent(_smCtxKlassen));
+    const d = await r.json();
+    const opts = ['<option value="">— bitte wählen —</option>'];
+    (d.items || []).forEach(ls => {
+      const label = ls.display_name
+        + (ls.klassen_key ? '  ['+ls.klassen_key+']' : '');
+      opts.push('<option value="'+ls.id+'">'+esc(label)+'</option>');
+    });
+    _smLs.innerHTML = opts.join('');
+    if (prefill.ls_id) _smLs.value = String(prefill.ls_id);
+  } catch (e) {
+    _smLs.innerHTML = '<option value="">Fehler beim Laden</option>';
+  }
+
+  // KW-Range: heute bis +4 Wochen, oder Kontext-Datum
+  const startISO = _isoMonday(prefill.date || new Date());
+  const endISO = _addDaysISO(startISO, 28);
+  _smWeekFrom.value = startISO;
+  _smWeekTo.value = endISO;
+  _smPreviewWeek = startISO;
+
+  _smBackdrop.classList.add('open');
+  _smModal.classList.add('open');
+  await seriesModalLoadWeekPreview(startISO);
+}
+function seriesModalHide() {
+  _smBackdrop.classList.remove('open');
+  _smModal.classList.remove('open');
+}
+
+async function seriesModalLoadWeekPreview(weekISO) {
+  _smPreviewWeek = _isoMonday(weekISO);
+  _smWeekLabel.textContent = 'KW ab ' + _fmtDayMon(_smPreviewWeek);
+  _smGridBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:1rem">Lade …</td></tr>';
+  try {
+    const r = await fetch('/api/timetable/week-preview?week=' + encodeURIComponent(_smPreviewWeek));
+    const d = await r.json();
+    _smSlots = d.slots || [];
+    _smBlocksByWeek[_smPreviewWeek] = d.blocks || [];
+    _smRenderGrid();
+  } catch (e) {
+    _smGridBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:1rem">Fehler: '+esc(e.message)+'</td></tr>';
+  }
+}
+
+function _smRenderGrid() {
+  const blocks = _smBlocksByWeek[_smPreviewWeek] || [];
+  // Gruppieren nach slot.start + day_idx
+  const byCell = {};
+  blocks.forEach(b => {
+    const k = b.block_start + '|' + b.day_idx;
+    (byCell[k] = byCell[k] || []).push(b);
+  });
+  const rows = [];
+  if (!_smSlots.length) {
+    rows.push('<tr><td colspan="6" class="muted" style="text-align:center;padding:1rem">Keine Stunden in dieser Woche.</td></tr>');
+  }
+  _smSlots.forEach(sl => {
+    const cells = ['<td class="slot-h">'+esc(sl.name)+'<br><span style="font-weight:normal;font-size:10px">'+esc(sl.start)+'</span></td>'];
+    for (let di = 0; di < 5; di++) {
+      const lst = byCell[sl.start + '|' + di] || [];
+      const inner = lst.map(b => {
+        const patternKey = di + '|' + b.block_start + '|' + b.klassen + '|' + b.subjects;
+        const picked = _smPicked.has(patternKey);
+        const cls = ['sm-block'];
+        if (picked) cls.push('picked');
+        if (b.existing_ls_id) cls.push('has-ls');
+        return '<div class="'+cls.join(' ')+'" data-pkey="'+esc(patternKey)+'"'
+          + ' data-day-idx="'+di+'" data-block-start="'+esc(b.block_start)+'"'
+          + ' data-klassen="'+esc(b.klassen)+'" data-subjects="'+esc(b.subjects)+'">'
+          + '<div class="sm-b-klasse">'+esc(b.klassen_long || b.klassen || '—')+'</div>'
+          + (b.subjects_short ? '<div class="sm-b-fach">'+esc(b.subjects_short)+'</div>' : '')
+          + (b.existing_ls_name ? '<div class="sm-b-ls" title="'+esc(b.existing_ls_name)+'">📚 '+esc(b.existing_ls_name)+'</div>' : '')
+          + '</div>';
+      }).join('');
+      cells.push('<td>'+inner+'</td>');
+    }
+    rows.push('<tr>'+cells.join('')+'</tr>');
+  });
+  _smGridBody.innerHTML = rows.join('');
+  // Klick-Handler binden
+  _smGridBody.querySelectorAll('.sm-block').forEach(el => {
+    el.addEventListener('click', () => {
+      const pk = el.dataset.pkey;
+      if (_smPicked.has(pk)) _smPicked.delete(pk);
+      else _smPicked.add(pk);
+      el.classList.toggle('picked');
+      _smRecompute();
+    });
+  });
+  _smRecompute();
+}
+
+// Aus aktuellem Pattern + KW-Range alle konkreten Blöcke berechnen
+function _smCollectBlocks() {
+  if (_smPicked.size === 0) return { blocks: [], conflicts: [] };
+  const fromMon = _isoMonday(_smWeekFrom.value || _smPreviewWeek);
+  const toMon = _isoMonday(_smWeekTo.value || _smPreviewWeek);
+  if (toMon < fromMon) return { blocks: [], conflicts: [] };
+  const refBlocks = _smBlocksByWeek[_smPreviewWeek] || [];
+  // Index: pattern -> {klassen, subjects, block_start, day_idx} (vom Pattern abgeleitet)
+  const patternList = Array.from(_smPicked).map(pk => {
+    const [day_idx, block_start, klassen, subjects] = pk.split('|');
+    return { day_idx: parseInt(day_idx, 10), block_start, klassen, subjects };
+  });
+  // Existing-LS-Map für die Vorschau-Woche (Konflikt-Info nur dort verfügbar)
+  const existingByKey = {};
+  refBlocks.forEach(b => {
+    if (b.existing_ls_id) {
+      const k = b.date + '|' + b.klassen + '|' + b.subjects + '|' + b.block_start;
+      existingByKey[k] = { id: b.existing_ls_id, name: b.existing_ls_name };
+    }
+  });
+  const all = [];
+  const conflicts = [];
+  const selLsId = parseInt(_smLs.value || '0', 10);
+  let cursor = fromMon;
+  while (cursor <= toMon) {
+    patternList.forEach(p => {
+      const date = _addDaysISO(cursor, p.day_idx);
+      const block = {
+        date, klassen: p.klassen, subjects: p.subjects, block_start: p.block_start,
+      };
+      all.push(block);
+      // Konflikt-Check: aktuell nur für die Vorschau-Woche bekannt
+      const k = date + '|' + p.klassen + '|' + p.subjects + '|' + p.block_start;
+      const ex = existingByKey[k];
+      if (ex && ex.id !== selLsId) {
+        conflicts.push({ block, existing: ex, key: k });
+      }
+    });
+    cursor = _addDaysISO(cursor, 7);
+  }
+  return { blocks: all, conflicts };
+}
+
+function _smRecompute() {
+  const { blocks, conflicts } = _smCollectBlocks();
+  if (!blocks.length) {
+    _smSummary.textContent = 'Noch keine Blöcke gewählt.';
+    _smConflicts.style.display = 'none';
+    return;
+  }
+  _smSummary.innerHTML = '<strong>' + blocks.length + '</strong> Block-Termine im KW-Bereich '
+    + '(Pattern: ' + _smPicked.size + ' Slot' + (_smPicked.size === 1 ? '' : 's') + ' × '
+    + Math.round(blocks.length / Math.max(_smPicked.size, 1)) + ' Wochen)';
+  if (conflicts.length) {
+    _smConflicts.style.display = 'block';
+    const rows = ['<tr><th>Block (Vorschau-Woche)</th><th>bisherige LS</th><th>Entscheidung</th></tr>'];
+    conflicts.forEach(c => {
+      const lbl = c.block.date + ' · ' + c.block.block_start + ' · ' + c.block.klassen;
+      rows.push('<tr>'
+        + '<td>'+esc(lbl)+'</td>'
+        + '<td>'+esc(c.existing.name || '—')+'</td>'
+        + '<td>'
+        + '<label><input type="radio" name="sm-c-'+esc(c.key)+'" value="replace" checked> ersetzen</label> '
+        + '<label><input type="radio" name="sm-c-'+esc(c.key)+'" value="keep"> behalten</label>'
+        + '</td></tr>');
+    });
+    _smConflictsTable.innerHTML = rows.join('');
+  } else {
+    _smConflicts.style.display = 'none';
+    _smConflictsTable.innerHTML = '';
+  }
+}
+
+async function seriesModalApply() {
+  const ls_id = parseInt(_smLs.value || '0', 10);
+  if (!ls_id) { alert('Bitte eine Lernsituation wählen.'); return; }
+  const { blocks, conflicts } = _smCollectBlocks();
+  if (!blocks.length) { alert('Bitte mindestens einen Slot anklicken.'); return; }
+  // Konflikt-Entscheidungen sammeln
+  const global = (document.querySelector('input[name="sm-global"]:checked') || {}).value || 'replace';
+  const confDecisions = {};
+  conflicts.forEach(c => {
+    if (global === 'replace') confDecisions[c.key] = 'replace';
+    else if (global === 'keep') confDecisions[c.key] = 'keep';
+    else {
+      const r = document.querySelector('input[name="sm-c-'+c.key+'"]:checked');
+      confDecisions[c.key] = r ? r.value : 'replace';
+    }
+  });
+  const btn = document.getElementById('sm-apply');
+  btn.disabled = true; btn.textContent = 'Verteile …';
+  try {
+    const r = await fetch('/api/ls/distribute', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ls_id, blocks, conflicts: confDecisions }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    seriesModalHide();
+    alert('Verteilt: ' + d.written + ' Blöcke · übersprungen: ' + d.skipped
+      + '\nSeite wird neu geladen, damit die LS im Stundenplan sichtbar wird.');
+    location.reload();
+  } catch (e) {
+    alert('Fehler: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Verteilen';
+  }
+}
+
+_smBackdrop.addEventListener('click', seriesModalHide);
+document.getElementById('sm-cancel').addEventListener('click', seriesModalHide);
+document.getElementById('sm-apply').addEventListener('click', seriesModalApply);
+document.getElementById('sm-week-prev').addEventListener('click',
+  () => seriesModalLoadWeekPreview(_addDaysISO(_smPreviewWeek, -7)));
+document.getElementById('sm-week-next').addEventListener('click',
+  () => seriesModalLoadWeekPreview(_addDaysISO(_smPreviewWeek, 7)));
+_smWeekFrom.addEventListener('change', _smRecompute);
+_smWeekTo.addEventListener('change', _smRecompute);
+_smLs.addEventListener('change', _smRecompute);
+
+// Tiefer Einstieg: ?distribute_ls=<id> → Modal mit vorausgewählter LS öffnen
+(function _maybeOpenFromQuery() {
+  const sp = new URLSearchParams(location.search);
+  const lsId = sp.get('distribute_ls');
+  if (lsId) {
+    setTimeout(() => seriesModalOpen({ ls_id: lsId }), 100);
+  }
+})();
+
 document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   el.addEventListener('click', () => {
     try {

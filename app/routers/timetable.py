@@ -576,6 +576,32 @@ def api_forward_done(
 # ── Reihen-Planung: LS auf Block-Set verteilen ───────────────────────────
 
 
+@router.get("/api/ls/list")
+def api_ls_list(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    klassen: str = "",
+):
+    """Liefert alle LS des Users; wenn `klassen` gesetzt, sortiert
+    klassen-spezifische LS nach oben."""
+    rows = db.query(LearningSituation).filter(
+        LearningSituation.user_id == user.id
+    ).order_by(LearningSituation.updated_at.desc()).all()
+    def sort_key(ls):
+        same = 0 if (klassen and ls.klassen_key == klassen) else 1
+        return (same, )
+    rows.sort(key=sort_key)
+    return JSONResponse({
+        "ok": True,
+        "items": [
+            {"id": ls.id, "display_name": ls.display_name,
+             "klassen_key": ls.klassen_key or "",
+             "lernfeld": ls.lernfeld or ""}
+            for ls in rows
+        ],
+    })
+
+
 @router.get("/api/timetable/week-preview")
 def api_week_preview(
     user: Annotated[User, Depends(require_user)],
