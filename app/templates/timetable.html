@@ -191,6 +191,9 @@ window.MathJax = {
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ prev_week }}">← vorige Woche</a>
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ this_week }}">heute</a>
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ next_week }}">nächste Woche →</a>
+      <a class="btn btn-sec" style="padding:5px 10px;font-size:12px"
+         href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
+         title="Wochen-Arbeitsplan dieser Woche als PDF herunterladen">📄 Arbeitsplan (PDF)</a>
     </div>
     {% endif %}
   </div>

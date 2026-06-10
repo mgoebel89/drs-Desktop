@@ -149,6 +149,204 @@ def timetable_view(
     })
 
 
+_WEEKDAY_LONG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
+
+
+def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
+    """Sammelt alle Daten für den Wochen-Arbeitsplan (PDF).
+
+    Liefert {monday, friday, days: [{label, ical, rows}]}. Nur Tage mit
+    Unterricht (oder iCal-Terminen) erscheinen. Pro Block eine Zeile je
+    Lesson; Blöcke ohne Notiz behalten leere Inhaltsfelder."""
+    monday = ref - timedelta(days=ref.weekday())
+    friday = monday + timedelta(days=4)
+
+    ical_events: list[dict] = []
+    for cal in db.query(IcalCalendar).filter(
+        IcalCalendar.user_id == user.id, IcalCalendar.enabled == True).all():  # noqa: E712
+        evs, err_msg = ical_client.get_events_for_calendar(cal, monday, friday)
+        if not err_msg:
+            ical_events.extend(evs)
+
+    grid = webuntis_client.get_week_grid(user, ref, ical_events=ical_events)
+
+    # Blocknotizen der Woche (Volltext) als Map
+    note_map: dict[tuple[str, str, str, str], dict] = {}
+    note_ls: dict[tuple[str, str, str, str], int | None] = {}
+    note_ids: dict[tuple[str, str, str, str], int] = {}
+    for n in db.query(LessonNote).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.lesson_date >= monday.isoformat(),
+        LessonNote.lesson_date <= friday.isoformat(),
+    ).all():
+        key = (n.lesson_date, n.klassen_key or "", n.subjects_key or "",
+               n.block_start or "")
+        note_map[key] = {
+            "theme": n.theme or "", "notes": n.notes or "",
+            "material": n.material or "", "remarks": n.remarks or "",
+            "subject_override": n.subject_override or "",
+            "is_exam": bool(n.is_exam),
+        }
+        note_ls[key] = n.learning_situation_id
+        note_ids[key] = n.id
+
+    # Reihen-Fachnamen
+    series_override: dict[tuple[str, str], str] = {}
+    for so in db.query(LessonSeriesOverride).filter(
+        LessonSeriesOverride.user_id == user.id,
+    ).all():
+        if so.display_name.strip():
+            series_override[(so.klassen_key, so.subjects_key)] = so.display_name
+
+    # LS-Namen + Aufgaben-Marker
+    ls_names: dict[int, str] = {}
+    ls_ids = {v for v in note_ls.values() if v}
+    if ls_ids:
+        for ls in db.query(LearningSituation).filter(
+            LearningSituation.id.in_(ls_ids)).all():
+            ls_names[ls.id] = ls.display_name
+
+    aufgaben_markers: dict[tuple[str, str, str, str], str] = {}
+    rows_a = db.query(
+        LessonNote.lesson_date, LessonNote.klassen_key, LessonNote.subjects_key,
+        LessonNote.block_start, LsAufgabe.nummer,
+    ).join(
+        LessonNoteAufgabe, LessonNoteAufgabe.lesson_note_id == LessonNote.id,
+    ).join(
+        LsAufgabe, LsAufgabe.id == LessonNoteAufgabe.ls_aufgabe_id,
+    ).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.lesson_date >= monday.isoformat(),
+        LessonNote.lesson_date <= friday.isoformat(),
+    ).order_by(LessonNote.lesson_date, LsAufgabe.nummer).all()
+    bucket_a: dict[tuple[str, str, str, str], list[int]] = {}
+    for d, kk, sk, bs, num in rows_a:
+        bucket_a.setdefault((d, kk or "", sk or "", bs or ""), []).append(num)
+    for key, nums in bucket_a.items():
+        aufgaben_markers[key] = "Aufg. " + ", ".join(str(n) for n in nums)
+
+    # Prüfungen der Woche
+    week_exams = db.query(Exam).filter(
+        Exam.owner_user_id == user.id,
+        Exam.datum >= monday.isoformat(),
+        Exam.datum <= friday.isoformat(),
+    ).all()
+    exams_by_note_id: dict[int, str] = {}
+    exams_by_day_class: list[tuple[str, set[str], str]] = []
+    for exm in week_exams:
+        if exm.lesson_note_id:
+            exams_by_note_id[exm.lesson_note_id] = exm.title
+        classes = {c.strip() for c in (exm.klassen_key or "").split(",") if c.strip()}
+        exams_by_day_class.append((exm.datum, classes, exm.title))
+
+    # Tage aufbauen
+    days_out: list[dict] = []
+    for day_idx in range(5):
+        d = monday + timedelta(days=day_idx)
+        d_iso = d.isoformat()
+
+        ical_lines: list[str] = []
+        for ev in grid.get("all_day_row", {}).get(day_idx, []):
+            ical_lines.append(f"Ganztägig: {ev.get('summary', '')}")
+        for (slot_start, di), evs in grid.get("events", {}).items():
+            if di != day_idx:
+                continue
+            for ev in evs:
+                ical_lines.append(
+                    f"{ev.get('start_time', '')}–{ev.get('end_time', '')} "
+                    f"{ev.get('summary', '')}")
+
+        rows: list[dict] = []
+        for sl in grid["slots"]:
+            lessons = grid["cells"].get((sl["start"], day_idx)) or []
+            for i, l in enumerate(lessons):
+                kk, sk = webuntis_client.lesson_key_parts(l)
+                key = (d_iso, kk, sk, sl["start"])
+                note = note_map.get(key, {})
+                fach = (note.get("subject_override")
+                        or series_override.get((kk, sk))
+                        or " / ".join(l.get("subjects_long")
+                                      or l.get("subjects") or []))
+                ls_id = note_ls.get(key)
+                pruefung = ""
+                note_id = note_ids.get(key)
+                if note_id and note_id in exams_by_note_id:
+                    pruefung = exams_by_note_id[note_id]
+                else:
+                    lesson_classes = set(l.get("klassen") or [])
+                    for exd, classes, title in exams_by_day_class:
+                        if exd == d_iso and (classes & lesson_classes):
+                            pruefung = title
+                            break
+                if not pruefung and note.get("is_exam"):
+                    pruefung = "✓ Prüfung"
+                rows.append({
+                    "block": sl["name"] if i == 0 else "",
+                    "zeit": f"{sl['start']}–{sl['end']}" if i == 0 else "",
+                    "klasse": ", ".join(l.get("klassen") or []),
+                    "fach": fach,
+                    "thema": note.get("theme", ""),
+                    "notizen": note.get("notes", ""),
+                    "material": note.get("material", ""),
+                    "bemerkungen": note.get("remarks", ""),
+                    "ls_name": ls_names.get(ls_id, "") if ls_id else "",
+                    "aufgaben": aufgaben_markers.get(key, ""),
+                    "pruefung": pruefung,
+                })
+
+        if rows or ical_lines:
+            days_out.append({
+                "label": f"{_WEEKDAY_LONG[day_idx]}, {d.strftime('%d.%m.%Y')}",
+                "ical": ical_lines,
+                "rows": rows,
+            })
+
+    return {"monday": monday, "friday": friday, "days": days_out}
+
+
+@router.get("/timetable/arbeitsplan.pdf")
+async def timetable_arbeitsplan_pdf(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    week: str | None = None,
+):
+    """Wochen-Arbeitsplan als A4-PDF: pro Tag eine Tabelle mit Block,
+    Klasse, Fach, geplantem Inhalt, LS/Aufgaben und Prüfungen."""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+
+    from app import branding
+    from app.auth import audit
+    from app.services.playwright_pdf import render_pdf
+
+    if not user.untis_creds_enc:
+        raise HTTPException(400, "Keine WebUntis-Zugangsdaten hinterlegt")
+    ref = _parse_iso_date(week)
+    plan = _collect_week_plan(db, user, ref)
+
+    html = templates.get_template("timetable/arbeitsplan_pdf.html").render({
+        "request": request,
+        "days": plan["days"],
+        "monday": plan["monday"],
+        "friday": plan["friday"],
+        "lehrer_name": user.full_name or user.username,
+        "school_logo_data_url": branding.logo_data_url(db),
+        "school_name_value": branding.get_school_name(db),
+    })
+    pdf_bytes = await render_pdf(html)
+
+    audit(db, "arbeitsplan_pdf", actor=user,
+          target=plan["monday"].isoformat(), request=request)
+    db.commit()
+
+    filename = f"arbeitsplan_{plan['monday'].isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
+    )
+
+
 @router.get("/timetable/diagnose", response_class=HTMLResponse)
 def timetable_diagnose(
     request: Request,

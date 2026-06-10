@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Arbeitsplan — Woche vom {{ monday.strftime('%d.%m.%Y') }}</title>
+<style>
+:root{
+  --blau:#00639C; --blau-hell:#E6F3FA;
+  --gruen:#B1C800; --pink:#D4005E; --gelb:#F8B442;
+  --border:#ddd; --text:#1a1a1a; --muted:#666;
+}
+@page{ size:A4; margin:15mm; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DIN Pro',Calibri,Arial,sans-serif;color:var(--text);font-size:12px;}
+.drs-header{display:flex;justify-content:space-between;align-items:flex-start;
+  margin-bottom:1.2rem;padding-bottom:.8rem;border-bottom:2px solid var(--blau);}
+.brand{font-weight:700;color:var(--blau);font-size:15px;letter-spacing:.5px;
+  display:flex;align-items:center;gap:.6rem;}
+.brand img{height:38px;width:auto;}
+.meta{text-align:right;font-size:11px;color:var(--muted);line-height:1.7;}
+.meta strong{color:var(--text);font-size:12px;}
+h1{font-size:17px;color:var(--blau);margin:.2rem 0 1rem;}
+
+section.day{margin-bottom:1.1rem;}
+.day-head{background:var(--blau);color:#fff;font-weight:700;font-size:13px;
+  padding:5px 11px;border-radius:6px 6px 0 0;}
+.day-ical{font-style:italic;font-size:11px;color:var(--muted);
+  padding:4px 11px;background:#f5f8fb;border:1px solid var(--border);border-top:0;}
+
+table.plan{width:100%;border-collapse:collapse;}
+table.plan th,table.plan td{border:1px solid var(--border);padding:5px 8px;
+  vertical-align:top;font-size:11px;}
+table.plan th{background:var(--blau-hell);color:var(--blau);text-align:left;
+  font-size:10px;text-transform:uppercase;letter-spacing:.4px;}
+table.plan tr{page-break-inside:avoid;}
+td.block{width:56px;white-space:nowrap;font-weight:700;color:var(--blau);}
+td.block .zeit{display:block;font-weight:400;font-size:9px;color:var(--muted);}
+td.klasse{width:70px;}
+td.fach{width:110px;}
+td.inhalt .thema{font-weight:700;}
+td.inhalt .notizen{margin-top:2px;white-space:pre-wrap;}
+td.inhalt .klein{margin-top:3px;font-size:10px;color:var(--muted);}
+td.inhalt .klein strong{font-weight:600;}
+td.ls{width:110px;font-size:10px;}
+td.ls .lsname{font-weight:600;}
+td.pruefung{width:85px;}
+td.pruefung.hit{color:var(--pink);font-weight:700;}
+
+.empty-week{margin-top:2rem;padding:1rem;border:1px dashed var(--border);
+  border-radius:8px;color:var(--muted);text-align:center;}
+</style>
+</head>
+<body>
+  <div class="drs-header">
+    <div class="brand">
+      {% if school_logo_data_url %}<img src="{{ school_logo_data_url }}" alt="">{% endif %}
+      <span>{{ school_name_value }}</span>
+    </div>
+    <div class="meta">
+      <strong>{{ lehrer_name }}</strong><br>
+      Woche vom {{ monday.strftime('%d.%m.') }}–{{ friday.strftime('%d.%m.%Y') }}
+    </div>
+  </div>
+
+  <h1>Arbeitsplan</h1>
+
+  {% for day in days %}
+  <section class="day">
+    <div class="day-head">{{ day.label }}</div>
+    {% for line in day.ical %}
+    <div class="day-ical">📅 {{ line }}</div>
+    {% endfor %}
+    {% if day.rows %}
+    <table class="plan">
+      <thead>
+        <tr>
+          <th>Block</th><th>Klasse</th><th>Fach</th>
+          <th>Geplanter Inhalt</th><th>LS / Aufgaben</th><th>Prüfung</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in day.rows %}
+        <tr>
+          <td class="block">{{ r.block }}{% if r.zeit %}<span class="zeit">{{ r.zeit }}</span>{% endif %}</td>
+          <td class="klasse">{{ r.klasse }}</td>
+          <td class="fach">{{ r.fach }}</td>
+          <td class="inhalt">
+            {% if r.thema %}<div class="thema">{{ r.thema }}</div>{% endif %}
+            {% if r.notizen %}<div class="notizen">{{ r.notizen }}</div>{% endif %}
+            {% if r.material %}<div class="klein"><strong>Material:</strong> {{ r.material }}</div>{% endif %}
+            {% if r.bemerkungen %}<div class="klein"><strong>Bemerkungen:</strong> {{ r.bemerkungen }}</div>{% endif %}
+          </td>
+          <td class="ls">
+            {% if r.ls_name %}<div class="lsname">{{ r.ls_name }}</div>{% endif %}
+            {% if r.aufgaben %}<div>{{ r.aufgaben }}</div>{% endif %}
+          </td>
+          <td class="pruefung{% if r.pruefung %} hit{% endif %}">{{ r.pruefung }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+  {% else %}
+  <div class="empty-week">Keine Stunden in dieser Woche.</div>
+  {% endfor %}
+</body>
+</html>
