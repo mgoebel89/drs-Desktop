@@ -4,22 +4,10 @@
 <meta charset="UTF-8">
 <title>Arbeitsplan — Woche vom {{ monday.strftime('%d.%m.%Y') }}</title>
 
-{% raw %}
-<script>
-window.MathJax = {
-  tex: {
-    inlineMath: [['$','$']],
-    displayMath: [['$$','$$']],
-    packages: {'[+]': ['physics']},
-    tags: 'none'
-  },
-  options: { skipHtmlTags: ['script','noscript','style','textarea'] }
-};
-</script>
-{% endraw %}
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
-
 <style>
+math { font-size: 1em; font-family: 'Latin Modern Math','STIX Two Math',
+       'Cambria Math',serif; }
+math[display="block"] { display: block; margin: .3em 0; text-align: center; }
 :root{
   --blau:#00639C; --blau-hell:#E6F3FA;
   --gruen:#B1C800; --pink:#D4005E; --gelb:#F8B442;

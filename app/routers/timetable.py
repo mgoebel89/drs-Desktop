@@ -197,8 +197,10 @@ _md_renderer = None
 def _md_to_html(text: str) -> str:
     """Rendert die Blocknotizen (Markdown) als HTML für den Arbeitsplan-PDF.
 
-    Nutzt markdown-it-py wie das Obsidian-Notizen-Rendering. Falls keine
-    Eingabe vorliegt → leerer String."""
+    Nutzt markdown-it-py wie das Obsidian-Notizen-Rendering. LaTeX-Mathe
+    ($...$ inline, $$...$$ display) wird serverseitig via latex2mathml in
+    MathML konvertiert — Chromium rendert MathML nativ im PDF, kein
+    MathJax/CDN nötig."""
     if not text or not text.strip():
         return ""
     global _md_renderer
@@ -208,7 +210,44 @@ def _md_to_html(text: str) -> str:
             MarkdownIt("commonmark", {"html": False, "linkify": True, "typographer": True})
             .enable("table").enable("strikethrough")
         )
-    return _md_renderer.render(text)
+    # Vor dem Markdown-Render Mathe-Stellen herauslösen und durch
+    # neutrale Platzhalter ersetzen, damit Markdown nicht in $...$
+    # hineininterpretiert (z. B. Underscores als Italic).
+    import re
+    chunks: list[str] = []
+
+    def _mathml(latex: str, display: bool) -> str:
+        try:
+            from latex2mathml.converter import convert
+            ml = convert(latex)
+            if display:
+                ml = ml.replace("<math ", '<math display="block" ', 1)
+        except Exception:
+            # Fallback: roh als Code-Span ausgeben, damit nichts verloren geht
+            esc = (latex.replace("&", "&amp;").replace("<", "&lt;")
+                   .replace(">", "&gt;"))
+            return f"<code>${esc}$</code>"
+        return ml
+
+    def _stash(s: str) -> str:
+        idx = len(chunks)
+        chunks.append(s)
+        return f"@@MATHCHUNK{idx}@@"
+
+    work = re.sub(
+        r"\$\$([^$]+?)\$\$",
+        lambda m: _stash(_mathml(m.group(1).strip(), display=True)),
+        text, flags=re.DOTALL,
+    )
+    work = re.sub(
+        r"\$([^$\n]+?)\$",
+        lambda m: _stash(_mathml(m.group(1).strip(), display=False)),
+        work,
+    )
+    html = _md_renderer.render(work)
+    for i, ml in enumerate(chunks):
+        html = html.replace(f"@@MATHCHUNK{i}@@", ml)
+    return html
 
 
 def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
