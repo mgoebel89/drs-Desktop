@@ -465,21 +465,27 @@ window.MathJax = {
                          data-subjects-key="{{ sk }}"
                          data-block-start="{{ sl.start }}">
                       <div class="tt-klasse">
-                        {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
-                        {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
-                        {% if has_pin %}<span class="forward-pin" title="Bemerkung aus letzter Stunde offen">📌</span>{% endif %}
+                        {% if state != 'cancelled' %}
+                          {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
+                          {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
+                          {% if has_pin %}<span class="forward-pin" title="Bemerkung aus letzter Stunde offen">📌</span>{% endif %}
+                        {% endif %}
                         <span>{{ cls }}</span>
                       </div>
-                      {% if fach_display %}<div class="tt-fach">{{ fach_display }}</div>{% endif %}
-                      {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
-                      {% if aufgaben_mark %}
-                        <div class="tt-aufgaben"
-                             style="font-size:10px;color:#5e3fc0;background:#f0ecff;
-                                    padding:1px 6px;border-radius:8px;margin-top:2px;
-                                    display:inline-block;max-width:100%;
-                                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                          {{ aufgaben_mark }}
-                        </div>
+                      {% if state == 'cancelled' %}
+                        <div class="tt-fach" style="font-style:italic">entfällt</div>
+                      {% else %}
+                        {% if fach_display %}<div class="tt-fach">{{ fach_display }}</div>{% endif %}
+                        {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
+                        {% if aufgaben_mark %}
+                          <div class="tt-aufgaben"
+                               style="font-size:10px;color:#5e3fc0;background:#f0ecff;
+                                      padding:1px 6px;border-radius:8px;margin-top:2px;
+                                      display:inline-block;max-width:100%;
+                                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                            {{ aufgaben_mark }}
+                          </div>
+                        {% endif %}
                       {% endif %}
                     </div>
                   {% endfor %}

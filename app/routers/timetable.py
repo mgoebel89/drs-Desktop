@@ -322,10 +322,23 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
                 kk, sk = webuntis_client.lesson_key_parts(l)
                 key = (d_iso, kk, sk, sl["start"])
                 note = note_map.get(key, {})
+                is_cancelled = (l.get("code") == "cancelled")
                 fach = (note.get("subject_override")
                         or series_override.get((kk, sk))
                         or " / ".join(l.get("subjects_long")
                                       or l.get("subjects") or []))
+                if is_cancelled:
+                    rows.append({
+                        "block": sl["name"] if i == 0 else "",
+                        "zeit": f"{sl['start']}–{sl['end']}" if i == 0 else "",
+                        "klasse": ", ".join(l.get("klassen") or []),
+                        "fach": (fach + " (entfällt)").strip(),
+                        "thema": "", "notizen_html": "",
+                        "material": "", "bemerkungen": "",
+                        "ls_name": "", "aufgaben": "",
+                        "pruefung": "", "cancelled": True,
+                    })
+                    continue
                 ls_id = note_ls.get(key)
                 pruefung = ""
                 note_id = note_ids.get(key)
@@ -351,6 +364,7 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
                     "ls_name": ls_names.get(ls_id, "") if ls_id else "",
                     "aufgaben": aufgaben_markers.get(key, ""),
                     "pruefung": pruefung,
+                    "cancelled": False,
                 })
 
         if rows or ical_lines:
