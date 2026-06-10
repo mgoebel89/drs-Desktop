@@ -205,7 +205,11 @@ class LearningSituation(Base):
     content_md_present: Mapped[bool] = mapped_column(Boolean, default=False)
     # Schema v3 (Migration 0015): 2 = Wizard v2, 3 = neue Vorlage mit
     # Arbeitsblättern, Lehrerinformationen, Leistungsfeststellung.
+    # Schema v3 (Migration 0015): 2 = Wizard v2, 3 = neue Vorlage,
+    # 4 = LS-Neudesign (Migration 0021): Auftrag-Feld, mehrfache Lernfelder,
+    # strukturierte Anhänge, Stunden-Budget, Moodle-Push.
     schema_version: Mapped[int] = mapped_column(Integer, default=2)
+    # dauer_stunden zählt Schulstunden (45 min). 1 Stundenplan-Block = 2.
     dauer_stunden: Mapped[int] = mapped_column(Integer, default=0)
     version_no: Mapped[int] = mapped_column(Integer, default=1)
     lernsituation_md: Mapped[str] = mapped_column(Text, default="")
@@ -214,6 +218,16 @@ class LearningSituation(Base):
     uebergreifende_aspekte_md: Mapped[str] = mapped_column(Text, default="")
     lehrer_vorwissen_md: Mapped[str] = mapped_column(Text, default="")
     leistungsfeststellung_md: Mapped[str] = mapped_column(Text, default="")
+    # Schema v4: betrieblicher Auftrag / Handlungssituation als
+    # didaktischer Kern, getrennt von der eher kontextuellen
+    # 'lernsituation_md'.
+    auftrag_md: Mapped[str] = mapped_column(Text, default="")
+    auftrag_bild_path: Mapped[str] = mapped_column(String(500), default="")
+    fachliche_praezisierung_md: Mapped[str] = mapped_column(Text, default="")
+    # Moodle-Push-Verknüpfung
+    moodle_course_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    moodle_last_pushed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
     # Sync-Tracking für die Zwei-Wege-Sync App ↔ Obsidian.
     content_hash: Mapped[str] = mapped_column(String(64), default="")
     content_mtime: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -252,10 +266,63 @@ class LsArbeitsblatt(Base):
     )
     position: Mapped[int] = mapped_column(Integer, default=0)
     title: Mapped[str] = mapped_column(String(255), default="")
+    # v3-Freitext-Phase ('Arbeitsplanung' o. ä.) — bleibt für Bestand;
+    # Schema v4 nutzt zusätzlich 'phasen' (CSV der 6 Standardphasen).
     phase: Mapped[str] = mapped_column(String(255), default="")
+    phasen: Mapped[str] = mapped_column(String(128), default="")
+    stunden_geplant: Mapped[int] = mapped_column(Integer, default=0)
     bearbeitungshinweis_md: Mapped[str] = mapped_column(Text, default="")
     content_md: Mapped[str] = mapped_column(Text, default="")
+    # Moodle-Buch-Kapitel-ID nach Push
+    moodle_chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class Lernfeld(Base):
+    """Stammdaten Lernfeld (z. B. LF 5 'Steuerungs-Hardware analysieren'
+    für Mechatroniker). Eine LS kann mehreren Lernfeldern zugeordnet sein
+    (Schema v4, Migration 0021)."""
+    __tablename__ = "lernfelder"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    beruf_key: Mapped[str] = mapped_column(String(64), default="", index=True)
+    nummer: Mapped[int] = mapped_column(Integer, default=0)
+    titel: Mapped[str] = mapped_column(String(255), default="")
+    stunden_lehrplan: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LsLernfeld(Base):
+    """n:m-Zuordnung LS ↔ Lernfeld (Schema v4)."""
+    __tablename__ = "ls_lernfelder"
+
+    learning_situation_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="CASCADE"),
+        primary_key=True)
+    lernfeld_id: Mapped[int] = mapped_column(
+        ForeignKey("lernfelder.id", ondelete="CASCADE"),
+        primary_key=True)
+
+
+class LsAttachment(Base):
+    """Strukturierter Anhang einer LS (Schema v4): Auftragsbild,
+    Schaltplan, Datenblatt, Sonstiges. Die Datei selbst liegt im
+    SMB-Folder der LS; smb_relpath ist relativ zu smb_folder_name."""
+    __tablename__ = "ls_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    learning_situation_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="CASCADE"), index=True)
+    kategorie: Mapped[str] = mapped_column(String(32), default="sonstiges")
+    dateiname: Mapped[str] = mapped_column(String(255), default="")
+    smb_relpath: Mapped[str] = mapped_column(String(500), default="")
+    mime_type: Mapped[str] = mapped_column(String(120), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class LessonSeriesOverride(Base):
