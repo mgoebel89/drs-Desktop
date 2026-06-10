@@ -152,6 +152,26 @@ def timetable_view(
 _WEEKDAY_LONG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
 
 
+_md_renderer = None
+
+
+def _md_to_html(text: str) -> str:
+    """Rendert die Blocknotizen (Markdown) als HTML für den Arbeitsplan-PDF.
+
+    Nutzt markdown-it-py wie das Obsidian-Notizen-Rendering. Falls keine
+    Eingabe vorliegt → leerer String."""
+    if not text or not text.strip():
+        return ""
+    global _md_renderer
+    if _md_renderer is None:
+        from markdown_it import MarkdownIt
+        _md_renderer = (
+            MarkdownIt("commonmark", {"html": False, "linkify": True, "typographer": True})
+            .enable("table").enable("strikethrough")
+        )
+    return _md_renderer.render(text)
+
+
 def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
     """Sammelt alle Daten für den Wochen-Arbeitsplan (PDF).
 
@@ -286,7 +306,7 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
                     "klasse": ", ".join(l.get("klassen") or []),
                     "fach": fach,
                     "thema": note.get("theme", ""),
-                    "notizen": note.get("notes", ""),
+                    "notizen_html": _md_to_html(note.get("notes", "")),
                     "material": note.get("material", ""),
                     "bemerkungen": note.get("remarks", ""),
                     "ls_name": ls_names.get(ls_id, "") if ls_id else "",
@@ -341,9 +361,11 @@ async def timetable_arbeitsplan_pdf(
     db.commit()
 
     filename = f"arbeitsplan_{plan['monday'].isoformat()}.pdf"
+    # Inline-Disposition → Browser zeigt das PDF als Vorschau; das
+    # eingebaute PDF-Viewer-UI bietet darin einen Download-Knopf.
     return Response(
         content=pdf_bytes, media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
+        headers={"Content-Disposition": f'inline; filename="{quote(filename)}"'},
     )
 
 

@@ -21,7 +21,10 @@ body{font-family:'DIN Pro',Calibri,Arial,sans-serif;color:var(--text);font-size:
 .meta strong{color:var(--text);font-size:12px;}
 h1{font-size:17px;color:var(--blau);margin:.2rem 0 1rem;}
 
-section.day{margin-bottom:1.1rem;}
+/* Tag-Sektion bleibt zusammen. Passt sie nicht mehr auf die aktuelle
+   Seite, schiebt der PDF-Engine den ganzen Block (Tages-Balken + Tabelle)
+   auf die nächste Seite. Nur extrem lange Tage dürfen umbrechen. */
+section.day{margin-bottom:1.1rem;page-break-inside:avoid;break-inside:avoid;}
 .day-head{background:var(--blau);color:#fff;font-weight:700;font-size:13px;
   padding:5px 11px;border-radius:6px 6px 0 0;}
 .day-ical{font-style:italic;font-size:11px;color:var(--muted);
@@ -38,7 +41,14 @@ td.block .zeit{display:block;font-weight:400;font-size:9px;color:var(--muted);}
 td.klasse{width:70px;}
 td.fach{width:110px;}
 td.inhalt .thema{font-weight:700;}
-td.inhalt .notizen{margin-top:2px;white-space:pre-wrap;}
+td.inhalt .notizen{margin-top:2px;line-height:1.4;}
+td.inhalt .notizen p{margin:0 0 .25em;}
+td.inhalt .notizen p:last-child{margin-bottom:0;}
+td.inhalt .notizen ul,td.inhalt .notizen ol{margin:.1em 0 .25em 1.1em;padding:0;}
+td.inhalt .notizen li{margin:0;}
+td.inhalt .notizen strong{font-weight:700;}
+td.inhalt .notizen em{font-style:italic;}
+td.inhalt .notizen code{font-family:Consolas,monospace;font-size:10px;background:#f3f3f3;padding:0 3px;border-radius:3px;}
 td.inhalt .klein{margin-top:3px;font-size:10px;color:var(--muted);}
 td.inhalt .klein strong{font-weight:600;}
 td.ls{width:110px;font-size:10px;}
@@ -86,7 +96,7 @@ td.pruefung.hit{color:var(--pink);font-weight:700;}
           <td class="fach">{{ r.fach }}</td>
           <td class="inhalt">
             {% if r.thema %}<div class="thema">{{ r.thema }}</div>{% endif %}
-            {% if r.notizen %}<div class="notizen">{{ r.notizen }}</div>{% endif %}
+            {% if r.notizen_html %}<div class="notizen">{{ r.notizen_html|safe }}</div>{% endif %}
             {% if r.material %}<div class="klein"><strong>Material:</strong> {{ r.material }}</div>{% endif %}
             {% if r.bemerkungen %}<div class="klein"><strong>Bemerkungen:</strong> {{ r.bemerkungen }}</div>{% endif %}
           </td>
