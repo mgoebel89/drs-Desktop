@@ -173,6 +173,26 @@ window.MathJax = {
   .note-status {
     font-size: 11px; color: var(--muted); margin-top: .3rem; font-style: italic;
   }
+  /* Pin-Marker am Block: Bemerkung aus der vorherigen Stunde noch offen */
+  .forward-pin { color: #f57c00; font-size: 11px; margin-right: 2px; }
+  /* Banner im Side-Panel für offene Forward-Reminder (orange Hervorhebung) */
+  .forward-banner {
+    margin: 0 0 1rem; padding: .7rem .9rem;
+    background: #fff3e0; border: 1px solid #f5b942; border-left: 4px solid #f57c00;
+    border-radius: 6px; font-size: 13px;
+  }
+  .forward-banner .fb-head {
+    font-weight: 700; color: #b85b00; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px;
+  }
+  .forward-banner .fb-text { white-space: pre-wrap; }
+  .forward-banner button {
+    margin-top: .5rem; padding: 4px 10px; font-size: 12px;
+    background: #f57c00; color: #fff; border: none;
+    border-radius: 4px; cursor: pointer;
+  }
+  .forward-banner button:hover { background: #e36e00; }
+
   .prev-note-box {
     background: var(--blau-hell); border-radius: 6px; padding: .7rem .9rem;
     font-size: 12px; margin-bottom: 1rem;
@@ -283,6 +303,7 @@ window.MathJax = {
                     {% set series_ov = grid.series_override.get((kk, sk)) if grid.series_override else None %}
                     {% set fach_display = sess_ov or series_ov %}
                     {% set aufgaben_mark = grid.aufgaben_markers.get((d_iso, kk, sk, sl.start)) if grid.aufgaben_markers else None %}
+                    {% set has_pin = (d_iso, kk, sk, sl.start) in (grid.pending_forward_reminders or []) %}
                     <div class="tt-lesson {{ state }}{% if is_exam %} exam{% endif %}"
                          data-lesson='{{ l|tojson|forceescape }}'
                          data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
@@ -294,6 +315,7 @@ window.MathJax = {
                       <div class="tt-klasse">
                         {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
                         {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
+                        {% if has_pin %}<span class="forward-pin" title="Bemerkung aus letzter Stunde offen">📌</span>{% endif %}
                         <span>{{ cls }}</span>
                       </div>
                       {% if fach_display %}<div class="tt-fach">{{ fach_display }}</div>{% endif %}
@@ -453,12 +475,17 @@ function _doSave() {
   const material = document.getElementById('note-material')?.value || '';
   const remarks = document.getElementById('note-remarks')?.value || '';
   const sov = document.getElementById('note-subject-override')?.value || '';
+  const fwdEl = document.getElementById('note-forward');
   const payload = {
     ...(_currentLessonKey),
     theme, notes, material, remarks,
     subject_override: sov,
     is_exam: isExam,
   };
+  // forward_remarks nur dann in den Payload schreiben, wenn das Feld
+  // im aktuellen Panel existiert — sonst würde ein leeres Feld den
+  // Server-seitigen Bestand unbeabsichtigt löschen.
+  if (fwdEl) payload.forward_remarks = fwdEl.value || '';
   const status = document.getElementById('note-status');
   if (status) { status.textContent = 'speichere…'; status.style.color = '#666'; }
   fetch('/api/lesson-note', {
@@ -470,7 +497,8 @@ function _doSave() {
   .then(d => {
     if (status) { status.textContent = d.deleted ? 'leer – verworfen' : 'gespeichert'; status.style.color = '#2e7d32'; }
     // Live-Update der Grid-Karte: Exam-Rahmen + Notiz-Icon sofort sichtbar
-    const hasNote = !!(theme.trim() || notes.trim() || material.trim() || remarks.trim() || sov.trim());
+    const fwdVal = fwdEl ? (fwdEl.value || '').trim() : '';
+    const hasNote = !!(theme.trim() || notes.trim() || material.trim() || remarks.trim() || sov.trim() || fwdVal);
     _updateLessonCardClasses(_currentLessonKey, isExam, hasNote);
   })
   .catch(e => { if (status) { status.textContent = 'Fehler: ' + e.message; status.style.color = '#c62828'; } });
@@ -529,6 +557,9 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + (l.code ? _row('Status', l.code) : '')
     + '</dl>';
 
+  // Offener Forward-Reminder aus der vorherigen Stunde — wird async befüllt
+  html += '<div id="forward-banner-slot"></div>';
+
   // Vorheriges Mal — wird async geladen
   html += '<div id="prev-note-slot"></div>';
 
@@ -547,6 +578,9 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + '<textarea id="note-material" name="material" rows="3"></textarea>'
     + '<label for="note-remarks">Bemerkungen</label>'
     + '<textarea id="note-remarks" name="remarks" rows="3"></textarea>'
+    + '<label for="note-forward" style="margin-top:.6rem;color:#b85b00">📌 Bemerkung für die nächste Stunde</label>'
+    + '<div class="muted" style="font-size:11px;margin-bottom:.3rem">Erscheint beim Öffnen der nächsten Stunde derselben Klasse + Fach als oranger Banner — bis du dort „Erledigt" klickst.</div>'
+    + '<textarea id="note-forward" name="forward_remarks" rows="2" placeholder="z. B. Hausaufgabe abfragen, Bauteil mitbringen …"></textarea>'
     + '<div class="note-status" id="note-status">—</div>'
     + '<h4 style="margin-top:1.4rem">Fach-Anzeige</h4>'
     + '<div class="muted" style="font-size:11px;margin-bottom:.4rem">'
@@ -593,16 +627,17 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     document.getElementById('note-remarks').value = n.remarks || '';
     document.getElementById('note-subject-override').value = n.subject_override || '';
     document.getElementById('note-is-exam').checked = !!n.is_exam;
+    document.getElementById('note-forward').value = n.forward_remarks || '';
     document.getElementById('series-display').value = d.series_default || '';
     document.getElementById('note-status').textContent =
-      (n.theme || n.notes || n.material || n.remarks || n.subject_override || n.is_exam) ? 'geladen' : '—';
+      (n.theme || n.notes || n.material || n.remarks || n.subject_override || n.is_exam || n.forward_remarks) ? 'geladen' : '—';
     document.getElementById('series-status').textContent = d.series_default ? 'geladen' : '—';
   } catch (e) {
     document.getElementById('note-status').textContent = 'Konnte Notizen nicht laden.';
   }
 
   // Auto-Save Listener für Note-Felder
-  ['note-theme', 'note-notes', 'note-material', 'note-remarks', 'note-subject-override'].forEach(id => {
+  ['note-theme', 'note-notes', 'note-material', 'note-remarks', 'note-subject-override', 'note-forward'].forEach(id => {
     document.getElementById(id).addEventListener('input', scheduleNoteSave);
     document.getElementById(id).addEventListener('blur', () => {
       if (_pendingSave) { clearTimeout(_pendingSave); _pendingSave = null; _doSave(); }
@@ -645,7 +680,54 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
         + '</div>';
       retypesetMath();
     }
+    // Offenen Forward-Reminder als orangen Banner oben anzeigen
+    const fwdSlot = document.getElementById('forward-banner-slot');
+    if (fwdSlot && d2.forward_reminder) {
+      const fr = d2.forward_reminder;
+      fwdSlot.innerHTML = '<div class="forward-banner">'
+        + '<div class="fb-head">📌 Aus letzter Stunde (' + esc(fr.source_date) + ')</div>'
+        + '<div class="fb-text">' + esc(fr.text) + '</div>'
+        + '<button type="button" id="fb-done">Erledigt</button>'
+        + '<span class="muted" id="fb-status" style="margin-left:.6rem;font-size:11px"></span>'
+        + '</div>';
+      document.getElementById('fb-done').addEventListener('click', async () => {
+        const st = document.getElementById('fb-status');
+        st.textContent = 'speichere…';
+        try {
+          const r3 = await fetch('/api/lesson-note/forward-done', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              date: fr.source_date,
+              klassen: fr.source_klassen,
+              subjects: fr.source_subjects,
+              block_start: fr.source_block_start,
+            }),
+          });
+          const d3 = await r3.json();
+          if (d3.ok) {
+            // Banner aus dem Panel entfernen + Pin am betroffenen
+            // Quell-Block-Folge-Element ausblenden (best effort).
+            fwdSlot.innerHTML = '';
+            const pin = document.querySelector(
+              '.tt-lesson[data-date="' + dateIso + '"]'
+              + '[data-klassen-key="' + cssEsc(klassenKey) + '"]'
+              + '[data-subjects-key="' + cssEsc(subjectsKey) + '"]'
+              + '[data-block-start="' + cssEsc(blockStart || '') + '"] .forward-pin'
+            );
+            if (pin) pin.remove();
+          } else {
+            st.textContent = 'Fehler';
+          }
+        } catch (e) { st.textContent = 'Fehler: ' + e.message; }
+      });
+    }
   } catch (e) {}
+}
+
+// CSS.escape-Fallback für Attribute mit Sonderzeichen
+function cssEsc(s) {
+  return String(s == null ? '' : s).replace(/(["\\\]])/g, '\\\\$1');
 }
 
 // ── Bewertungen-Box pro Block ─────────────────────────────────────────────

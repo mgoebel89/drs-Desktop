@@ -119,6 +119,12 @@ class LessonNote(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     material: Mapped[str] = mapped_column(Text, default="")
     remarks: Mapped[str] = mapped_column(Text, default="")
+    # Bemerkung an die nächste Stunde derselben Klasse+Fach (z. B. HA-Hinweis).
+    # Wird in der Folgestunde als oranger Banner angezeigt; 'done_at' setzt
+    # der Lehrer per Klick zum Schließen.
+    forward_remarks: Mapped[str] = mapped_column(Text, default="")
+    forward_remarks_done_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
     # Sitzungs-spezifische Fach-Anzeige (überschreibt Untis-Kürzel und Reihen-Default)
     subject_override: Mapped[str] = mapped_column(String(200), default="")
     # Stunde als Prüfung markieren (roter Rahmen im Grid)

@@ -141,6 +141,45 @@ def timetable_view(
             aufgaben_markers[key] = "Aufg. " + ", ".join(str(n) for n in nums)
         grid["aufgaben_markers"] = aufgaben_markers
 
+        # Pin-Marker für offene Forward-Reminder: ein Block der Woche bekommt
+        # einen Pin, wenn die vorherige Stunde derselben (klassen, subjects)
+        # eine forward_remarks-Notiz hat, die noch nicht als 'erledigt'
+        # markiert wurde — und diese Notiz vor dem Block-Datum liegt.
+        pending_forward: set[tuple[str, str, str, str]] = set()
+        # 1) Alle Quellen mit offenem Reminder
+        open_sources = db.query(
+            LessonNote.lesson_date, LessonNote.klassen_key,
+            LessonNote.subjects_key,
+        ).filter(
+            LessonNote.user_id == user.id,
+            LessonNote.forward_remarks != "",
+            LessonNote.forward_remarks_done_at.is_(None),
+            LessonNote.lesson_date <= friday.isoformat(),
+        ).all()
+        # Pro (klassen, subjects) die jüngste Quelle behalten
+        latest_source: dict[tuple[str, str], str] = {}
+        for d, kk_src, sk_src in open_sources:
+            k = (kk_src or "", sk_src or "")
+            if d > latest_source.get(k, ""):
+                latest_source[k] = d
+        # 2) Pro Quelle den NÄCHSTEN passenden Block der Woche markieren
+        for (kk_src, sk_src), src_date in latest_source.items():
+            cand: tuple[str, str, str, str] | None = None
+            for (slot_start, day_idx), lessons in grid["cells"].items():
+                for l in lessons:
+                    kk, sk = webuntis_client.lesson_key_parts(l)
+                    if kk != kk_src or sk != sk_src:
+                        continue
+                    block_date = (monday + timedelta(days=day_idx)).isoformat()
+                    if block_date <= src_date:
+                        continue
+                    key = (block_date, kk, sk, slot_start)
+                    if cand is None or (key[0], key[3]) < (cand[0], cand[3]):
+                        cand = key
+            if cand:
+                pending_forward.add(cand)
+        grid["pending_forward_reminders"] = pending_forward
+
     return templates.TemplateResponse(request, "timetable.html", {
         "user": user, "error": err, "grid": grid,
         "prev_week": (ref - timedelta(days=7)).isoformat(),
@@ -383,7 +422,8 @@ def timetable_diagnose(
 def _note_dict(n: LessonNote | None) -> dict:
     if not n:
         return {"theme": "", "notes": "", "material": "", "remarks": "",
-                "subject_override": "", "is_exam": False}
+                "subject_override": "", "is_exam": False,
+                "forward_remarks": "", "forward_remarks_done_at": None}
     return {
         "theme": n.theme or "",
         "notes": n.notes or "",
@@ -391,6 +431,11 @@ def _note_dict(n: LessonNote | None) -> dict:
         "remarks": n.remarks or "",
         "subject_override": n.subject_override or "",
         "is_exam": bool(n.is_exam),
+        "forward_remarks": n.forward_remarks or "",
+        "forward_remarks_done_at": (
+            n.forward_remarks_done_at.isoformat()
+            if n.forward_remarks_done_at else None
+        ),
         "updated_at": n.updated_at.isoformat() if n.updated_at else None,
     }
 
@@ -445,6 +490,9 @@ def api_save_note(
     remarks = body.get("remarks") or ""
     subject_override = (body.get("subject_override") or "")[:200]
     is_exam = bool(body.get("is_exam"))
+    forward_remarks = body.get("forward_remarks")
+    forward_remarks_present = "forward_remarks" in body
+    fr_text = (forward_remarks or "") if forward_remarks_present else ""
 
     n = db.query(LessonNote).filter(
         LessonNote.user_id == user.id, LessonNote.lesson_date == d,
@@ -452,8 +500,16 @@ def api_save_note(
         LessonNote.block_start == bs,
     ).first()
 
-    is_blank = not any([theme.strip(), notes.strip(), material.strip(),
-                        remarks.strip(), subject_override.strip(), is_exam])
+    # 'forward_remarks' wird nur dann in is_blank einbezogen, wenn das
+    # Feld im Payload mitgesendet wurde — sonst ändert sich der bestehende
+    # Wert nicht (Auto-Save anderer Felder löscht keinen Reminder).
+    blank_inputs = [theme.strip(), notes.strip(), material.strip(),
+                    remarks.strip(), subject_override.strip(), is_exam]
+    if forward_remarks_present:
+        blank_inputs.append(fr_text.strip())
+    elif n:
+        blank_inputs.append((n.forward_remarks or "").strip())
+    is_blank = not any(blank_inputs)
     if is_blank:
         if n:
             db.delete(n)
@@ -472,9 +528,49 @@ def api_save_note(
     n.remarks = remarks
     n.subject_override = subject_override
     n.is_exam = is_exam
+    if forward_remarks_present:
+        old = n.forward_remarks or ""
+        n.forward_remarks = fr_text[:5000]
+        # Bei Inhaltsänderung wird der 'erledigt'-Stempel zurückgesetzt,
+        # damit der Reminder in der nächsten Stunde wieder als offen
+        # erscheint. Leerung markiert keinen offenen Reminder mehr.
+        if old != n.forward_remarks:
+            n.forward_remarks_done_at = None
     n.updated_at = datetime.utcnow()
     db.commit()
     return JSONResponse({"ok": True, "saved_at": n.updated_at.isoformat()})
+
+
+@router.post("/api/lesson-note/forward-done")
+def api_forward_done(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Setzt den 'erledigt'-Zeitstempel auf der QUELL-Notiz, deren
+    forward_remarks in der jetzt angezeigten Folgestunde als Banner
+    erscheint. Identifiziert wird die Quelle über (date, klassen,
+    subjects, block_start) — exakt die Werte, die der
+    /api/lesson-note/previous-Endpoint zurückgeliefert hat."""
+    d = (body.get("date") or "").strip()
+    kk = (body.get("klassen") or "")[:255]
+    sk = (body.get("subjects") or "")[:255]
+    bs = (body.get("block_start") or "")[:5]
+    if len(d) != 10:
+        raise HTTPException(400, "Ungültiges Datum (YYYY-MM-DD).")
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id, LessonNote.lesson_date == d,
+        LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+        LessonNote.block_start == bs,
+    ).first()
+    if not n:
+        return JSONResponse({"ok": True, "no_change": True})
+    n.forward_remarks_done_at = datetime.utcnow()
+    db.commit()
+    return JSONResponse({
+        "ok": True,
+        "done_at": n.forward_remarks_done_at.isoformat(),
+    })
 
 
 # ── Reihen-Override (Fach-Bezeichnung pro Klassen+Fach-Kombi) ─────────────
@@ -550,10 +646,25 @@ def api_previous_note(
     if not n:
         n = base_q.order_by(LessonNote.lesson_date.desc()).first()
     if not n:
-        return JSONResponse({"ok": True, "note": None})
-    return JSONResponse({"ok": True, "note": {
+        return JSONResponse({"ok": True, "note": None,
+                             "forward_reminder": None})
+    note_payload = {
         "date": n.lesson_date, "block_start": n.block_start, **_note_dict(n),
-    }})
+    }
+    # Offener Forward-Reminder = Text vorhanden + nicht als 'erledigt' markiert.
+    forward_reminder = None
+    if (n.forward_remarks or "").strip() and not n.forward_remarks_done_at:
+        forward_reminder = {
+            "source_date": n.lesson_date,
+            "source_block_start": n.block_start,
+            "source_klassen": n.klassen_key,
+            "source_subjects": n.subjects_key,
+            "text": n.forward_remarks,
+        }
+    return JSONResponse({
+        "ok": True, "note": note_payload,
+        "forward_reminder": forward_reminder,
+    })
 
 
 # ── Aufgaben aus Lernsituationen pro Block ───────────────────────────────
