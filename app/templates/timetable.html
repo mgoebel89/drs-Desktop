@@ -175,6 +175,64 @@ window.MathJax = {
   }
   /* Pin-Marker am Block: Bemerkung aus der vorherigen Stunde noch offen */
   .forward-pin { color: #f57c00; font-size: 11px; margin-right: 2px; }
+  /* Rechtsklick-Kontextmenü */
+  .block-menu {
+    display: none; position: fixed; z-index: 1100;
+    min-width: 220px; background: #fff; border: 1px solid #ddd;
+    border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    padding: .3rem 0; font-size: 13px;
+  }
+  .block-menu.open { display: block; }
+  .block-menu button {
+    display: block; width: 100%; padding: .5rem .9rem;
+    border: none; background: transparent; text-align: left;
+    cursor: pointer; font-size: 13px; font-family: inherit; color: var(--text);
+  }
+  .block-menu button:hover { background: #f0f4ff; }
+  .block-menu hr {
+    margin: .25rem 0; border: 0; border-top: 1px solid #eee;
+  }
+  /* Kleines Modal für 'Bemerkung nächste Stunde' (Quick-Edit ohne Side-Panel) */
+  .mini-modal-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.45); z-index: 1090;
+  }
+  .mini-modal-backdrop.open { display: block; }
+  .mini-modal {
+    display: none; position: fixed; z-index: 1095;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(440px, 94vw); background: #fff;
+    border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.25);
+    padding: 1rem 1.2rem;
+  }
+  .mini-modal.open { display: block; }
+  .mini-modal h3 { margin: 0 0 .5rem; color: var(--blau); font-size: 15px; }
+  .mini-modal .mm-sub { font-size: 11px; color: var(--muted); margin-bottom: .6rem; }
+  .mini-modal textarea {
+    width: 100%; min-height: 80px; padding: .5rem .7rem;
+    border: 1px solid #ddd; border-radius: 6px; font-family: inherit;
+    font-size: 13px; resize: vertical;
+  }
+  .mini-modal .mm-actions {
+    display: flex; gap: .5rem; justify-content: flex-end; margin-top: .8rem;
+  }
+  /* Quick-Look-Popover für 'Letzte Stunde' */
+  .quick-popover {
+    display: none; position: fixed; z-index: 1100;
+    width: min(360px, 92vw); max-height: 60vh; overflow: auto;
+    background: #fff; border: 1px solid #ddd; border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.2); padding: .8rem 1rem;
+    font-size: 12px;
+  }
+  .quick-popover.open { display: block; }
+  .quick-popover .qp-head {
+    font-size: 11px; color: var(--blau); font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px; margin-bottom: .3rem;
+  }
+  .quick-popover .qp-close {
+    float: right; border: none; background: transparent;
+    font-size: 18px; cursor: pointer; line-height: 1;
+  }
   /* Banner im Side-Panel für offene Forward-Reminder (orange Hervorhebung) */
   .forward-banner {
     margin: 0 0 1rem; padding: .7rem .9rem;
@@ -382,6 +440,35 @@ window.MathJax = {
   </div>
   <div class="tt-panel-body" id="tt-panel-body"></div>
 </aside>
+
+<!-- Rechtsklick-Kontextmenü -->
+<div class="block-menu" id="block-menu" role="menu">
+  <button type="button" data-act="open">🗒 Planung öffnen</button>
+  <button type="button" data-act="forward">📌 Bemerkung für nächste Stunde</button>
+  <button type="button" data-act="series">📚 Lernfeld-Reihe planen</button>
+  <hr>
+  <button type="button" data-act="prev">🔍 Letzte Stunde anzeigen</button>
+  <button type="button" data-act="exam">✅ Prüfung umschalten</button>
+</div>
+
+<!-- Mini-Modal: Bemerkung für nächste Stunde (Quick-Edit) -->
+<div class="mini-modal-backdrop" id="mm-backdrop"></div>
+<div class="mini-modal" id="mm-forward" role="dialog" aria-modal="true">
+  <h3 id="mm-forward-title">📌 Bemerkung für die nächste Stunde</h3>
+  <div class="mm-sub" id="mm-forward-sub">Erscheint in der nächsten Klassen-Stunde als oranger Banner.</div>
+  <textarea id="mm-forward-text" placeholder="z. B. Hausaufgabe abfragen, Bauteil mitbringen …"></textarea>
+  <div class="mm-actions">
+    <button type="button" class="btn btn-sec" id="mm-forward-cancel">Abbrechen</button>
+    <button type="button" class="btn" id="mm-forward-save">Speichern</button>
+  </div>
+</div>
+
+<!-- Quick-Look-Popover: Letzte Stunde -->
+<div class="quick-popover" id="qp-prev">
+  <button type="button" class="qp-close" id="qp-close" aria-label="Schließen">×</button>
+  <div class="qp-head" id="qp-head">Letzte Stunde</div>
+  <div id="qp-body"></div>
+</div>
 
 <script>
 const _panel = document.getElementById('tt-panel');
@@ -920,7 +1007,210 @@ document.querySelectorAll('.tt-lesson').forEach(el => {
                       el.dataset.blockStart || '');
     } catch (e) { console.error(e); }
   });
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    blockMenuShow(e.clientX, e.clientY, el);
+  });
 });
+
+// ── Rechtsklick-Kontextmenü ──────────────────────────────────────────────
+const _blockMenu = document.getElementById('block-menu');
+let _menuTargetEl = null;
+
+function blockMenuShow(x, y, el) {
+  _menuTargetEl = el;
+  _blockMenu.classList.add('open');
+  // Erst sichtbar machen, dann an Cursorposition + Bildschirmrand klammern
+  const rect = _blockMenu.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - 6;
+  const maxY = window.innerHeight - rect.height - 6;
+  _blockMenu.style.left = Math.min(x, maxX) + 'px';
+  _blockMenu.style.top = Math.min(y, maxY) + 'px';
+}
+function blockMenuHide() {
+  _blockMenu.classList.remove('open');
+  _menuTargetEl = null;
+}
+document.addEventListener('click', (e) => {
+  if (!_blockMenu.classList.contains('open')) return;
+  if (!_blockMenu.contains(e.target)) blockMenuHide();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    blockMenuHide();
+    miniForwardHide();
+    quickPrevHide();
+  }
+});
+window.addEventListener('scroll', blockMenuHide, true);
+
+_blockMenu.querySelectorAll('button[data-act]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const act = btn.dataset.act;
+    const el = _menuTargetEl;
+    if (!el) return blockMenuHide();
+    const key = {
+      date: el.dataset.date,
+      klassen: el.dataset.klassenKey || '',
+      subjects: el.dataset.subjectsKey || '',
+      block_start: el.dataset.blockStart || '',
+    };
+    blockMenuHide();
+    if (act === 'open') {
+      el.click();
+    } else if (act === 'forward') {
+      miniForwardOpen(key, el);
+    } else if (act === 'series') {
+      // Phase 4: Reihen-Modal — Platzhalter, kommt im nächsten Schritt
+      alert('Lernfeld-Reihe planen — folgt in der nächsten Phase.');
+    } else if (act === 'prev') {
+      quickPrevOpen(key);
+    } else if (act === 'exam') {
+      await toggleExamForBlock(key, el);
+    }
+  });
+});
+
+// ── Mini-Modal: Bemerkung für nächste Stunde ─────────────────────────────
+const _mmBackdrop = document.getElementById('mm-backdrop');
+const _mmForward = document.getElementById('mm-forward');
+const _mmForwardText = document.getElementById('mm-forward-text');
+let _mmForwardKey = null;
+let _mmForwardSourceEl = null;
+
+async function miniForwardOpen(key, el) {
+  _mmForwardKey = key;
+  _mmForwardSourceEl = el;
+  _mmForwardText.value = '';
+  document.getElementById('mm-forward-sub').textContent =
+    el.dataset.day + ' · ' + el.dataset.slot + ' — '
+    + 'Erscheint in der nächsten Stunde derselben Klasse + Fach als oranger Banner.';
+  // Vorhandenen Wert laden
+  try {
+    const r = await fetch('/api/lesson-note?date=' + encodeURIComponent(key.date)
+      + '&klassen=' + encodeURIComponent(key.klassen)
+      + '&subjects=' + encodeURIComponent(key.subjects)
+      + '&block_start=' + encodeURIComponent(key.block_start));
+    const d = await r.json();
+    _mmForwardText.value = (d.note && d.note.forward_remarks) || '';
+  } catch (e) {}
+  _mmBackdrop.classList.add('open');
+  _mmForward.classList.add('open');
+  setTimeout(() => _mmForwardText.focus(), 50);
+}
+function miniForwardHide() {
+  _mmBackdrop.classList.remove('open');
+  _mmForward.classList.remove('open');
+  _mmForwardKey = null;
+}
+_mmBackdrop.addEventListener('click', miniForwardHide);
+document.getElementById('mm-forward-cancel').addEventListener('click', miniForwardHide);
+document.getElementById('mm-forward-save').addEventListener('click', async () => {
+  if (!_mmForwardKey) return;
+  // GET, dann mit forward_remarks überschreiben + bestehende Felder
+  // erhalten, damit der Save nicht versehentlich Inhalte löscht
+  try {
+    const r0 = await fetch('/api/lesson-note?date=' + encodeURIComponent(_mmForwardKey.date)
+      + '&klassen=' + encodeURIComponent(_mmForwardKey.klassen)
+      + '&subjects=' + encodeURIComponent(_mmForwardKey.subjects)
+      + '&block_start=' + encodeURIComponent(_mmForwardKey.block_start));
+    const d0 = await r0.json();
+    const n = d0.note || {};
+    const payload = {
+      date: _mmForwardKey.date, klassen: _mmForwardKey.klassen,
+      subjects: _mmForwardKey.subjects, block_start: _mmForwardKey.block_start,
+      theme: n.theme || '', notes: n.notes || '',
+      material: n.material || '', remarks: n.remarks || '',
+      subject_override: n.subject_override || '', is_exam: !!n.is_exam,
+      forward_remarks: _mmForwardText.value || '',
+    };
+    await fetch('/api/lesson-note', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    miniForwardHide();
+  } catch (e) {
+    alert('Fehler: ' + e.message);
+  }
+});
+
+// ── Quick-Popover: Letzte Stunde ─────────────────────────────────────────
+const _qpPrev = document.getElementById('qp-prev');
+async function quickPrevOpen(key) {
+  const head = document.getElementById('qp-head');
+  const body = document.getElementById('qp-body');
+  head.textContent = 'Letzte Stunde — lade …';
+  body.innerHTML = '';
+  // Positionierung: zentriert
+  _qpPrev.style.left = '50%';
+  _qpPrev.style.top = '50%';
+  _qpPrev.style.transform = 'translate(-50%, -50%)';
+  _qpPrev.classList.add('open');
+  try {
+    const r = await fetch('/api/lesson-note/previous?before=' + encodeURIComponent(key.date)
+      + '&klassen=' + encodeURIComponent(key.klassen)
+      + '&subjects=' + encodeURIComponent(key.subjects)
+      + '&block_start=' + encodeURIComponent(key.block_start));
+    const d = await r.json();
+    if (d.note) {
+      const p = d.note;
+      head.textContent = 'Letzte Stunde — ' + p.date;
+      body.innerHTML = [
+        p.theme ? '<div><strong>Thema:</strong> ' + esc(p.theme) + '</div>' : '',
+        p.notes ? '<div style="margin-top:.3rem">' + renderMarkdown(p.notes) + '</div>' : '',
+        p.material ? '<div style="margin-top:.3rem"><strong>Material:</strong> ' + esc(p.material) + '</div>' : '',
+        p.remarks ? '<div style="margin-top:.3rem"><strong>Bemerkungen:</strong> ' + esc(p.remarks) + '</div>' : '',
+      ].filter(Boolean).join('') || '<span class="muted">leer</span>';
+      retypesetMath();
+    } else {
+      head.textContent = 'Letzte Stunde';
+      body.innerHTML = '<span class="muted">Keine frühere Notiz gefunden.</span>';
+    }
+  } catch (e) {
+    head.textContent = 'Letzte Stunde — Fehler';
+    body.innerHTML = '<span class="muted">' + esc(e.message) + '</span>';
+  }
+}
+function quickPrevHide() { _qpPrev.classList.remove('open'); }
+document.getElementById('qp-close').addEventListener('click', quickPrevHide);
+document.addEventListener('click', (e) => {
+  if (!_qpPrev.classList.contains('open')) return;
+  if (!_qpPrev.contains(e.target)) {
+    // Nur schließen, wenn nicht innerhalb des Popovers oder des Kontextmenüs
+    if (!_blockMenu.contains(e.target)) quickPrevHide();
+  }
+});
+
+// ── Prüfung-Toggle ohne Side-Panel ───────────────────────────────────────
+async function toggleExamForBlock(key, el) {
+  try {
+    const r0 = await fetch('/api/lesson-note?date=' + encodeURIComponent(key.date)
+      + '&klassen=' + encodeURIComponent(key.klassen)
+      + '&subjects=' + encodeURIComponent(key.subjects)
+      + '&block_start=' + encodeURIComponent(key.block_start));
+    const d0 = await r0.json();
+    const n = d0.note || {};
+    const newIsExam = !n.is_exam;
+    const payload = {
+      date: key.date, klassen: key.klassen,
+      subjects: key.subjects, block_start: key.block_start,
+      theme: n.theme || '', notes: n.notes || '',
+      material: n.material || '', remarks: n.remarks || '',
+      subject_override: n.subject_override || '', is_exam: newIsExam,
+    };
+    await fetch('/api/lesson-note', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    // Live-Update der Block-Karte
+    const hasNote = !!((n.theme || '').trim() || (n.notes || '').trim()
+      || (n.material || '').trim() || (n.remarks || '').trim()
+      || (n.subject_override || '').trim() || newIsExam);
+    _updateLessonCardClasses(key, newIsExam, hasNote);
+  } catch (e) {
+    alert('Fehler: ' + e.message);
+  }
+}
 document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   el.addEventListener('click', () => {
     try {
