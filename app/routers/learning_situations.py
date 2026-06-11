@@ -522,6 +522,16 @@ def ls_detail(
         for ab in arbeitsblaetter:
             ab._aufgaben = aufgaben_by_ab.get(ab.id, [])
 
+    from app.constants import (PHASEN as _PHASEN,
+                                PHASEN_LABELS as _PHASEN_LABELS,
+                                parse_phasen_csv as _parse_phasen)
+    # Phasen-Sets vor-rendern, damit das Template nicht selbst parsen muss
+    ab_phasen: dict[int, set[str]] = {}
+    auf_phasen: dict[int, set[str]] = {}
+    for ab in arbeitsblaetter:
+        ab_phasen[ab.id] = set(_parse_phasen(ab.phasen or ""))
+        for a in getattr(ab, "_aufgaben", []):
+            auf_phasen[a.id] = set(_parse_phasen(a.phasen or ""))
     return templates.TemplateResponse(request, "learning_situations/detail.html", {
         "ls": ls,
         "files": files,
@@ -530,6 +540,10 @@ def ls_detail(
         "has_note": has_note,
         "aufgaben": aufgaben,
         "arbeitsblaetter": arbeitsblaetter,
+        "phasen": _PHASEN,
+        "phasen_labels": _PHASEN_LABELS,
+        "ab_phasen": ab_phasen,
+        "auf_phasen": auf_phasen,
     })
 
 
@@ -725,6 +739,66 @@ _SECTION_FIELDS = {
 }
 
 
+def validate_pflicht_v4(db: Session, ls: LearningSituation) -> dict:
+    """Prüft, ob die LS nach Schema v4 vollständig gepflegt ist.
+
+    Pflichtkriterien:
+    - Bezeichnung (display_name)
+    - Auftrag (auftrag_md, nicht leer)
+    - mindestens ein Lernfeld via M2M (LsLernfeld)
+    - dauer_stunden > 0
+    - mindestens ein Arbeitsblatt mit mindestens einer Aufgabe
+
+    Liefert {ok, problems: [{code, label}]}.
+    """
+    problems: list[dict] = []
+
+    def _empty(s: str | None) -> bool:
+        return not (s or "").strip()
+
+    if _empty(ls.display_name):
+        problems.append({"code": "display_name",
+                         "label": "Bezeichnung fehlt"})
+    if _empty(ls.auftrag_md):
+        problems.append({"code": "auftrag",
+                         "label": "Auftrag/Handlungssituation fehlt"})
+    if not ls.dauer_stunden or ls.dauer_stunden <= 0:
+        problems.append({"code": "dauer_stunden",
+                         "label": "Dauer (Schulstunden) fehlt oder 0"})
+    lf_count = db.scalar(
+        select(LsLernfeld).where(
+            LsLernfeld.learning_situation_id == ls.id).limit(1))
+    if lf_count is None:
+        problems.append({"code": "lernfeld",
+                         "label": "Mindestens ein Lernfeld muss verknüpft sein"})
+    ab_with_aufgaben = db.execute(
+        select(LsArbeitsblatt.id).where(
+            LsArbeitsblatt.learning_situation_id == ls.id,
+            LsArbeitsblatt.id.in_(
+                select(LsAufgabe.arbeitsblatt_id).where(
+                    LsAufgabe.learning_situation_id == ls.id,
+                    LsAufgabe.arbeitsblatt_id.is_not(None))
+            )
+        ).limit(1)
+    ).first()
+    if not ab_with_aufgaben:
+        problems.append({"code": "arbeitsblatt",
+                         "label": "Mindestens ein Arbeitsblatt mit Aufgabe nötig"})
+    return {"ok": not problems, "problems": problems}
+
+
+@router.get("/api/ls/{ls_id}/validate")
+def ls_validate_endpoint(
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    return JSONResponse(validate_pflicht_v4(db, ls))
+
+
 def _require_v3(db: Session, user: User, ls_id: int) -> LearningSituation:
     ls = db.get(LearningSituation, ls_id)
     if not ls or ls.user_id != user.id:
@@ -896,6 +970,17 @@ def ls_section_save(
         sub = (body.get("field") or "content").strip()
         if sub == "phase":
             ab.phase = value[:255]
+        elif sub == "phasen":
+            from app.constants import parse_phasen_csv, serialize_phasen
+            raw = body.get("value")
+            if isinstance(raw, list):
+                raw = ", ".join(str(x) for x in raw)
+            ab.phasen = serialize_phasen(parse_phasen_csv(str(raw or "")))
+        elif sub == "stunden_geplant":
+            try:
+                ab.stunden_geplant = max(0, int(value or 0))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Stunden muss eine Zahl sein")
         elif sub == "hinweis":
             ab.bearbeitungshinweis_md = value[:10000]
         elif sub == "title":
@@ -1065,6 +1150,13 @@ def ls_aufgabe_update(
         a.text_md = value[:200000]
     elif field == "loesungsskizze":
         a.loesungsskizze_md = value[:200000]
+    elif field == "phasen":
+        # Erwartet entweder Liste oder CSV-String; canonisiert via constants
+        from app.constants import parse_phasen_csv, serialize_phasen
+        raw = body.get("value")
+        if isinstance(raw, list):
+            raw = ", ".join(str(x) for x in raw)
+        a.phasen = serialize_phasen(parse_phasen_csv(str(raw or "")))
     else:
         raise HTTPException(400, "Unbekanntes Feld")
     ls_sync.save_to_vault(user, ls, db)

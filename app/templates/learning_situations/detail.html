@@ -187,6 +187,25 @@
     <span id="ls-meta-status" class="muted" style="font-size:11px"></span>
   </div>
 
+  <style>
+    .v4-validate { margin-top:1rem; padding:.6rem .9rem; border-radius:8px;
+      font-size:13px; display:none; }
+    .v4-validate.ok { background:#e8f5e9; border:1px solid #66bb6a;
+      color:#1b5e20; display:block; }
+    .v4-validate.warn { background:#fff3e0; border:1px solid #f5b942;
+      color:#8a4f00; display:block; }
+    .v4-validate ul { margin:.3rem 0 0 1.2rem; padding:0; }
+    .v4-validate li { margin:.1rem 0; }
+    .phasen-pills { display:flex; flex-wrap:wrap; gap:.25rem; }
+    .phasen-pills label { font-size:11px; padding:2px 8px; border-radius:10px;
+      background:#eee; color:#444; cursor:pointer; user-select:none;
+      border:1px solid transparent; }
+    .phasen-pills label.picked { background:#d4edda; color:#1b5e20;
+      border-color:#5ec27a; }
+    .phasen-pills input { display:none; }
+  </style>
+  <div class="v4-validate" id="v4-validate"></div>
+
   {% if request.query_params.get('ws_error') %}
   <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.7rem 1rem;margin-top:.6rem">
     Arbeitsblatt konnte nicht erzeugt werden: {{ request.query_params.get('ws_error').replace('+', ' ') }}
@@ -404,14 +423,31 @@
         <input data-field="title" value="{{ ab.title }}" style="flex:1;font-weight:600">
         <span class="muted" data-status style="font-size:11px"></span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.4rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr 90px;gap:.6rem;margin-bottom:.4rem">
         <div>
-          <label style="font-size:12px">Phase</label>
+          <label style="font-size:12px">Phase (Freitext, alt)</label>
           <input data-field="phase" value="{{ ab.phase or '' }}" placeholder="z. B. Arbeitsplanung">
         </div>
         <div>
           <label style="font-size:12px">Bearbeitungshinweis</label>
           <input data-field="hinweis" value="{{ ab.bearbeitungshinweis_md or '' }}" placeholder="Hinweis (Optional)">
+        </div>
+        <div>
+          <label style="font-size:12px" title="Schulstunden (45 min)">Std. geplant</label>
+          <input data-field="stunden_geplant" type="number" min="0"
+                 value="{{ ab.stunden_geplant or 0 }}">
+        </div>
+      </div>
+      <div style="margin-bottom:.4rem">
+        <label style="font-size:12px">Phasen der vollständigen Handlung</label>
+        <div class="phasen-pills" data-field="phasen">
+          {% for ph in phasen %}
+            {% set picked = ph in ab_phasen.get(ab.id, []) %}
+            <label class="{% if picked %}picked{% endif %}">
+              <input type="checkbox" value="{{ ph }}" {% if picked %}checked{% endif %}>
+              {{ phasen_labels[ph] }}
+            </label>
+          {% endfor %}
         </div>
       </div>
       <label style="font-size:12px">Aufgabenblock / Intro</label>
@@ -432,6 +468,18 @@
           <input data-auf-field="titel" value="{{ a.titel or '' }}" placeholder="Titel (optional)" style="flex:1;font-size:12px">
           <span class="muted" data-auf-status style="font-size:11px"></span>
           <button class="btn-sec" data-auf-del style="padding:2px 6px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </div>
+        <div style="margin:.3rem 0">
+          <label style="font-size:11px">Phasen der vollständigen Handlung</label>
+          <div class="phasen-pills" data-auf-field="phasen">
+            {% for ph in phasen %}
+              {% set picked = ph in auf_phasen.get(a.id, []) %}
+              <label class="{% if picked %}picked{% endif %}">
+                <input type="checkbox" value="{{ ph }}" {% if picked %}checked{% endif %}>
+                {{ phasen_labels[ph] }}
+              </label>
+            {% endfor %}
+          </div>
         </div>
         <label style="font-size:11px">Aufgabentext</label>
         <textarea data-auf-field="text" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ a.text_md or '' }}</textarea>
@@ -774,6 +822,89 @@
     } catch(e) { status.textContent = '✗ ' + e.message; }
   });
 })();
+
+// ── Phasen-Pills (Arbeitsblatt + Aufgabe, Schema v4) ─────────────────────
+(function(){
+  const LS_ID = {{ ls.id }};
+
+  function collectPhasen(container) {
+    return Array.from(container.querySelectorAll('input[type=checkbox]:checked'))
+      .map(cb => cb.value);
+  }
+  function updatePicked(container) {
+    container.querySelectorAll('label').forEach(lab => {
+      const cb = lab.querySelector('input[type=checkbox]');
+      lab.classList.toggle('picked', cb && cb.checked);
+    });
+  }
+
+  // Arbeitsblatt-Phasen: speichert via /ls/{id}/section/arbeitsblatt:N
+  document.querySelectorAll('.v3-ab').forEach(box => {
+    const pos = parseInt(box.dataset.pos, 10);
+    const status = box.querySelector('[data-status]');
+    box.querySelectorAll('.phasen-pills[data-field="phasen"]').forEach(group => {
+      group.addEventListener('change', async () => {
+        updatePicked(group);
+        const phasen = collectPhasen(group);
+        try {
+          status.textContent = 'speichere …';
+          const r = await fetch('/ls/'+LS_ID+'/section/arbeitsblatt:'+pos, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({field:'phasen', value: phasen}),
+          });
+          if (!r.ok) throw new Error('HTTP '+r.status);
+          status.textContent = '✓';
+          setTimeout(()=>status.textContent='', 1200);
+          refreshValidator();
+        } catch(e) { status.textContent = '✗ '+e.message; }
+      });
+    });
+  });
+
+  // Aufgabe-Phasen: speichert via /ls/{id}/aufgabe/{aid}
+  document.querySelectorAll('.v3-aufgabe').forEach(box => {
+    const aid = box.dataset.aufId;
+    const status = box.querySelector('[data-auf-status]');
+    box.querySelectorAll('.phasen-pills[data-auf-field="phasen"]').forEach(group => {
+      group.addEventListener('change', async () => {
+        updatePicked(group);
+        const phasen = collectPhasen(group);
+        try {
+          status.textContent = 'speichere …';
+          const r = await fetch('/ls/'+LS_ID+'/aufgabe/'+aid, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({field:'phasen', value: phasen}),
+          });
+          if (!r.ok) throw new Error('HTTP '+r.status);
+          status.textContent = '✓';
+          setTimeout(()=>status.textContent='', 1200);
+        } catch(e) { status.textContent = '✗ '+e.message; }
+      });
+    });
+  });
+})();
+
+// ── Validator-Banner v4 ───────────────────────────────────────────────────
+async function refreshValidator(){
+  const banner = document.getElementById('v4-validate');
+  if (!banner) return;
+  try {
+    const r = await fetch('/api/ls/'+{{ ls.id }}+'/validate');
+    const d = await r.json();
+    banner.classList.remove('ok', 'warn');
+    if (d.ok) {
+      banner.classList.add('ok');
+      banner.innerHTML = '✓ <strong>Lernsituation vollständig</strong> '
+        + '— alle Pflichtfelder gepflegt (Auftrag · Lernfeld · Dauer · Arbeitsblatt mit Aufgabe).';
+    } else {
+      banner.classList.add('warn');
+      const li = (d.problems || []).map(p => '<li>'
+        + String(p.label||'').replace(/</g,'&lt;') + '</li>').join('');
+      banner.innerHTML = '⚠ <strong>Lernsituation noch unvollständig:</strong><ul>'+li+'</ul>';
+    }
+  } catch(e) { /* silent */ }
+}
+refreshValidator();
 
 // ── Anhänge (Schema v4) ───────────────────────────────────────────────────
 (function(){
