@@ -11,9 +11,10 @@ from sqlalchemy import select
 
 from app.auth import audit, require_user
 from app.db import get_db
+from app.constants import ATTACHMENT_KATEGORIEN, ATTACHMENT_KATEGORIE_LABELS
 from app.models import (
-    LearningSituation, Lernfeld, LsArbeitsblatt, LsAufgabe, LsLernfeld,
-    User, Worksheet)
+    LearningSituation, Lernfeld, LsArbeitsblatt, LsAttachment, LsAufgabe,
+    LsLernfeld, User, Worksheet)
 from app.services import (aufgabe_sync, file_store, ls_sync, obsidian_writer,
                           smb_client, wizard_helpers, worksheet_from_ls)
 from app.models import AppFile
@@ -132,6 +133,10 @@ def ls_meta_update(
         ls.klassen_key = str(value or "").strip()[:255]
     elif field == "lernfeld":
         ls.lernfeld = str(value or "").strip()[:64]
+    elif field == "auftrag_md":
+        ls.auftrag_md = str(value or "")
+    elif field == "fachliche_praezisierung_md":
+        ls.fachliche_praezisierung_md = str(value or "")
     elif field == "dauer_stunden":
         try:
             ls.dauer_stunden = max(0, int(value))
@@ -254,6 +259,218 @@ def ls_lernfelder_set(
     db.commit()
     return JSONResponse({"ok": True, "linked_ids": sorted(valid_ids),
                          "lernfeld_display": ls.lernfeld})
+
+
+# ── LS-Anhänge (kategorisiert) + Auftragsbild (Schema v4) ────────────────
+
+
+import re as _re
+
+
+_ATTACH_SUBFOLDER = "_anhaenge"
+_FILENAME_SAFE = _re.compile(r"[^A-Za-z0-9._\- ]+")
+
+
+def _safe_filename(name: str) -> str:
+    name = (name or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].strip()
+    name = _FILENAME_SAFE.sub("_", name)[:200]
+    return name or "datei"
+
+
+def _serialize_attachment(a: LsAttachment) -> dict:
+    return {
+        "id": a.id,
+        "kategorie": a.kategorie,
+        "kategorie_label": ATTACHMENT_KATEGORIE_LABELS.get(
+            a.kategorie, a.kategorie),
+        "dateiname": a.dateiname,
+        "smb_relpath": a.smb_relpath,
+        "mime_type": a.mime_type,
+        "position": a.position,
+    }
+
+
+@router.get("/api/ls/{ls_id}/attachments")
+def ls_attachments_list(
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    rows = db.scalars(
+        select(LsAttachment).where(
+            LsAttachment.learning_situation_id == ls_id)
+        .order_by(LsAttachment.position, LsAttachment.id)
+    ).all()
+    return JSONResponse({
+        "ok": True,
+        "kategorien": [
+            {"key": k, "label": ATTACHMENT_KATEGORIE_LABELS[k]}
+            for k in ATTACHMENT_KATEGORIEN
+        ],
+        "items": [_serialize_attachment(a) for a in rows],
+    })
+
+
+@router.post("/api/ls/{ls_id}/attachments")
+async def ls_attachments_upload(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    kategorie: str = Form("sonstiges"),
+    file: UploadFile = File(...),
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    if kategorie not in ATTACHMENT_KATEGORIEN:
+        raise HTTPException(400, "Unbekannte Kategorie")
+    cfg = smb_client.load_config(user)
+    if not cfg:
+        raise HTTPException(400, "SMB nicht konfiguriert")
+    dateiname = _safe_filename(file.filename or "anhang")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Datei leer")
+    # Eindeutiger Pfad: _anhaenge/<id>__<dateiname> — id wird nach commit
+    # bekannt, daher: zuerst INSERT, dann Pfad festlegen, dann schreiben.
+    a = LsAttachment(
+        learning_situation_id=ls.id, kategorie=kategorie,
+        dateiname=dateiname, mime_type=file.content_type or "",
+        smb_relpath="", position=0,
+    )
+    db.add(a)
+    db.flush()
+    a.smb_relpath = f"{_ATTACH_SUBFOLDER}/{a.id:04d}__{dateiname}"
+    base = smb_client.material_subpath(cfg, ls.smb_folder_name)
+    smb_client.ensure_folder(user, base + "/" + _ATTACH_SUBFOLDER)
+    smb_client.write_file(user, base + "/" + a.smb_relpath, data)
+    audit(db, "ls_attachment_uploaded", actor=user, target=str(ls.id),
+          detail=f"{kategorie}:{dateiname}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "item": _serialize_attachment(a)})
+
+
+@router.post("/api/ls/{ls_id}/attachments/{aid}")
+def ls_attachment_update(
+    request: Request,
+    ls_id: int,
+    aid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Aktualisiert die Kategorie eines bestehenden Anhangs."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    a = db.get(LsAttachment, aid)
+    if not a or a.learning_situation_id != ls_id:
+        raise HTTPException(404)
+    new_kat = (body.get("kategorie") or "").strip()
+    if new_kat and new_kat in ATTACHMENT_KATEGORIEN:
+        a.kategorie = new_kat
+    audit(db, "ls_attachment_updated", actor=user, target=str(a.id),
+          detail=a.kategorie, request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "item": _serialize_attachment(a)})
+
+
+@router.delete("/api/ls/{ls_id}/attachments/{aid}")
+def ls_attachment_delete(
+    request: Request,
+    ls_id: int,
+    aid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    a = db.get(LsAttachment, aid)
+    if not a or a.learning_situation_id != ls_id:
+        raise HTTPException(404)
+    cfg = smb_client.load_config(user)
+    if cfg and a.smb_relpath:
+        base = smb_client.material_subpath(cfg, ls.smb_folder_name)
+        try:
+            smb_client.delete_file(user, base + "/" + a.smb_relpath)
+        except Exception:
+            pass
+    db.delete(a)
+    audit(db, "ls_attachment_deleted", actor=user, target=str(aid),
+          detail=a.dateiname, request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/ls/{ls_id}/auftragsbild")
+async def ls_auftragsbild_upload(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(...),
+):
+    """Lädt das Auftragsbild für die LS hoch und setzt auftrag_bild_path.
+
+    Bild wird als `_auftrag<ext>` im LS-Material-Ordner abgelegt
+    (overschreibt vorhandenes Bild)."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    cfg = smb_client.load_config(user)
+    if not cfg:
+        raise HTTPException(400, "SMB nicht konfiguriert")
+    raw_name = _safe_filename(file.filename or "auftrag.jpg")
+    ext = raw_name.rsplit(".", 1)[-1].lower() if "." in raw_name else "jpg"
+    if ext not in ("jpg", "jpeg", "png", "gif", "webp", "svg"):
+        raise HTTPException(400, "Bildformat nicht unterstützt")
+    relpath = f"_auftrag.{ext}"
+    data = await file.read()
+    base = smb_client.material_subpath(cfg, ls.smb_folder_name)
+    smb_client.ensure_folder(user, base)
+    smb_client.write_file(user, base + "/" + relpath, data)
+    # Altes Bild mit abweichender Endung entfernen (Aufräumen)
+    for old_ext in ("jpg", "jpeg", "png", "gif", "webp", "svg"):
+        if old_ext == ext:
+            continue
+        try:
+            smb_client.delete_file(user, base + f"/_auftrag.{old_ext}")
+        except Exception:
+            pass
+    ls.auftrag_bild_path = relpath
+    audit(db, "ls_auftragsbild_set", actor=user, target=str(ls.id),
+          detail=relpath, request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "auftrag_bild_path": relpath})
+
+
+@router.delete("/api/ls/{ls_id}/auftragsbild")
+def ls_auftragsbild_delete(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    cfg = smb_client.load_config(user)
+    if cfg and ls.auftrag_bild_path:
+        base = smb_client.material_subpath(cfg, ls.smb_folder_name)
+        try:
+            smb_client.delete_file(user, base + "/" + ls.auftrag_bild_path)
+        except Exception:
+            pass
+    ls.auftrag_bild_path = ""
+    audit(db, "ls_auftragsbild_cleared", actor=user, target=str(ls.id),
+          request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.get("/ls/{ls_id}", response_class=HTMLResponse)
@@ -502,6 +719,9 @@ _SECTION_FIELDS = {
     "uebergreifende_aspekte": "uebergreifende_aspekte_md",
     "lehrer_vorwissen": "lehrer_vorwissen_md",
     "leistungsfeststellung": "leistungsfeststellung_md",
+    # Schema v4
+    "auftrag": "auftrag_md",
+    "fachliche_praezisierung": "fachliche_praezisierung_md",
 }
 
 
