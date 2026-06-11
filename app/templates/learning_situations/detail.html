@@ -203,8 +203,28 @@
     .phasen-pills label.picked { background:#d4edda; color:#1b5e20;
       border-color:#5ec27a; }
     .phasen-pills input { display:none; }
+    .v4-dist { margin-top:1rem; padding:.7rem 1rem; border:1px solid #ddd;
+      border-radius:8px; background:#fafbfd; }
+    .v4-dist h3 { margin:0 0 .4rem; font-size:13px; color:var(--blau);
+      text-transform:uppercase; letter-spacing:.4px; }
+    .v4-dist .bar-wrap { background:#e9eef5; border-radius:4px; height:14px;
+      overflow:hidden; margin:.4rem 0; }
+    .v4-dist .bar { height:100%; background:#5ec27a; transition:width .3s; }
+    .v4-dist .bar.over { background:#e36e00; }
+    .v4-dist .bar.under { background:#5e8fd0; }
+    .v4-dist .stats { font-size:12px; color:var(--text); }
+    .v4-dist table { width:100%; margin-top:.5rem; border-collapse:collapse;
+      font-size:11px; }
+    .v4-dist table th, .v4-dist table td { padding:3px 6px;
+      border-bottom:1px solid #eee; text-align:left; }
+    .v4-dist table th { color:var(--blau); font-weight:600; }
+    .v4-dist .empty { color:var(--muted); font-style:italic; font-size:12px; }
   </style>
   <div class="v4-validate" id="v4-validate"></div>
+  <div class="v4-dist" id="v4-dist" style="display:none">
+    <h3>Verteilung im Stundenplan</h3>
+    <div id="v4-dist-body"></div>
+  </div>
 
   {% if request.query_params.get('ws_error') %}
   <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.7rem 1rem;margin-top:.6rem">
@@ -905,6 +925,73 @@ async function refreshValidator(){
   } catch(e) { /* silent */ }
 }
 refreshValidator();
+
+// ── Verteilungs-Übersicht (Schema v4) ─────────────────────────────────────
+async function refreshDistribution(){
+  const box = document.getElementById('v4-dist');
+  const body = document.getElementById('v4-dist-body');
+  if (!box || !body) return;
+  try {
+    const r = await fetch('/api/ls/'+{{ ls.id }}+'/distribution');
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || ('HTTP '+r.status));
+    box.style.display = 'block';
+    const dauer = d.dauer_stunden || 0;
+    const verteilt = d.verteilt_stunden || 0;
+    const pct = dauer > 0 ? Math.min(100, Math.round(100 * verteilt / dauer)) : 0;
+    let barClass = 'bar';
+    let label;
+    if (dauer <= 0) {
+      label = '<em>Keine geplante Dauer hinterlegt</em>';
+    } else if (verteilt === dauer) {
+      label = '✓ <strong>'+verteilt+' / '+dauer+'</strong> Schulstunden verteilt';
+    } else if (verteilt > dauer) {
+      barClass += ' over';
+      label = '⚠ <strong>'+verteilt+' / '+dauer+'</strong> Schulstunden ('
+        + 'überschritten um '+(verteilt-dauer)+')';
+    } else {
+      barClass += ' under';
+      label = '<strong>'+verteilt+' / '+dauer+'</strong> Schulstunden ('
+        + 'noch '+(dauer-verteilt)+' zu verteilen)';
+    }
+    let bar = '';
+    if (dauer > 0) {
+      const widthPct = verteilt > dauer ? 100 : pct;
+      bar = '<div class="bar-wrap"><div class="'+barClass+'" '
+        + 'style="width:'+widthPct+'%"></div></div>';
+    }
+    const stats = '<div class="stats">'+label+' · '
+      + d.count_blocks+' Block-Termin'+(d.count_blocks===1?'':'e')+'</div>';
+    let tbl = '';
+    if (d.blocks && d.blocks.length) {
+      const rows = d.blocks.map(b => '<tr>'
+        + '<td>'+b.date+'</td>'
+        + '<td>'+(b.block_start||'')+'</td>'
+        + '<td>'+(b.klassen||'')+'</td>'
+        + '<td>'+(b.theme||'').replace(/</g,'&lt;')+'</td>'
+        + '</tr>').join('');
+      tbl = '<table><thead><tr><th>Datum</th><th>Block</th>'
+        + '<th>Klasse</th><th>Thema</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    } else {
+      tbl = '<div class="empty">— noch keine Blöcke verteilt —</div>';
+    }
+    body.innerHTML = bar + stats + tbl;
+  } catch(e) {
+    box.style.display = 'block';
+    body.innerHTML = '<div class="empty">Fehler: '+String(e.message||e).replace(/</g,'&lt;')+'</div>';
+  }
+}
+refreshDistribution();
+
+// Validator + Distribution gemeinsam aktualisieren, wenn Pflichtfelder
+// gespeichert werden (Auftrag/Sektionen/Phasen/Lernfelder/Dauer)
+(function(){
+  const origValidator = refreshValidator;
+  window.refreshValidator = async function(){
+    await origValidator();
+    refreshDistribution();
+  };
+})();
 
 // ── Anhänge (Schema v4) ───────────────────────────────────────────────────
 (function(){

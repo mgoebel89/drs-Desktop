@@ -629,6 +629,64 @@ def api_forward_done(
 # ── Reihen-Planung: LS auf Block-Set verteilen ───────────────────────────
 
 
+def _compute_ls_distribution(db: Session, user: User,
+                             ls_id: int) -> dict:
+    """Liefert die Verteilungs-Übersicht einer LS: alle LessonNotes mit
+    dieser learning_situation_id, gruppiert nach Datum/Block, plus Summen.
+
+    Stunden-Einheit ist Schulstunde (45 min); 1 Stundenplan-Block zählt
+    als 2 Schulstunden (vgl. app/constants.SCHULSTUNDEN_PRO_BLOCK).
+    """
+    from app.constants import SCHULSTUNDEN_PRO_BLOCK
+    notes = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.learning_situation_id == ls_id,
+    ).order_by(LessonNote.lesson_date, LessonNote.block_start).all()
+    blocks_out = [{
+        "date": n.lesson_date, "block_start": n.block_start or "",
+        "klassen": n.klassen_key or "", "subjects": n.subjects_key or "",
+        "theme": n.theme or "",
+    } for n in notes]
+    return {
+        "count_blocks": len(notes),
+        "count_schulstunden": len(notes) * SCHULSTUNDEN_PRO_BLOCK,
+        "blocks": blocks_out,
+    }
+
+
+@router.get("/api/ls/{ls_id}/distribution")
+def api_ls_distribution(
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Liefert Verteilungs-Übersicht + Budget-Vergleich für eine LS."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404, "Lernsituation nicht gefunden")
+    info = _compute_ls_distribution(db, user, ls_id)
+    dauer = ls.dauer_stunden or 0
+    verteilt = info["count_schulstunden"]
+    if dauer <= 0:
+        budget_status = "unset"
+    elif verteilt == dauer:
+        budget_status = "ok"
+    elif verteilt < dauer:
+        budget_status = "under"
+    else:
+        budget_status = "over"
+    return JSONResponse({
+        "ok": True,
+        "ls_id": ls_id,
+        "display_name": ls.display_name,
+        "dauer_stunden": dauer,
+        "verteilt_stunden": verteilt,
+        "count_blocks": info["count_blocks"],
+        "budget_status": budget_status,
+        "blocks": info["blocks"],
+    })
+
+
 @router.get("/api/ls/list")
 def api_ls_list(
     user: Annotated[User, Depends(require_user)],
@@ -649,7 +707,8 @@ def api_ls_list(
         "items": [
             {"id": ls.id, "display_name": ls.display_name,
              "klassen_key": ls.klassen_key or "",
-             "lernfeld": ls.lernfeld or ""}
+             "lernfeld": ls.lernfeld or "",
+             "dauer_stunden": ls.dauer_stunden or 0}
             for ls in rows
         ],
     })
@@ -781,7 +840,22 @@ def api_ls_distribute(
     audit(db, "ls_distributed", actor=user, target=str(ls_id),
           detail=f"{written} Blöcke · {skipped} übersprungen", request=request)
     db.commit()
-    return JSONResponse({"ok": True, "written": written, "skipped": skipped})
+
+    # Budget-Status berechnen (Schulstunden = 2 × Blöcke)
+    info = _compute_ls_distribution(db, user, ls_id)
+    dauer = ls.dauer_stunden or 0
+    verteilt = info["count_schulstunden"]
+    warning = ""
+    if dauer > 0 and verteilt != dauer:
+        warning = "budget_exceeded" if verteilt > dauer else "budget_under"
+
+    return JSONResponse({
+        "ok": True, "written": written, "skipped": skipped,
+        "dauer_stunden": dauer,
+        "verteilt_stunden": verteilt,
+        "count_blocks": info["count_blocks"],
+        "warning": warning,
+    })
 
 
 # ── Reihen-Override (Fach-Bezeichnung pro Klassen+Fach-Kombi) ─────────────

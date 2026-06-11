@@ -611,6 +611,8 @@ window.MathJax = {
     Noch keine Blöcke gewählt.
   </div>
 
+  <div id="sm-budget" style="display:none;margin:.4rem 0 .6rem;padding:.5rem .8rem;border-radius:6px;font-size:12px"></div>
+
   <div class="sm-conflicts" id="sm-conflicts" style="display:none">
     <h4>⚠ Konflikte: bereits zugeordnete Lernsituationen</h4>
     <div style="margin-bottom:.4rem">
@@ -1393,6 +1395,9 @@ let _smSlots = [];             // [{name, start, end}]
 let _smBlocksByWeek = {};      // { 'YYYY-MM-DD': [block,...] } (Montag des week-preview)
 let _smPicked = new Set();     // Pattern-Keys: 'day_idx|block_start|klassen|subjects'
 let _smCtxKlassen = '';        // optional Kontext-Klasse für LS-Vorfilterung
+let _smLsBudgets = {};         // {ls_id: dauer_stunden}  (aus /api/ls/list)
+let _smLsDist = null;          // {ls_id, dauer_stunden, verteilt_stunden} (Detail)
+const SCHULSTD_PRO_BLOCK = 2;  // synchron mit app/constants.py
 
 function _isoMonday(d) {
   const dt = (d instanceof Date) ? new Date(d) : new Date(d + 'T00:00:00');
@@ -1422,9 +1427,12 @@ async function seriesModalOpen(prefill) {
     const r = await fetch('/api/ls/list?klassen=' + encodeURIComponent(_smCtxKlassen));
     const d = await r.json();
     const opts = ['<option value="">— bitte wählen —</option>'];
+    _smLsBudgets = {};
     (d.items || []).forEach(ls => {
+      _smLsBudgets[ls.id] = ls.dauer_stunden || 0;
+      const budget = ls.dauer_stunden ? '  ('+ls.dauer_stunden+' Std.)' : '';
       const label = ls.display_name
-        + (ls.klassen_key ? '  ['+ls.klassen_key+']' : '');
+        + (ls.klassen_key ? '  ['+ls.klassen_key+']' : '') + budget;
       opts.push('<option value="'+ls.id+'">'+esc(label)+'</option>');
     });
     _smLs.innerHTML = opts.join('');
@@ -1432,6 +1440,9 @@ async function seriesModalOpen(prefill) {
   } catch (e) {
     _smLs.innerHTML = '<option value="">Fehler beim Laden</option>';
   }
+  // Baseline-Verteilung für die ausgewählte LS holen
+  _smLsDist = null;
+  await _smLoadDistribution();
 
   // KW-Range: heute bis +4 Wochen, oder Kontext-Datum
   const startISO = _isoMonday(prefill.date || new Date());
@@ -1555,11 +1566,57 @@ function _smCollectBlocks() {
   return { blocks: all, conflicts };
 }
 
+async function _smLoadDistribution() {
+  const lsId = parseInt(_smLs.value || '0', 10);
+  const box = document.getElementById('sm-budget');
+  if (!lsId) {
+    _smLsDist = null;
+    box.style.display = 'none';
+    return;
+  }
+  try {
+    const r = await fetch('/api/ls/'+lsId+'/distribution');
+    const d = await r.json();
+    if (r.ok && d.ok) _smLsDist = d;
+  } catch (e) { _smLsDist = null; }
+  _smRecompute();
+}
+
+function _smRenderBudget(addedBlocks) {
+  const box = document.getElementById('sm-budget');
+  if (!_smLsDist || !_smLsDist.dauer_stunden) {
+    box.style.display = 'none';
+    return;
+  }
+  const dauer = _smLsDist.dauer_stunden;
+  const baseline = _smLsDist.verteilt_stunden;
+  // Vorausgesagte Gesamtzahl nach Verteilung (überschätzt leicht, weil
+  // Blöcke außerhalb der Vorschau-Woche unbekannte Bestände haben — der
+  // Server liefert nach Klick die echte Zahl)
+  const added = addedBlocks * SCHULSTD_PRO_BLOCK;
+  const predicted = baseline + added;
+  const diff = predicted - dauer;
+  let bg = '#e8f5e9', border = '#66bb6a', color = '#1b5e20', sign = '✓';
+  if (diff !== 0) { bg = '#fff3e0'; border = '#f5b942'; color = '#8a4f00'; sign = '⚠'; }
+  box.style.background = bg;
+  box.style.border = '1px solid ' + border;
+  box.style.color = color;
+  box.style.display = 'block';
+  const diffStr = diff > 0 ? ('+'+diff) : String(diff);
+  box.innerHTML = '<strong>'+sign+' Stunden-Budget:</strong> '
+    + 'aktuell verteilt <strong>'+baseline+'</strong> Std. · '
+    + 'beim Verteilen geschätzt <strong>'+predicted+'</strong> Std. ('
+    + (added>0?'+'+added:added)+') · '
+    + 'geplante Dauer <strong>'+dauer+'</strong> Std.'
+    + (diff !== 0 ? ' <em>(Abweichung '+diffStr+')</em>' : '');
+}
+
 function _smRecompute() {
   const { blocks, conflicts } = _smCollectBlocks();
   if (!blocks.length) {
     _smSummary.textContent = 'Noch keine Blöcke gewählt.';
     _smConflicts.style.display = 'none';
+    _smRenderBudget(0);
     return;
   }
   _smSummary.innerHTML = '<strong>' + blocks.length + '</strong> Block-Termine im KW-Bereich '
@@ -1583,6 +1640,7 @@ function _smRecompute() {
     _smConflicts.style.display = 'none';
     _smConflictsTable.innerHTML = '';
   }
+  _smRenderBudget(blocks.length);
 }
 
 async function seriesModalApply() {
@@ -1590,6 +1648,24 @@ async function seriesModalApply() {
   if (!ls_id) { alert('Bitte eine Lernsituation wählen.'); return; }
   const { blocks, conflicts } = _smCollectBlocks();
   if (!blocks.length) { alert('Bitte mindestens einen Slot anklicken.'); return; }
+  // Budget-Bestätigung bei Abweichung
+  if (_smLsDist && _smLsDist.dauer_stunden) {
+    const dauer = _smLsDist.dauer_stunden;
+    const predicted = _smLsDist.verteilt_stunden + blocks.length * SCHULSTD_PRO_BLOCK;
+    if (predicted !== dauer) {
+      const diff = predicted - dauer;
+      const direction = diff > 0
+        ? 'überschreitet das geplante Stunden-Budget'
+        : 'erreicht das geplante Stunden-Budget nicht';
+      const ok = confirm(
+        'Achtung: Diese Verteilung ' + direction + '.\n\n'
+        + 'Geplante Dauer: ' + dauer + ' Schulstunden\n'
+        + 'Voraussichtlich verteilt: ' + predicted + ' Schulstunden'
+        + ' (Abweichung ' + (diff>0?'+':'') + diff + ')\n\n'
+        + 'Trotzdem verteilen?');
+      if (!ok) return;
+    }
+  }
   // Konflikt-Entscheidungen sammeln
   const global = (document.querySelector('input[name="sm-global"]:checked') || {}).value || 'replace';
   const confDecisions = {};
@@ -1611,8 +1687,14 @@ async function seriesModalApply() {
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.detail || ('HTTP ' + r.status));
     seriesModalHide();
-    alert('Verteilt: ' + d.written + ' Blöcke · übersprungen: ' + d.skipped
-      + '\nSeite wird neu geladen, damit die LS im Stundenplan sichtbar wird.');
+    let msg = 'Verteilt: ' + d.written + ' Blöcke · übersprungen: ' + d.skipped;
+    if (d.dauer_stunden) {
+      msg += '\nStunden-Budget: ' + d.verteilt_stunden + ' / '
+        + d.dauer_stunden + ' Schulstunden';
+      if (d.warning === 'budget_exceeded') msg += ' (⚠ überschritten)';
+      else if (d.warning === 'budget_under') msg += ' (⚠ unter Plan)';
+    }
+    alert(msg + '\nSeite wird neu geladen, damit die LS im Stundenplan sichtbar wird.');
     location.reload();
   } catch (e) {
     alert('Fehler: ' + e.message);
@@ -1630,7 +1712,7 @@ document.getElementById('sm-week-next').addEventListener('click',
   () => seriesModalLoadWeekPreview(_addDaysISO(_smPreviewWeek, 7)));
 _smWeekFrom.addEventListener('change', _smRecompute);
 _smWeekTo.addEventListener('change', _smRecompute);
-_smLs.addEventListener('change', _smRecompute);
+_smLs.addEventListener('change', _smLoadDistribution);
 
 // Tiefer Einstieg: ?distribute_ls=<id> → Modal mit vorausgewählter LS öffnen
 (function _maybeOpenFromQuery() {
