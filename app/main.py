@@ -19,6 +19,7 @@ from app.routers import timetable as timetable_router
 from app.routers import preview as preview_router
 from app.routers import obsidian as obsidian_router
 from app.routers import learning_situations as ls_router
+from app.routers import lernfelder as lernfelder_router
 from app.routers import wizard as wizard_router
 from app.routers import students as students_router
 from app.routers import exams as exams_router
@@ -44,6 +45,7 @@ app.include_router(timetable_router.router)
 app.include_router(preview_router.router)
 app.include_router(obsidian_router.router)
 app.include_router(ls_router.router)
+app.include_router(lernfelder_router.router)
 app.include_router(wizard_router.router)
 app.include_router(students_router.router)
 app.include_router(exams_router.router)

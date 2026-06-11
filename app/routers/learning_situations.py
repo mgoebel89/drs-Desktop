@@ -11,7 +11,9 @@ from sqlalchemy import select
 
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import LearningSituation, LsArbeitsblatt, LsAufgabe, User, Worksheet
+from app.models import (
+    LearningSituation, Lernfeld, LsArbeitsblatt, LsAufgabe, LsLernfeld,
+    User, Worksheet)
 from app.services import (aufgabe_sync, file_store, ls_sync, obsidian_writer,
                           smb_client, wizard_helpers, worksheet_from_ls)
 from app.models import AppFile
@@ -152,6 +154,106 @@ def ls_meta_update(
           detail=f"{field}={value}", request=request)
     db.commit()
     return JSONResponse({"ok": True})
+
+
+# ── LS ↔ Lernfeld M2M (Schema v4) ─────────────────────────────────────────
+
+
+@router.get("/api/ls/{ls_id}/lernfelder")
+def ls_lernfelder_get(
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Liefert verknüpfte Lernfeld-IDs der LS + die Auswahl-Liste."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    linked_ids = [int(row[0]) for row in db.execute(
+        select(LsLernfeld.lernfeld_id).where(
+            LsLernfeld.learning_situation_id == ls_id)
+    ).all()]
+    all_lf = db.scalars(
+        select(Lernfeld).where(Lernfeld.user_id == user.id)
+        .order_by(Lernfeld.beruf_key, Lernfeld.nummer)
+    ).all()
+    return JSONResponse({
+        "ok": True,
+        "linked_ids": linked_ids,
+        "options": [
+            {"id": lf.id, "beruf_key": lf.beruf_key or "",
+             "nummer": lf.nummer or 0, "titel": lf.titel}
+            for lf in all_lf
+        ],
+    })
+
+
+@router.post("/api/ls/{ls_id}/lernfelder")
+def ls_lernfelder_set(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Überschreibt die Lernfeld-Verknüpfungen der LS.
+
+    Body: {ids: [int, ...]}.
+    Synchronisiert auch das Legacy-String-Feld `lernfeld` (erstes LF als
+    Anzeige-Wert), damit bestehende Pfade (Obsidian-MD, PDF-Export,
+    Wizard-Prompts) weiter funktionieren."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    raw_ids = body.get("ids") or []
+    if not isinstance(raw_ids, list):
+        raise HTTPException(400, "ids muss eine Liste sein")
+    # Nur eigene Lernfeld-IDs zulassen
+    requested: list[int] = []
+    for x in raw_ids:
+        try:
+            requested.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    valid_rows = db.scalars(
+        select(Lernfeld).where(
+            Lernfeld.user_id == user.id,
+            Lernfeld.id.in_(requested or [-1]))
+    ).all() if requested else []
+    valid_ids = {lf.id for lf in valid_rows}
+
+    # Bestehende Links löschen, neue setzen
+    db.query(LsLernfeld).filter(
+        LsLernfeld.learning_situation_id == ls_id).delete()
+    for lid in valid_ids:
+        db.add(LsLernfeld(learning_situation_id=ls_id, lernfeld_id=lid))
+
+    # Legacy-String aktualisieren (kommagetrennt aus LF-Nummern + Titeln)
+    if valid_ids:
+        by_id = {lf.id: lf for lf in valid_rows}
+        ordered = sorted(valid_ids, key=lambda i: (
+            by_id[i].beruf_key or "", by_id[i].nummer or 0))
+        parts = []
+        for i in ordered:
+            lf = by_id[i]
+            if lf.nummer:
+                parts.append(f"LF{lf.nummer} {lf.titel}".strip())
+            else:
+                parts.append(lf.titel)
+        ls.lernfeld = (", ".join(parts))[:64]
+    else:
+        ls.lernfeld = ""
+
+    if (ls.schema_version or 2) >= 3:
+        try:
+            ls_sync.save_to_vault(user, ls, db)
+        except Exception:
+            pass
+    audit(db, "ls_lernfelder_set", actor=user, target=str(ls_id),
+          detail=",".join(str(i) for i in sorted(valid_ids)), request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "linked_ids": sorted(valid_ids),
+                         "lernfeld_display": ls.lernfeld})
 
 
 @router.get("/ls/{ls_id}", response_class=HTMLResponse)

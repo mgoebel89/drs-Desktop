@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Lernfelder{% endblock %}
+{% block content %}
+<style>
+  .lf-table input { padding:.3rem .45rem; border:1px solid #ddd;
+    border-radius:5px; font-family:inherit; font-size:13px; width:100%;
+    background:transparent; }
+  .lf-table input:focus { outline:none; border-color:var(--blau);
+    background:#fff; }
+  .lf-table input.save-ok { border-color:#5ec27a; }
+  .lf-table input.save-err { border-color:var(--pink); }
+  .lf-table td.actions { white-space:nowrap; text-align:right; }
+  .lf-table td.count { color:var(--muted); font-size:11px; }
+</style>
+
+<div class="card">
+  <h1>Lernfelder</h1>
+  <p class="muted">
+    Stammdaten je Beruf/Lehrplan. Jede Lernsituation kann an mehrere
+    Lernfelder verknüpft werden. Felder lassen sich direkt in der Tabelle
+    inline bearbeiten (Auto-Save beim Verlassen des Feldes).
+  </p>
+
+  <h2 style="margin-top:1.2rem">Neues Lernfeld anlegen</h2>
+  <form method="post" action="/lernfelder"
+        style="display:grid;grid-template-columns:1fr 80px 2.5fr 100px auto;gap:.6rem;align-items:end;margin:.5rem 0 1.6rem">
+    <div>
+      <label style="font-size:12px">Beruf/Klassen-Key</label>
+      <input name="beruf_key" maxlength="64" placeholder="z. B. Mechatroniker">
+    </div>
+    <div>
+      <label style="font-size:12px">Nummer</label>
+      <input name="nummer" type="number" min="0" max="999" value="0">
+    </div>
+    <div>
+      <label style="font-size:12px">Titel <span style="color:var(--pink)">*</span></label>
+      <input name="titel" maxlength="255" required
+             placeholder="z. B. Steuerungs-Hardware analysieren">
+    </div>
+    <div>
+      <label style="font-size:12px">Std. Lehrplan</label>
+      <input name="stunden_lehrplan" type="number" min="0" placeholder="optional">
+    </div>
+    <button class="btn" type="submit">+ Anlegen</button>
+  </form>
+
+  <h2>Vorhandene Lernfelder</h2>
+  {% if items %}
+  <table class="lf-table">
+    <thead>
+      <tr>
+        <th style="width:18%">Beruf</th>
+        <th style="width:70px">Nr.</th>
+        <th>Titel</th>
+        <th style="width:110px">Std. Lehrplan</th>
+        <th style="width:100px">LS</th>
+        <th style="width:80px"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for lf in items %}
+      <tr data-lf-id="{{ lf.id }}">
+        <td><input data-field="beruf_key" value="{{ lf.beruf_key or '' }}"
+                   maxlength="64" placeholder="—"></td>
+        <td><input data-field="nummer" type="number" min="0" max="999"
+                   value="{{ lf.nummer or 0 }}"></td>
+        <td><input data-field="titel" value="{{ lf.titel }}"
+                   maxlength="255" required></td>
+        <td><input data-field="stunden_lehrplan" type="number" min="0"
+                   value="{{ lf.stunden_lehrplan if lf.stunden_lehrplan is not none else '' }}"
+                   placeholder="—"></td>
+        <td class="count">
+          {% set c = counts.get(lf.id, 0) %}
+          {% if c > 0 %}{{ c }} LS verknüpft{% else %}—{% endif %}
+        </td>
+        <td class="actions">
+          <form method="post" action="/lernfelder/{{ lf.id }}/delete"
+                style="display:inline"
+                onsubmit="return confirm('Lernfeld „{{ lf.titel }}" löschen?');">
+            <button class="btn-sec"
+                    style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)"
+                    {% if counts.get(lf.id, 0) > 0 %}disabled
+                    title="An verknüpfte Lernsituationen gebunden — erst dort lösen"{% endif %}>🗑</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Noch keine Lernfelder angelegt. Lege oben das erste an —
+  z. B. „LF 5 — Steuerungs-Hardware analysieren" für Mechatroniker.</p>
+  {% endif %}
+</div>
+
+<script>
+function esc(s){ return String(s==null?'':s); }
+
+document.querySelectorAll('.lf-table tbody tr').forEach(row => {
+  const lfId = row.dataset.lfId;
+  row.querySelectorAll('input[data-field]').forEach(inp => {
+    let original = inp.value;
+    inp.addEventListener('blur', async () => {
+      if (inp.value === original) return;
+      const field = inp.dataset.field;
+      const value = inp.value;
+      try {
+        const r = await fetch('/api/lernfelder/' + lfId, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ field, value }),
+        });
+        const d = await r.json().catch(()=>({}));
+        if (!r.ok || !d.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+        original = value;
+        inp.classList.add('save-ok');
+        setTimeout(()=>inp.classList.remove('save-ok'), 1200);
+      } catch (e) {
+        inp.classList.add('save-err');
+        alert('Fehler beim Speichern: ' + e.message);
+        inp.value = original;
+        setTimeout(()=>inp.classList.remove('save-err'), 1500);
+      }
+    });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    });
+  });
+});
+</script>
+{% endblock %}

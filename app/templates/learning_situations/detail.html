@@ -12,7 +12,36 @@
     Ordner <code>{{ ls.smb_folder_name }}</code>
   </p>
 
-  <div id="ls-meta" style="display:grid;grid-template-columns:2fr 1fr 1fr 100px 100px;gap:.6rem;align-items:end;margin-top:.4rem">
+  <style>
+    .lf-pills { display:flex; flex-wrap:wrap; gap:.3rem;
+      min-height:30px; padding:3px 4px; border:1px solid #ddd;
+      border-radius:6px; background:#fff; align-items:center;
+      cursor:pointer; }
+    .lf-pills:hover { border-color:#bbb; }
+    .lf-pill { background:var(--blau-hell); color:var(--blau);
+      border:1px solid #b8d8ec; padding:2px 8px; border-radius:12px;
+      font-size:12px; display:inline-flex; align-items:center; gap:4px; }
+    .lf-pill .x { cursor:pointer; opacity:.6; font-weight:bold; }
+    .lf-pill .x:hover { opacity:1; color:var(--pink); }
+    .lf-pills .placeholder { color:var(--muted); font-size:12px;
+      font-style:italic; padding:2px 4px; }
+    .lf-picker {
+      display:none; position:absolute; z-index:1100;
+      background:#fff; border:1px solid #ddd; border-radius:8px;
+      box-shadow:0 8px 24px rgba(0,0,0,.18);
+      max-height:300px; overflow:auto; min-width:280px;
+      padding:.3rem 0;
+    }
+    .lf-picker.open { display:block; }
+    .lf-picker .lf-opt { padding:6px 12px; cursor:pointer; font-size:13px; }
+    .lf-picker .lf-opt:hover { background:var(--blau-hell); }
+    .lf-picker .lf-opt.picked { background:#f0ecff; color:#5e3fc0; }
+    .lf-picker .lf-opt small { color:var(--muted); margin-left:6px; }
+    .lf-picker .lf-empty { padding:8px 12px; color:var(--muted);
+      font-size:12px; font-style:italic; }
+  </style>
+
+  <div id="ls-meta" style="display:grid;grid-template-columns:2fr 1fr 1.4fr 100px 100px;gap:.6rem;align-items:end;margin-top:.4rem">
     <div>
       <label style="font-size:12px">Bezeichnung</label>
       <input data-meta="display_name" value="{{ ls.display_name }}" maxlength="200">
@@ -21,19 +50,139 @@
       <label style="font-size:12px">Klasse</label>
       <input data-meta="klassen_key" value="{{ ls.klassen_key or '' }}" maxlength="64" placeholder="—">
     </div>
-    <div>
-      <label style="font-size:12px">Lernfeld</label>
-      <input data-meta="lernfeld" value="{{ ls.lernfeld or '' }}" maxlength="64" placeholder="—">
+    <div style="position:relative">
+      <label style="font-size:12px">Lernfelder
+        <a href="/lernfelder" style="float:right;font-size:11px;color:var(--muted)" title="Stammdaten">verwalten ↗</a>
+      </label>
+      <div id="lf-pills" class="lf-pills" tabindex="0">
+        <span class="placeholder" id="lf-placeholder">— bitte wählen —</span>
+      </div>
+      <div id="lf-picker" class="lf-picker"></div>
     </div>
     <div>
-      <label style="font-size:12px">Dauer (h)</label>
-      <input data-meta="dauer_stunden" type="number" min="0" value="{{ ls.dauer_stunden or 0 }}">
+      <label style="font-size:12px">Dauer (Std.)</label>
+      <input data-meta="dauer_stunden" type="number" min="0"
+             value="{{ ls.dauer_stunden or 0 }}"
+             title="Schulstunden (45 min)">
     </div>
     <div>
       <label style="font-size:12px">Version</label>
       <input data-meta="version_no" type="number" min="1" value="{{ ls.version_no or 1 }}">
     </div>
   </div>
+
+  <script>
+  (function(){
+    const LS_ID = {{ ls.id }};
+    const pillsBox = document.getElementById('lf-pills');
+    const picker = document.getElementById('lf-picker');
+    const placeholder = document.getElementById('lf-placeholder');
+    let options = [];      // {id, beruf_key, nummer, titel}
+    let linked = new Set();
+
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    function renderPills(){
+      // alles außer placeholder entfernen
+      pillsBox.querySelectorAll('.lf-pill').forEach(el => el.remove());
+      const linkedOpts = options.filter(o => linked.has(o.id));
+      linkedOpts.sort((a,b)=>{
+        const c = (a.beruf_key||'').localeCompare(b.beruf_key||'');
+        if (c !== 0) return c;
+        return (a.nummer||0) - (b.nummer||0);
+      });
+      placeholder.style.display = linkedOpts.length ? 'none' : '';
+      linkedOpts.forEach(o => {
+        const pill = document.createElement('span');
+        pill.className = 'lf-pill';
+        const numTxt = o.nummer ? ('LF'+o.nummer+' ') : '';
+        pill.innerHTML = esc(numTxt + o.titel)
+          + ' <span class="x" data-id="'+o.id+'" title="entfernen">×</span>';
+        pillsBox.insertBefore(pill, placeholder);
+      });
+      pillsBox.querySelectorAll('.lf-pill .x').forEach(x => {
+        x.addEventListener('click', e => {
+          e.stopPropagation();
+          linked.delete(parseInt(x.dataset.id, 10));
+          save();
+          renderPills();
+          renderPicker();
+        });
+      });
+    }
+
+    function renderPicker(){
+      if (!options.length) {
+        picker.innerHTML = '<div class="lf-empty">Noch keine Lernfelder angelegt — '
+          + '<a href="/lernfelder">Stammdaten pflegen</a></div>';
+        return;
+      }
+      const html = options.map(o => {
+        const cls = 'lf-opt' + (linked.has(o.id) ? ' picked' : '');
+        const numTxt = o.nummer ? ('LF'+o.nummer+' ') : '';
+        const beruf = o.beruf_key ? ('<small>['+esc(o.beruf_key)+']</small>') : '';
+        return '<div class="'+cls+'" data-id="'+o.id+'">'
+          + (linked.has(o.id) ? '✓ ' : '')
+          + esc(numTxt + o.titel) + beruf + '</div>';
+      }).join('');
+      picker.innerHTML = html;
+      picker.querySelectorAll('.lf-opt').forEach(el => {
+        el.addEventListener('click', () => {
+          const id = parseInt(el.dataset.id, 10);
+          if (linked.has(id)) linked.delete(id); else linked.add(id);
+          save();
+          renderPills();
+          renderPicker();
+        });
+      });
+    }
+
+    async function save(){
+      try {
+        await fetch('/api/ls/'+LS_ID+'/lernfelder', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ ids: Array.from(linked) }),
+        });
+      } catch (e) {
+        console.error('LF-Save:', e);
+      }
+    }
+
+    function openPicker(){
+      const rect = pillsBox.getBoundingClientRect();
+      picker.style.left = (rect.left + window.scrollX) + 'px';
+      picker.style.top = (rect.bottom + window.scrollY + 2) + 'px';
+      picker.style.minWidth = rect.width + 'px';
+      picker.classList.add('open');
+    }
+    function closePicker(){ picker.classList.remove('open'); }
+
+    pillsBox.addEventListener('click', e => {
+      if (e.target.classList.contains('x')) return;
+      if (picker.classList.contains('open')) closePicker();
+      else openPicker();
+    });
+    document.addEventListener('click', e => {
+      if (!picker.classList.contains('open')) return;
+      if (picker.contains(e.target) || pillsBox.contains(e.target)) return;
+      closePicker();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closePicker();
+    });
+
+    fetch('/api/ls/'+LS_ID+'/lernfelder')
+      .then(r => r.json())
+      .then(d => {
+        options = d.options || [];
+        linked = new Set(d.linked_ids || []);
+        renderPills();
+        renderPicker();
+      })
+      .catch(e => console.error('LF-Load:', e));
+  })();
+  </script>
   <div style="display:flex;justify-content:flex-end;margin-top:.2rem">
     <span id="ls-meta-status" class="muted" style="font-size:11px"></span>
   </div>
