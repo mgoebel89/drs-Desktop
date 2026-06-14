@@ -568,8 +568,9 @@ window.MathJax = {
 <div class="series-modal" id="series-modal" role="dialog" aria-modal="true">
   <h3>📚 Lernfeld-Reihe verteilen</h3>
   <div class="sm-sub">
-    Lernsituation wählen, KW-Bereich festlegen, dann im Wochen-Raster die Blöcke
-    anklicken (das Muster wird auf alle Wochen im Bereich angewendet).
+    Lernsituation wählen, mit den Wochen-Pfeilen durch den Stundenplan
+    blättern und einzelne Blöcke anklicken. Jeder Klick ist eine konkrete
+    Stunde an einem konkreten Datum — kein Pattern, keine Replikation.
   </div>
 
   <div class="sm-row">
@@ -577,11 +578,9 @@ window.MathJax = {
     <select id="sm-ls"><option value="">— bitte wählen —</option></select>
   </div>
   <div class="sm-row">
-    <label for="sm-week-from">Von KW</label>
+    <label for="sm-week-from">Startwoche</label>
     <input type="date" id="sm-week-from">
-    <label for="sm-week-to" style="min-width:60px">Bis KW</label>
-    <input type="date" id="sm-week-to">
-    <span class="muted" style="font-size:11px">(Datum innerhalb der Start-/End-Woche)</span>
+    <span class="muted" style="font-size:11px">(beliebiges Datum innerhalb der gewünschten Woche — von hier aus blätterst du weiter)</span>
   </div>
 
   <div class="sm-week-nav">
@@ -589,7 +588,7 @@ window.MathJax = {
     <span id="sm-week-label" style="font-size:12px;color:var(--blau);font-weight:600"></span>
     <button type="button" id="sm-week-next">Woche →</button>
     <span class="muted" style="font-size:11px;margin-left:.6rem">
-      Vorschau-Woche (Slot-Pattern gilt für alle Wochen im KW-Bereich)
+      Klicke pro Woche die Blöcke an, in denen diese LS laufen soll
     </span>
   </div>
 
@@ -1421,7 +1420,6 @@ const _smBackdrop = document.getElementById('sm-backdrop');
 const _smModal = document.getElementById('series-modal');
 const _smLs = document.getElementById('sm-ls');
 const _smWeekFrom = document.getElementById('sm-week-from');
-const _smWeekTo = document.getElementById('sm-week-to');
 const _smGridBody = document.getElementById('sm-grid-body');
 const _smWeekLabel = document.getElementById('sm-week-label');
 const _smSummary = document.getElementById('sm-summary');
@@ -1431,7 +1429,8 @@ const _smConflictsTable = document.getElementById('sm-conflicts-table');
 let _smPreviewWeek = null;     // ISO-Datum (Montag) der angezeigten Vorschau-Woche
 let _smSlots = [];             // [{name, start, end}]
 let _smBlocksByWeek = {};      // { 'YYYY-MM-DD': [block,...] } (Montag des week-preview)
-let _smPicked = new Set();     // Pattern-Keys: 'day_idx|block_start|klassen|subjects'
+let _smPicked = new Set();     // Absolute Block-Keys: 'date|block_start|klassen|subjects'
+let _smPickedMeta = {};        // key → {date, klassen, subjects, block_start}
 let _smCtxKlassen = '';        // optional Kontext-Klasse für LS-Vorfilterung
 let _smLsBudgets = {};         // {ls_id: dauer_stunden}  (aus /api/ls/list)
 let _smLsDist = null;          // {ls_id, dauer_stunden, verteilt_stunden} (Detail)
@@ -1464,6 +1463,7 @@ async function seriesModalOpen(prefill) {
   prefill = prefill || {};
   _smCtxKlassen = prefill.klassen || '';
   _smPicked = new Set();
+  _smPickedMeta = {};
   _smConflicts.style.display = 'none';
   _smConflictsTable.innerHTML = '';
 
@@ -1490,11 +1490,9 @@ async function seriesModalOpen(prefill) {
   _smLsDist = null;
   await _smLoadDistribution();
 
-  // KW-Range: heute bis +4 Wochen, oder Kontext-Datum
+  // Startwoche (kein Bis-KW mehr — Lehrer pickt einzelne Blöcke)
   const startISO = _isoMonday(prefill.date || new Date());
-  const endISO = _addDaysISO(startISO, 28);
   _smWeekFrom.value = startISO;
-  _smWeekTo.value = endISO;
   _smPreviewWeek = startISO;
 
   _smBackdrop.classList.add('open');
@@ -1538,13 +1536,14 @@ function _smRenderGrid() {
     for (let di = 0; di < 5; di++) {
       const lst = byCell[sl.start + '|' + di] || [];
       const inner = lst.map(b => {
-        const patternKey = di + '|' + b.block_start + '|' + b.klassen + '|' + b.subjects;
-        const picked = _smPicked.has(patternKey);
+        // Absolute Key: date + block_start + klassen + subjects
+        const absKey = b.date + '|' + b.block_start + '|' + b.klassen + '|' + b.subjects;
+        const picked = _smPicked.has(absKey);
         const cls = ['sm-block'];
         if (picked) cls.push('picked');
         if (b.existing_ls_id) cls.push('has-ls');
-        return '<div class="'+cls.join(' ')+'" data-pkey="'+esc(patternKey)+'"'
-          + ' data-day-idx="'+di+'" data-block-start="'+esc(b.block_start)+'"'
+        return '<div class="'+cls.join(' ')+'" data-akey="'+esc(absKey)+'"'
+          + ' data-date="'+esc(b.date)+'" data-block-start="'+esc(b.block_start)+'"'
           + ' data-klassen="'+esc(b.klassen)+'" data-subjects="'+esc(b.subjects)+'">'
           + '<div class="sm-b-klasse">'+esc(b.klassen_long || b.klassen || '—')+'</div>'
           + (b.subjects_short ? '<div class="sm-b-fach">'+esc(b.subjects_short)+'</div>' : '')
@@ -1556,12 +1555,22 @@ function _smRenderGrid() {
     rows.push('<tr>'+cells.join('')+'</tr>');
   });
   _smGridBody.innerHTML = rows.join('');
-  // Klick-Handler binden
+  // Klick-Handler binden — Auswahl ist eine ABSOLUTE Stunde
   _smGridBody.querySelectorAll('.sm-block').forEach(el => {
     el.addEventListener('click', () => {
-      const pk = el.dataset.pkey;
-      if (_smPicked.has(pk)) _smPicked.delete(pk);
-      else _smPicked.add(pk);
+      const ak = el.dataset.akey;
+      if (_smPicked.has(ak)) {
+        _smPicked.delete(ak);
+        delete _smPickedMeta[ak];
+      } else {
+        _smPicked.add(ak);
+        _smPickedMeta[ak] = {
+          date: el.dataset.date,
+          block_start: el.dataset.blockStart,
+          klassen: el.dataset.klassen,
+          subjects: el.dataset.subjects,
+        };
+      }
       el.classList.toggle('picked');
       _smRecompute();
     });
@@ -1569,46 +1578,37 @@ function _smRenderGrid() {
   _smRecompute();
 }
 
-// Aus aktuellem Pattern + KW-Range alle konkreten Blöcke berechnen
+// Sammle alle gepickten Blöcke (absolute Datum-Auswahl, kein Pattern)
 function _smCollectBlocks() {
   if (_smPicked.size === 0) return { blocks: [], conflicts: [] };
-  const fromMon = _isoMonday(_smWeekFrom.value || _smPreviewWeek);
-  const toMon = _isoMonday(_smWeekTo.value || _smPreviewWeek);
-  if (toMon < fromMon) return { blocks: [], conflicts: [] };
   const refBlocks = _smBlocksByWeek[_smPreviewWeek] || [];
-  // Index: pattern -> {klassen, subjects, block_start, day_idx} (vom Pattern abgeleitet)
-  const patternList = Array.from(_smPicked).map(pk => {
-    const [day_idx, block_start, klassen, subjects] = pk.split('|');
-    return { day_idx: parseInt(day_idx, 10), block_start, klassen, subjects };
-  });
-  // Existing-LS-Map für die Vorschau-Woche (Konflikt-Info nur dort verfügbar)
   const existingByKey = {};
   refBlocks.forEach(b => {
     if (b.existing_ls_id) {
-      const k = b.date + '|' + b.klassen + '|' + b.subjects + '|' + b.block_start;
+      const k = b.date + '|' + b.block_start + '|' + b.klassen + '|' + b.subjects;
       existingByKey[k] = { id: b.existing_ls_id, name: b.existing_ls_name };
     }
   });
+  const selLsId = parseInt(_smLs.value || '0', 10);
   const all = [];
   const conflicts = [];
-  const selLsId = parseInt(_smLs.value || '0', 10);
-  let cursor = fromMon;
-  while (cursor <= toMon) {
-    patternList.forEach(p => {
-      const date = _addDaysISO(cursor, p.day_idx);
-      const block = {
-        date, klassen: p.klassen, subjects: p.subjects, block_start: p.block_start,
-      };
-      all.push(block);
-      // Konflikt-Check: aktuell nur für die Vorschau-Woche bekannt
-      const k = date + '|' + p.klassen + '|' + p.subjects + '|' + p.block_start;
-      const ex = existingByKey[k];
-      if (ex && ex.id !== selLsId) {
-        conflicts.push({ block, existing: ex, key: k });
-      }
+  Array.from(_smPicked).forEach(ak => {
+    const meta = _smPickedMeta[ak];
+    if (!meta) return;
+    all.push({
+      date: meta.date, klassen: meta.klassen,
+      subjects: meta.subjects, block_start: meta.block_start,
     });
-    cursor = _addDaysISO(cursor, 7);
-  }
+    // Konflikt-Check: nur für Blöcke der aktuell sichtbaren Vorschau-Woche
+    const ex = existingByKey[ak];
+    if (ex && ex.id !== selLsId) {
+      conflicts.push({
+        block: { date: meta.date, klassen: meta.klassen,
+                 subjects: meta.subjects, block_start: meta.block_start },
+        existing: ex, key: ak,
+      });
+    }
+  });
   return { blocks: all, conflicts };
 }
 
@@ -1665,9 +1665,9 @@ function _smRecompute() {
     _smRenderBudget(0);
     return;
   }
-  _smSummary.innerHTML = '<strong>' + blocks.length + '</strong> Block-Termine im KW-Bereich '
-    + '(Pattern: ' + _smPicked.size + ' Slot' + (_smPicked.size === 1 ? '' : 's') + ' × '
-    + Math.round(blocks.length / Math.max(_smPicked.size, 1)) + ' Wochen)';
+  _smSummary.innerHTML = '<strong>' + blocks.length + '</strong> '
+    + (blocks.length === 1 ? 'Block ausgewählt' : 'Blöcke ausgewählt')
+    + ' (einzelne Stunden, kein Wochen-Pattern)';
   if (conflicts.length) {
     _smConflicts.style.display = 'block';
     const rows = ['<tr><th>Block (Vorschau-Woche)</th><th>bisherige LS</th><th>Entscheidung</th></tr>'];
@@ -1756,8 +1756,11 @@ document.getElementById('sm-week-prev').addEventListener('click',
   () => seriesModalLoadWeekPreview(_addDaysISO(_smPreviewWeek, -7)));
 document.getElementById('sm-week-next').addEventListener('click',
   () => seriesModalLoadWeekPreview(_addDaysISO(_smPreviewWeek, 7)));
-_smWeekFrom.addEventListener('change', _smRecompute);
-_smWeekTo.addEventListener('change', _smRecompute);
+_smWeekFrom.addEventListener('change', () => {
+  // Startwoche geändert → Vorschau auf diese Woche springen
+  const iso = _isoMonday(_smWeekFrom.value || new Date());
+  seriesModalLoadWeekPreview(iso);
+});
 _smLs.addEventListener('change', _smLoadDistribution);
 
 // Tiefer Einstieg: ?distribute_ls=<id> → Modal mit vorausgewählter LS öffnen
