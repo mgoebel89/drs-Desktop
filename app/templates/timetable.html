@@ -825,7 +825,13 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + '<input id="note-is-exam" type="checkbox" style="margin-right:.4rem"> Diese Stunde ist eine Prüfung'
     + '</label>'
     + '</div>'
-    + '<label for="note-theme">Geplantes Thema</label>'
+    + '<div style="display:flex;align-items:baseline;gap:.4rem">'
+    +   '<label for="note-theme" style="margin:0;flex:1">Geplantes Thema</label>'
+    +   '<button type="button" id="note-theme-refill"'
+    +     ' title="Thema aus AB-Titel + Aufgaben-Nummern (neu) füllen"'
+    +     ' style="border:none;background:transparent;cursor:pointer;'
+    +     'font-size:13px;color:var(--blau);padding:0 4px">↻</button>'
+    + '</div>'
     + '<input id="note-theme" name="theme" type="text" maxlength="500">'
     + '<label for="note-notes">Notizen (Markdown + LaTeX)</label>'
     + '<textarea id="note-notes" name="notes" rows="4"></textarea>'
@@ -1134,11 +1140,43 @@ async function initAufgabenPicker(dateIso, kk, sk, bs) {
         }),
       });
       const d = await r.json();
-      if (d.ok) { status.textContent = '✓ gespeichert'; setTimeout(() => status.textContent = '—', 2000); }
+      if (d.ok) {
+        status.textContent = '✓ gespeichert';
+        if (d.theme_autofilled && d.theme) {
+          const tEl = document.getElementById('note-theme');
+          if (tEl) tEl.value = d.theme;
+        }
+        setTimeout(() => status.textContent = '—', 2000);
+      }
       else { status.textContent = '✗ Fehler'; }
     } catch (e) {
       status.textContent = '✗ ' + e.message;
     }
+  });
+
+  // ↻-Knopf: Thema explizit aus aktueller Aufgaben-Zuordnung neu bauen
+  const refillBtn = document.getElementById('note-theme-refill');
+  if (refillBtn) refillBtn.addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/lesson-note/refill-thema', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          date: dateIso, klassen: kk, subjects: sk, block_start: bs,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.detail || ('HTTP '+r.status));
+      const tEl = document.getElementById('note-theme');
+      if (!d.theme) {
+        alert('Keine Aufgaben zugeordnet — bitte erst LS + Aufgaben wählen + speichern.');
+        return;
+      }
+      if (tEl) {
+        tEl.value = d.theme;
+        // Auto-Save anstoßen, falls noch nicht persistiert
+        scheduleNoteSave();
+      }
+    } catch (e) { alert('Fehler: ' + e.message); }
   });
 
   await reload();

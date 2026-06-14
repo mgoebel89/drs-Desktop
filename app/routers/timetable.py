@@ -1027,6 +1027,92 @@ def api_get_block_aufgaben(
     })
 
 
+def _build_thema_from_lesson_note(db: Session, n: LessonNote) -> str:
+    """Baut einen kompakten 'thema'-Text aus den aktuell zugeordneten
+    Aufgaben einer LessonNote. Wenn keine Aufgaben/keine LS gesetzt sind,
+    liefert es einen leeren String.
+
+    Format:
+    - Aufgaben aus einem AB:  "<AB-Titel>: Aufg. 2, 3, 5"
+    - Aufgaben aus mehreren:  "<AB1>: Aufg. 1, 2 · <AB2>: Aufg. 4"
+    """
+    if not n.learning_situation_id:
+        return ""
+    auf_ids = [row.ls_aufgabe_id for row in db.query(LessonNoteAufgabe)
+               .filter(LessonNoteAufgabe.lesson_note_id == n.id)
+               .order_by(LessonNoteAufgabe.position).all()]
+    if not auf_ids:
+        return ""
+    aufgaben = db.query(LsAufgabe).filter(LsAufgabe.id.in_(auf_ids)).all()
+    by_id = {a.id: a for a in aufgaben}
+    # In Reihenfolge der M2M-position gruppieren nach arbeitsblatt_id
+    groups: list[tuple[int | None, list[LsAufgabe]]] = []
+    by_ab: dict[int | None, list[LsAufgabe]] = {}
+    order: list[int | None] = []
+    for aid in auf_ids:
+        a = by_id.get(aid)
+        if not a:
+            continue
+        if a.arbeitsblatt_id not in by_ab:
+            by_ab[a.arbeitsblatt_id] = []
+            order.append(a.arbeitsblatt_id)
+        by_ab[a.arbeitsblatt_id].append(a)
+    for abid in order:
+        groups.append((abid, by_ab[abid]))
+
+    # AB-Titel nachladen
+    ab_titles: dict[int, str] = {}
+    ab_ids = [abid for abid, _ in groups if abid]
+    if ab_ids:
+        for ab in db.query(LsArbeitsblatt).filter(
+            LsArbeitsblatt.id.in_(ab_ids)
+        ).all():
+            ab_titles[ab.id] = (ab.title or "").strip() or f"Arbeitsblatt {ab.position}"
+
+    parts: list[str] = []
+    for abid, aufs in groups:
+        nums = ", ".join(str(a.nummer) for a in aufs if a.nummer)
+        title = ab_titles.get(abid, "") if abid else ""
+        if title and nums:
+            parts.append(f"{title}: Aufg. {nums}")
+        elif title:
+            parts.append(title)
+        elif nums:
+            parts.append(f"Aufg. {nums}")
+    return " · ".join(parts)[:500]
+
+
+@router.post("/api/lesson-note/refill-thema")
+def api_refill_thema(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Setzt das thema-Feld einer LessonNote NEU aus den aktuell
+    zugeordneten Aufgaben + Arbeitsblättern. Überschreibt einen
+    bestehenden Wert (für den ↻-Knopf im Side-Panel)."""
+    d = (body.get("date") or "").strip()
+    if len(d) != 10:
+        raise HTTPException(400, "Ungültiges Datum")
+    kk = (body.get("klassen") or "")[:255]
+    sk = (body.get("subjects") or "")[:255]
+    bs = (body.get("block_start") or "")[:5]
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id, LessonNote.lesson_date == d,
+        LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+        LessonNote.block_start == bs,
+    ).first()
+    if not n:
+        return JSONResponse({"ok": True, "theme": ""})
+    new_theme = _build_thema_from_lesson_note(db, n)
+    if new_theme:
+        n.theme = new_theme
+        n.updated_at = datetime.utcnow()
+        db.commit()
+    return JSONResponse({"ok": True, "theme": new_theme})
+
+
 @router.post("/api/lesson-note/aufgaben")
 def api_save_block_aufgaben(
     user: Annotated[User, Depends(require_user)],
@@ -1090,8 +1176,18 @@ def api_save_block_aufgaben(
                     lesson_note_id=n.id, ls_aufgabe_id=aid_int, position=pos,
                 ))
 
+    # Auto-Fill thema: nur wenn aktuell leer (manuelle Werte bleiben
+    # unangetastet — Lehrer kann via ↻-Knopf im Side-Panel erzwingen)
+    db.flush()
+    new_theme = ""
+    if not (n.theme or "").strip():
+        new_theme = _build_thema_from_lesson_note(db, n)
+        if new_theme:
+            n.theme = new_theme
+
     db.commit()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "theme": n.theme or "",
+                         "theme_autofilled": bool(new_theme)})
 
 
 @router.get("/api/lesson-note/exams")
