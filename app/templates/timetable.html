@@ -1632,33 +1632,64 @@ async function _smLoadDistribution() {
   _smRecompute();
 }
 
-function _smRenderBudget(addedBlocks) {
+function _smRenderBudget() {
   const box = document.getElementById('sm-budget');
   if (!_smLsDist || !_smLsDist.dauer_stunden) {
     box.style.display = 'none';
     return;
   }
   const dauer = _smLsDist.dauer_stunden;
-  const baseline = _smLsDist.verteilt_stunden;
-  // Vorausgesagte Gesamtzahl nach Verteilung (überschätzt leicht, weil
-  // Blöcke außerhalb der Vorschau-Woche unbekannte Bestände haben — der
-  // Server liefert nach Klick die echte Zahl)
-  const added = addedBlocks * SCHULSTD_PRO_BLOCK;
-  const predicted = baseline + added;
-  const diff = predicted - dauer;
-  let bg = '#e8f5e9', border = '#66bb6a', color = '#1b5e20', sign = '✓';
-  if (diff !== 0) { bg = '#fff3e0'; border = '#f5b942'; color = '#8a4f00'; sign = '⚠'; }
+
+  // Picks nach Klasse gruppieren — dauer_stunden gilt pro Klasse, daher
+  // muss die Vorhersage je Klasse separat passieren (sonst falsche
+  // 'überschritten'-Warnung, wenn Klasse A schon voll und Klasse B leer)
+  const picksByClass = {};
+  Object.values(_smPickedMeta).forEach(m => {
+    const k = m.klassen || '';
+    picksByClass[k] = (picksByClass[k] || 0) + 1;
+  });
+  const baselineByClass = {};
+  (_smLsDist.per_class || []).forEach(p => {
+    baselineByClass[p.klassen_key || ''] = p.verteilt_stunden || 0;
+  });
+  // Alle relevanten Klassen: aus per_class + aus aktuellen Picks
+  const allClasses = new Set([
+    ...Object.keys(baselineByClass),
+    ...Object.keys(picksByClass),
+  ]);
+  if (allClasses.size === 0) { box.style.display = 'none'; return; }
+
+  // Pro-Klasse-Zeilen bauen
+  const lines = [];
+  let anyDeviation = false;
+  Array.from(allClasses).sort().forEach(kk => {
+    const baseline = baselineByClass[kk] || 0;
+    const added = (picksByClass[kk] || 0) * SCHULSTD_PRO_BLOCK;
+    const predicted = baseline + added;
+    const diff = predicted - dauer;
+    const sign = diff === 0 ? '✓' : '⚠';
+    const color = diff === 0 ? '#1b5e20' : '#8a4f00';
+    if (diff !== 0) anyDeviation = true;
+    const diffStr = diff > 0 ? ('+'+diff) : String(diff);
+    const klabel = kk || '(ohne Klasse)';
+    lines.push('<div style="color:'+color+'">'
+      + sign+' <strong>'+esc(klabel)+':</strong> '
+      + 'aktuell <strong>'+baseline+'</strong> · '
+      + 'beim Verteilen <strong>'+predicted+'</strong> '
+      + '('+(added>0?'+'+added:added)+') · '
+      + 'Soll <strong>'+dauer+'</strong> Std.'
+      + (diff !== 0 ? ' <em>(Abweichung '+diffStr+')</em>' : '')
+      + '</div>');
+  });
+
+  const bg = anyDeviation ? '#fff3e0' : '#e8f5e9';
+  const border = anyDeviation ? '#f5b942' : '#66bb6a';
   box.style.background = bg;
   box.style.border = '1px solid ' + border;
-  box.style.color = color;
+  box.style.color = '#1a1a1a';
   box.style.display = 'block';
-  const diffStr = diff > 0 ? ('+'+diff) : String(diff);
-  box.innerHTML = '<strong>'+sign+' Stunden-Budget:</strong> '
-    + 'aktuell verteilt <strong>'+baseline+'</strong> Std. · '
-    + 'beim Verteilen geschätzt <strong>'+predicted+'</strong> Std. ('
-    + (added>0?'+'+added:added)+') · '
-    + 'geplante Dauer <strong>'+dauer+'</strong> Std.'
-    + (diff !== 0 ? ' <em>(Abweichung '+diffStr+')</em>' : '');
+  box.innerHTML = '<div style="font-weight:600;margin-bottom:.3rem">Stunden-Budget (pro Klasse):</div>'
+    + lines.join('');
 }
 
 function _smRecompute() {
@@ -1666,7 +1697,7 @@ function _smRecompute() {
   if (!blocks.length) {
     _smSummary.textContent = 'Noch keine Blöcke gewählt.';
     _smConflicts.style.display = 'none';
-    _smRenderBudget(0);
+    _smRenderBudget();
     return;
   }
   _smSummary.innerHTML = '<strong>' + blocks.length + '</strong> '
@@ -1690,7 +1721,7 @@ function _smRecompute() {
     _smConflicts.style.display = 'none';
     _smConflictsTable.innerHTML = '';
   }
-  _smRenderBudget(blocks.length);
+  _smRenderBudget();
 }
 
 async function seriesModalApply() {
@@ -1698,21 +1729,44 @@ async function seriesModalApply() {
   if (!ls_id) { alert('Bitte eine Lernsituation wählen.'); return; }
   const { blocks, conflicts } = _smCollectBlocks();
   if (!blocks.length) { alert('Bitte mindestens einen Slot anklicken.'); return; }
-  // Budget-Bestätigung bei Abweichung
+  // Budget-Bestätigung bei Abweichung — pro Klasse (dauer_stunden gilt
+  // pro Klasse, nicht gesamt)
   if (_smLsDist && _smLsDist.dauer_stunden) {
     const dauer = _smLsDist.dauer_stunden;
-    const predicted = _smLsDist.verteilt_stunden + blocks.length * SCHULSTD_PRO_BLOCK;
-    if (predicted !== dauer) {
+    const picksByClass = {};
+    blocks.forEach(b => {
+      const k = b.klassen || '';
+      picksByClass[k] = (picksByClass[k] || 0) + 1;
+    });
+    const baselineByClass = {};
+    (_smLsDist.per_class || []).forEach(p => {
+      baselineByClass[p.klassen_key || ''] = p.verteilt_stunden || 0;
+    });
+    const allClasses = new Set([
+      ...Object.keys(baselineByClass),
+      ...Object.keys(picksByClass),
+    ]);
+    const deviations = [];
+    allClasses.forEach(kk => {
+      const baseline = baselineByClass[kk] || 0;
+      const added = (picksByClass[kk] || 0) * SCHULSTD_PRO_BLOCK;
+      const predicted = baseline + added;
       const diff = predicted - dauer;
-      const direction = diff > 0
-        ? 'überschreitet das geplante Stunden-Budget'
-        : 'erreicht das geplante Stunden-Budget nicht';
+      if (diff !== 0) {
+        deviations.push({klasse: kk || '(ohne Klasse)',
+                         baseline, added, predicted, diff});
+      }
+    });
+    if (deviations.length) {
+      const lines = deviations.map(d =>
+        d.klasse + ': ' + d.predicted + ' / ' + dauer + ' Std.'
+        + ' (Abweichung ' + (d.diff>0?'+':'') + d.diff + ')'
+      ).join('\n');
       const ok = confirm(
-        'Achtung: Diese Verteilung ' + direction + '.\n\n'
-        + 'Geplante Dauer: ' + dauer + ' Schulstunden\n'
-        + 'Voraussichtlich verteilt: ' + predicted + ' Schulstunden'
-        + ' (Abweichung ' + (diff>0?'+':'') + diff + ')\n\n'
-        + 'Trotzdem verteilen?');
+        'Achtung: Bei mindestens einer Klasse wird das geplante '
+        + 'Stunden-Budget nicht exakt getroffen.\n\n'
+        + 'Geplante Dauer pro Klasse: ' + dauer + ' Schulstunden\n\n'
+        + lines + '\n\nTrotzdem verteilen?');
       if (!ok) return;
     }
   }
