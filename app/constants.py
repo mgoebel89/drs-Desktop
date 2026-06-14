@@ -78,3 +78,16 @@ ATTACHMENT_KATEGORIE_LABELS: dict[str, str] = {
     "datenblatt": "Datenblatt",
     "sonstiges": "Sonstiges",
 }
+
+
+# Aufgabentypen für SCORM-Auto-Bewertung (Schema v4 + Migration 0022).
+# "" = nicht-interaktiv (Default für Bestand-Aufgaben aus v3).
+AUFGABENTYPEN: list[str] = ["mc", "mr", "shortanswer", "freitext"]
+
+AUFGABENTYP_LABELS: dict[str, str] = {
+    "": "— nicht-interaktiv (Default) —",
+    "mc": "Multiple-Choice (1 von N richtig)",
+    "mr": "Multiple-Response (mehrere richtig)",
+    "shortanswer": "Kurz-Eingabe (Text/Zahl mit Toleranz)",
+    "freitext": "Freitext (nur Abgabe, keine Auto-Bewertung)",
+}

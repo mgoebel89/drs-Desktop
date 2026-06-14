@@ -161,6 +161,12 @@ class LsAufgabe(Base):
     # dort weiter in der MD.
     text_md: Mapped[str] = mapped_column(Text, default="")
     loesungsskizze_md: Mapped[str] = mapped_column(Text, default="")
+    # Schema v4 (Migration 0022): Aufgabentyp für SCORM-Auto-Bewertung.
+    # "" = nicht-interaktiv (Default für Bestand); sonst eine der
+    # Konstanten in app.constants.AUFGABENTYPEN.
+    aufgabentyp: Mapped[str] = mapped_column(String(16), default="")
+    antwort_schluessel_json: Mapped[str] = mapped_column(Text, default="")
+    punkte: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
