@@ -14,7 +14,7 @@ from app.db import get_db
 from app.constants import ATTACHMENT_KATEGORIEN, ATTACHMENT_KATEGORIE_LABELS
 from app.models import (
     LearningSituation, Lernfeld, LsArbeitsblatt, LsAttachment, LsAufgabe,
-    LsLernfeld, User, Worksheet)
+    LsKlasse, LsLernfeld, User, Worksheet)
 from app.services import (aufgabe_sync, file_store, ls_sync, obsidian_writer,
                           smb_client, wizard_helpers, worksheet_from_ls)
 from app.models import AppFile
@@ -191,6 +191,90 @@ def ls_lernfelder_get(
             for lf in all_lf
         ],
     })
+
+
+# ── LS ↔ Klassen M2M (Parallelklassen, Schema v4) ────────────────────────
+
+
+@router.get("/api/ls/{ls_id}/klassen")
+def ls_klassen_get(
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Liefert die zugeordneten Klassen (klassen_keys) der LS plus
+    Vorschlagsliste aller bekannten Klassen-Keys des Users (aus
+    LessonNote-Historie + LearningSituation.klassen_key)."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    linked = [row[0] for row in db.execute(
+        select(LsKlasse.klassen_key).where(
+            LsKlasse.learning_situation_id == ls_id)
+    ).all()]
+    # Vorschlags-Pool aus eigenen LSn und LessonNotes
+    from app.models import LessonNote
+    pool: set[str] = set()
+    for kk, in db.execute(
+        select(LearningSituation.klassen_key).where(
+            LearningSituation.user_id == user.id,
+            LearningSituation.klassen_key != "")
+    ).all():
+        pool.add(kk)
+    for kk, in db.execute(
+        select(LessonNote.klassen_key).where(
+            LessonNote.user_id == user.id,
+            LessonNote.klassen_key != "")
+        .distinct()
+    ).all():
+        pool.add(kk)
+    pool.update(linked)
+    return JSONResponse({
+        "ok": True,
+        "linked": sorted(linked),
+        "suggestions": sorted(pool),
+    })
+
+
+@router.post("/api/ls/{ls_id}/klassen")
+def ls_klassen_set(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Überschreibt die Klassen-Zuordnung der LS.
+
+    Body: {keys: ["MT 23 a", "MT 23 b", ...]}
+    Pflegt zusätzlich das Legacy-Feld `klassen_key` an der LS (erster
+    Eintrag in alphabetischer Reihenfolge), damit bestehende Stellen
+    (Stundenplan-Side-Panel, Wizard-Prompts, PDF) weiter funktionieren."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    raw = body.get("keys") or []
+    if not isinstance(raw, list):
+        raise HTTPException(400, "keys muss eine Liste sein")
+    keys: list[str] = []
+    seen: set[str] = set()
+    for x in raw:
+        s = str(x or "").strip()[:255]
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        keys.append(s)
+    db.query(LsKlasse).filter(
+        LsKlasse.learning_situation_id == ls_id).delete()
+    for k in keys:
+        db.add(LsKlasse(learning_situation_id=ls_id, klassen_key=k))
+    # Legacy-Spalte: erster Eintrag (sortiert)
+    ls.klassen_key = sorted(keys)[0] if keys else ""
+    audit(db, "ls_klassen_set", actor=user, target=str(ls_id),
+          detail=",".join(sorted(keys)), request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "linked": sorted(keys),
+                         "klassen_key": ls.klassen_key})
 
 
 @router.post("/api/ls/{ls_id}/lernfelder")
@@ -780,6 +864,13 @@ def validate_pflicht_v4(db: Session, ls: LearningSituation) -> dict:
     if lf_count is None:
         problems.append({"code": "lernfeld",
                          "label": "Mindestens ein Lernfeld muss verknüpft sein"})
+    # Mindestens eine Klasse (entweder M2M oder Legacy-String)
+    has_class = bool(ls.klassen_key) or db.scalar(
+        select(LsKlasse).where(
+            LsKlasse.learning_situation_id == ls.id).limit(1)) is not None
+    if not has_class:
+        problems.append({"code": "klassen",
+                         "label": "Mindestens eine Klasse muss zugeordnet sein"})
     ab_with_aufgaben = db.execute(
         select(LsArbeitsblatt.id).where(
             LsArbeitsblatt.learning_situation_id == ls.id,

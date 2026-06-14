@@ -46,9 +46,17 @@
       <label style="font-size:12px">Bezeichnung</label>
       <input data-meta="display_name" value="{{ ls.display_name }}" maxlength="200">
     </div>
-    <div>
-      <label style="font-size:12px">Klasse</label>
-      <input data-meta="klassen_key" value="{{ ls.klassen_key or '' }}" maxlength="64" placeholder="—">
+    <div style="position:relative">
+      <label style="font-size:12px">Klassen
+        <span class="muted" style="float:right;font-size:11px"
+              title="Parallelklassen mit gleichem Inhalt — Stunden-Budget gilt pro Klasse">
+          Parallelklassen ⓘ
+        </span>
+      </label>
+      <div id="kl-pills" class="lf-pills" tabindex="0">
+        <span class="placeholder" id="kl-placeholder">— bitte eintragen —</span>
+      </div>
+      <div id="kl-picker" class="lf-picker"></div>
     </div>
     <div style="position:relative">
       <label style="font-size:12px">Lernfelder
@@ -187,6 +195,120 @@
         renderPicker();
       })
       .catch(e => console.error('LF-Load:', e));
+  })();
+
+  // ── Klassen-Multi-Picker (Schema v4 Parallelklassen) ────────────────────
+  (function(){
+    const LS_ID = {{ ls.id }};
+    const pillsBox = document.getElementById('kl-pills');
+    const picker = document.getElementById('kl-picker');
+    const placeholder = document.getElementById('kl-placeholder');
+    let suggestions = [];   // string[]
+    let linked = [];        // string[]
+
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    function renderPills(){
+      pillsBox.querySelectorAll('.lf-pill').forEach(el => el.remove());
+      placeholder.style.display = linked.length ? 'none' : '';
+      linked.slice().sort().forEach(k => {
+        const pill = document.createElement('span');
+        pill.className = 'lf-pill';
+        pill.innerHTML = esc(k) + ' <span class="x" data-key="'+esc(k)+'" title="entfernen">×</span>';
+        pillsBox.insertBefore(pill, placeholder);
+      });
+      pillsBox.querySelectorAll('.lf-pill .x').forEach(x => {
+        x.addEventListener('click', e => {
+          e.stopPropagation();
+          linked = linked.filter(k => k !== x.dataset.key);
+          save(); renderPills(); renderPicker();
+        });
+      });
+    }
+
+    function renderPicker(){
+      const linkedSet = new Set(linked);
+      const free = suggestions.filter(s => !linkedSet.has(s));
+      let html = '<div class="lf-opt" style="display:flex;gap:4px;padding:6px 12px">'
+        + '<input id="kl-new-input" placeholder="Neue Klasse, z. B. MT 23 c" '
+        + 'style="flex:1;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:12px">'
+        + '<button id="kl-new-btn" style="padding:2px 9px;font-size:11px;'
+        + 'border:1px solid var(--blau);background:var(--blau);color:#fff;'
+        + 'border-radius:4px;cursor:pointer">+</button>'
+        + '</div>';
+      if (free.length) {
+        html += '<div style="font-size:10px;color:var(--muted);padding:4px 12px;text-transform:uppercase;letter-spacing:.4px">Vorschläge</div>';
+        html += free.map(s => '<div class="lf-opt" data-key="'+esc(s)+'">+ '+esc(s)+'</div>').join('');
+      }
+      picker.innerHTML = html;
+      const inp = document.getElementById('kl-new-input');
+      const btn = document.getElementById('kl-new-btn');
+      const addFromInput = () => {
+        const v = (inp.value || '').trim();
+        if (!v) return;
+        if (!linked.includes(v)) {
+          linked.push(v);
+          if (!suggestions.includes(v)) suggestions.push(v);
+          save(); renderPills(); renderPicker();
+          setTimeout(() => document.getElementById('kl-new-input')?.focus(), 50);
+        }
+      };
+      btn.addEventListener('click', addFromInput);
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addFromInput(); }
+      });
+      picker.querySelectorAll('.lf-opt[data-key]').forEach(el => {
+        el.addEventListener('click', () => {
+          const k = el.dataset.key;
+          if (!linked.includes(k)) linked.push(k);
+          save(); renderPills(); renderPicker();
+        });
+      });
+    }
+
+    async function save(){
+      try {
+        await fetch('/api/ls/'+LS_ID+'/klassen', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({keys: linked}),
+        });
+        if (typeof refreshValidator === 'function') refreshValidator();
+      } catch (e) { console.error('Klassen-Save:', e); }
+    }
+
+    function openPicker(){
+      const rect = pillsBox.getBoundingClientRect();
+      picker.style.left = rect.left + 'px';
+      picker.style.top = (rect.bottom + 2) + 'px';
+      picker.style.minWidth = rect.width + 'px';
+      picker.classList.add('open');
+    }
+    function closePicker(){ picker.classList.remove('open'); }
+    pillsBox.addEventListener('click', e => {
+      if (e.target.classList.contains('x')) return;
+      if (picker.classList.contains('open')) closePicker();
+      else openPicker();
+    });
+    document.addEventListener('click', e => {
+      if (!picker.classList.contains('open')) return;
+      if (picker.contains(e.target) || pillsBox.contains(e.target)) return;
+      closePicker();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closePicker();
+    });
+    window.addEventListener('scroll', closePicker, true);
+    window.addEventListener('resize', closePicker);
+
+    fetch('/api/ls/'+LS_ID+'/klassen')
+      .then(r => r.json())
+      .then(d => {
+        suggestions = d.suggestions || [];
+        linked = d.linked || [];
+        renderPills(); renderPicker();
+      })
+      .catch(e => console.error('Klassen-Load:', e));
   })();
   </script>
   <div style="display:flex;justify-content:flex-end;margin-top:.2rem">
@@ -1179,6 +1301,29 @@ refreshValidator();
 function _distEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+function _renderBudgetBar(dauer, verteilt, klassenLabel){
+  if (dauer <= 0) return '<div class="stats"><em>Keine geplante Dauer hinterlegt</em></div>';
+  const pct = Math.min(100, Math.round(100 * verteilt / dauer));
+  let barClass = 'bar';
+  let label;
+  if (verteilt === dauer) {
+    label = '✓ <strong>'+verteilt+' / '+dauer+'</strong> Schulstunden verteilt';
+  } else if (verteilt > dauer) {
+    barClass += ' over';
+    label = '⚠ <strong>'+verteilt+' / '+dauer+'</strong> Schulstunden ('
+      + 'überschritten um '+(verteilt-dauer)+')';
+  } else {
+    barClass += ' under';
+    label = '<strong>'+verteilt+' / '+dauer+'</strong> Schulstunden ('
+      + 'noch '+(dauer-verteilt)+' zu verteilen)';
+  }
+  const widthPct = verteilt > dauer ? 100 : pct;
+  const prefix = klassenLabel ? ('<strong style="color:var(--blau)">'+_distEsc(klassenLabel)+':</strong> ') : '';
+  return '<div class="bar-wrap"><div class="'+barClass+'" '
+    + 'style="width:'+widthPct+'%"></div></div>'
+    + '<div class="stats">'+prefix+label+'</div>';
+}
+
 async function refreshDistribution(){
   const box = document.getElementById('v4-dist');
   const body = document.getElementById('v4-dist-body');
@@ -1189,31 +1334,23 @@ async function refreshDistribution(){
     if (!r.ok || !d.ok) throw new Error(d.detail || ('HTTP '+r.status));
     box.style.display = 'block';
     const dauer = d.dauer_stunden || 0;
-    const verteilt = d.verteilt_stunden || 0;
-    const pct = dauer > 0 ? Math.min(100, Math.round(100 * verteilt / dauer)) : 0;
-    let barClass = 'bar';
-    let label;
-    if (dauer <= 0) {
-      label = '<em>Keine geplante Dauer hinterlegt</em>';
-    } else if (verteilt === dauer) {
-      label = '✓ <strong>'+verteilt+' / '+dauer+'</strong> Schulstunden verteilt';
-    } else if (verteilt > dauer) {
-      barClass += ' over';
-      label = '⚠ <strong>'+verteilt+' / '+dauer+'</strong> Schulstunden ('
-        + 'überschritten um '+(verteilt-dauer)+')';
+    const perClass = d.per_class || [];
+
+    // Pro-Klasse-Fortschritt: eine Bar pro zugeordneter Klasse
+    let bars = '';
+    if (perClass.length > 0) {
+      bars = perClass.map(p => _renderBudgetBar(
+        p.dauer_stunden || dauer,
+        p.verteilt_stunden || 0,
+        p.klassen_key || '(ohne Klasse)'
+      )).join('<div style="height:.3rem"></div>');
     } else {
-      barClass += ' under';
-      label = '<strong>'+verteilt+' / '+dauer+'</strong> Schulstunden ('
-        + 'noch '+(dauer-verteilt)+' zu verteilen)';
+      // Keine Klassen-Zuordnung: nur Gesamt-Bar
+      bars = _renderBudgetBar(dauer, d.verteilt_stunden || 0, '');
     }
-    let bar = '';
-    if (dauer > 0) {
-      const widthPct = verteilt > dauer ? 100 : pct;
-      bar = '<div class="bar-wrap"><div class="'+barClass+'" '
-        + 'style="width:'+widthPct+'%"></div></div>';
-    }
-    const stats = '<div class="stats">'+label+' · '
-      + d.count_blocks+' Block-Termin'+(d.count_blocks===1?'':'e')+'</div>';
+    const summary = '<div class="stats" style="margin-top:.3rem">'
+      + d.count_blocks+' Block-Termin'+(d.count_blocks===1?'':'e')
+      + ' insgesamt verteilt</div>';
 
     const abList = d.arbeitsblaetter || [];
     let tbl = '';
@@ -1258,7 +1395,7 @@ async function refreshDistribution(){
       +     'Löst die LS aus allen Block-Terminen ohne zugeordnete Aufgabe'
       +   '</span>'
       + '</div>';
-    body.innerHTML = bar + stats + tbl + actions;
+    body.innerHTML = bars + summary + tbl + actions;
     _bindDistInteractions(abList);
   } catch(e) {
     box.style.display = 'block';

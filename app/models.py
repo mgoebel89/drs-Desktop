@@ -314,6 +314,21 @@ class LsLernfeld(Base):
         primary_key=True)
 
 
+class LsKlasse(Base):
+    """Multi-Klassen-Zuordnung für eine LS (Schema v4, Migration 0023).
+
+    Eine LS kann in mehreren Parallel-Klassen unterrichtet werden — z. B.
+    'MT 23 a', 'MT 23 b', 'MT 23 c' parallel. Inhalt der LS ist
+    identisch; Stunden-Verteilung wird pro Klasse separat geführt.
+    `dauer_stunden` an der LS gilt PRO Klasse."""
+    __tablename__ = "ls_klassen"
+
+    learning_situation_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_situations.id", ondelete="CASCADE"),
+        primary_key=True)
+    klassen_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+
 class LsAttachment(Base):
     """Strukturierter Anhang einer LS (Schema v4): Auftragsbild,
     Schaltplan, Datenblatt, Sonstiges. Die Datei selbst liegt im

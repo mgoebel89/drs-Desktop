@@ -685,21 +685,68 @@ def api_ls_distribution(
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    """Liefert Verteilungs-Übersicht + Budget-Vergleich für eine LS."""
+    """Liefert Verteilungs-Übersicht + Budget-Vergleich für eine LS.
+
+    Wenn die LS mehreren Klassen zugeordnet ist (LsKlasse), wird die
+    Verteilung pro Klasse aufgeschlüsselt — dauer_stunden gilt PRO Klasse.
+    """
+    from app.constants import SCHULSTUNDEN_PRO_BLOCK
+    from app.models import LsKlasse
     ls = db.get(LearningSituation, ls_id)
     if not ls or ls.user_id != user.id:
         raise HTTPException(404, "Lernsituation nicht gefunden")
     info = _compute_ls_distribution(db, user, ls_id)
     dauer = ls.dauer_stunden or 0
-    verteilt = info["count_schulstunden"]
+    verteilt_total = info["count_schulstunden"]
+
+    # Zugeordnete Klassen via M2M; Fallback: Legacy-String
+    linked_classes = [row[0] for row in db.execute(
+        select(LsKlasse.klassen_key).where(
+            LsKlasse.learning_situation_id == ls_id)
+    ).all()]
+    if not linked_classes and ls.klassen_key:
+        linked_classes = [ls.klassen_key]
+
+    # Pro-Klasse Aufschlüsselung
+    blocks_by_class: dict[str, list[dict]] = {}
+    for b in info["blocks"]:
+        blocks_by_class.setdefault(b["klassen"] or "", []).append(b)
+
+    per_class: list[dict] = []
+    # Alle gepflegten Klassen anzeigen, auch ohne Blöcke; plus Klassen,
+    # die nur in den Blöcken auftauchen (Edge-Case)
+    seen = set(linked_classes)
+    order = list(linked_classes) + [k for k in blocks_by_class
+                                     if k and k not in seen]
+    for kk in order:
+        blks = blocks_by_class.get(kk, [])
+        v = len(blks) * SCHULSTUNDEN_PRO_BLOCK
+        if dauer <= 0:
+            status = "unset"
+        elif v == dauer:
+            status = "ok"
+        elif v < dauer:
+            status = "under"
+        else:
+            status = "over"
+        per_class.append({
+            "klassen_key": kk,
+            "count_blocks": len(blks),
+            "verteilt_stunden": v,
+            "dauer_stunden": dauer,
+            "budget_status": status,
+        })
+
+    # Gesamt-Status: ok nur wenn alle Klassen ok sind (oder unset)
     if dauer <= 0:
         budget_status = "unset"
-    elif verteilt == dauer:
+    elif per_class and all(p["budget_status"] == "ok"
+                           for p in per_class if p["klassen_key"]):
         budget_status = "ok"
-    elif verteilt < dauer:
-        budget_status = "under"
-    else:
+    elif any(p["budget_status"] == "over" for p in per_class):
         budget_status = "over"
+    else:
+        budget_status = "under"
 
     # Arbeitsblätter dieser LS mit ihren Aufgabe-IDs (für Multi-Picker)
     abs_ = db.query(LsArbeitsblatt).filter(
@@ -722,9 +769,11 @@ def api_ls_distribution(
         "ls_id": ls_id,
         "display_name": ls.display_name,
         "dauer_stunden": dauer,
-        "verteilt_stunden": verteilt,
+        "verteilt_stunden": verteilt_total,
         "count_blocks": info["count_blocks"],
         "budget_status": budget_status,
+        "linked_classes": linked_classes,
+        "per_class": per_class,
         "blocks": info["blocks"],
         "arbeitsblaetter": arbeitsblaetter_out,
     })
@@ -813,18 +862,34 @@ def api_ls_list(
 ):
     """Liefert alle LS des Users; wenn `klassen` gesetzt, sortiert
     klassen-spezifische LS nach oben."""
+    from app.models import LsKlasse
     rows = db.query(LearningSituation).filter(
         LearningSituation.user_id == user.id
     ).order_by(LearningSituation.updated_at.desc()).all()
+    # Zugeordnete Klassen pro LS via M2M (plus Legacy-String als Fallback)
+    classes_by_ls: dict[int, list[str]] = {}
+    for ls_id, kk in db.execute(
+        select(LsKlasse.learning_situation_id, LsKlasse.klassen_key)
+    ).all():
+        classes_by_ls.setdefault(int(ls_id), []).append(kk)
+    def klassen_of(ls):
+        out = classes_by_ls.get(ls.id, [])
+        if not out and ls.klassen_key:
+            out = [ls.klassen_key]
+        return out
     def sort_key(ls):
-        same = 0 if (klassen and ls.klassen_key == klassen) else 1
-        return (same, )
+        # LS mit gesuchter Klasse (egal ob als Mutter- oder Parallelklasse)
+        # zuerst, sonst nach updated_at-Reihenfolge (durch stabile Sortierung)
+        if klassen and klassen in klassen_of(ls):
+            return 0
+        return 1
     rows.sort(key=sort_key)
     return JSONResponse({
         "ok": True,
         "items": [
             {"id": ls.id, "display_name": ls.display_name,
              "klassen_key": ls.klassen_key or "",
+             "klassen": klassen_of(ls),
              "lernfeld": ls.lernfeld or "",
              "dauer_stunden": ls.dauer_stunden or 0}
             for ls in rows
