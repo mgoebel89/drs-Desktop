@@ -327,8 +327,6 @@
     <button class="btn" id="btn-migrate-v3">Auf Schema v3 migrieren</button>
   </div>
   {% else %}
-  <div id="sync-banner" style="margin-top:1rem;padding:.7rem 1rem;border-radius:8px;display:none"></div>
-
   <h2 style="margin-top:1.6rem;display:flex;align-items:center;gap:.8rem">
     Auftrag / Handlungssituation
     <span class="muted" style="font-size:11px;font-weight:normal">— didaktischer Kern (Schema v4)</span>
@@ -570,7 +568,7 @@
     </div>
     {% endfor %}
   {% else %}
-    <p class="muted">Noch keine Arbeitsblätter. Lege das erste über den +-Knopf an oder pflege es in Obsidian und nutze „Vault → DB" oben.</p>
+    <p class="muted">Noch keine Arbeitsblätter. Lege das erste über den +-Knopf an.</p>
   {% endif %}
   {% endif %}
 
@@ -810,52 +808,9 @@
     }catch(e){ alert('Fehler: ' + e.message); btnAdd.disabled = false; }
   });
 
-  // ── Sync-Banner aus /sync/status laden
-  const banner = document.getElementById('sync-banner');
-  async function refreshSync(){
-    if(!banner) return;
-    try{
-      const r = await fetch(`/ls/${LS_ID}/sync/status`);
-      if(!r.ok) return;
-      const d = await r.json();
-      if(d.in_sync){
-        banner.style.background = '#e8f5e9';
-        banner.style.border = '1px solid #66bb6a';
-        banner.innerHTML = '✓ Vault &amp; App synchron · <a href="#" data-pull>Vault → DB nachladen</a> · <a href="#" data-push>DB → Vault schreiben</a>';
-        banner.style.display = 'block';
-      } else {
-        const list = (d.sections||[]).map(s => `<li><label><input type="radio" name="ch_${s.key}" value="app" checked> App behalten</label> <label style="margin-left:.6rem"><input type="radio" name="ch_${s.key}" value="vault"> Obsidian holen</label> — <strong>${s.label}</strong></li>`).join('');
-        banner.style.background = '#fde2e2';
-        banner.style.border = '1px solid #f5b5b5';
-        banner.innerHTML = `<strong>⚠ Konflikt — Obsidian wurde extern geändert.</strong>
-          <ul style="margin:.4rem 0 .6rem 1.2rem;padding:0">${list}</ul>
-          <button class="btn" id="btn-resolve">Auswahl anwenden</button>`;
-        banner.style.display = 'block';
-        document.getElementById('btn-resolve').addEventListener('click', async () => {
-          const choices = {};
-          (d.sections||[]).forEach(s => {
-            const r = banner.querySelector(`input[name="ch_${s.key}"]:checked`);
-            choices[s.key] = r ? r.value : 'app';
-          });
-          try{
-            await postJSON(`/ls/${LS_ID}/sync/resolve`, {choices});
-            location.reload();
-          }catch(e){ alert('Fehler: ' + e.message); }
-        });
-      }
-      banner.querySelector('[data-pull]')?.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await postJSON(`/ls/${LS_ID}/sync/pull`);
-        location.reload();
-      });
-      banner.querySelector('[data-push]')?.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await postJSON(`/ls/${LS_ID}/sync/push`);
-        refreshSync();
-      });
-    }catch(e){ /* silent */ }
-  }
-  refreshSync();
+  // Sync: DB → Vault ist jetzt one-way. Vault-Knopf + Konflikt-Banner
+  // bewusst entfernt. Speichern der App-Sektionen schreibt direkt in den
+  // Vault (siehe ls_sync.save_to_vault in den jeweiligen Endpoints).
 })();
 
 // ── Auftragsbild (Schema v4) ──────────────────────────────────────────────

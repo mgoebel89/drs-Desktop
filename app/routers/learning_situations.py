@@ -503,13 +503,10 @@ def ls_detail(
         except Exception:
             db.rollback()
     elif (ls.schema_version or 2) >= 3:
-        # v3: initialer Pull bei leerer DB, danach Arbeitsblätter laden
-        if cfg and has_note and not ls.content_hash:
-            try:
-                ls_sync.load_from_vault(db, user, ls)
-                db.commit()
-            except Exception:
-                db.rollback()
+        # Sync ist seit v4 one-way (DB → Vault). Initialer Vault→DB-Pull
+        # entfällt; Bestands-LS mit leerer DB aber existierender MD muss
+        # einmal manuell durch den Lehrer (oder per separater Migrations-
+        # Aktion) befüllt werden.
         arbeitsblaetter = db.query(LsArbeitsblatt).filter(
             LsArbeitsblatt.learning_situation_id == ls.id
         ).order_by(LsArbeitsblatt.position).all()
@@ -930,60 +927,10 @@ def ls_migrate_v3(
                          "backup": ls.smb_folder_name + ".v2.bak.md"})
 
 
-@router.get("/ls/{ls_id}/sync/status")
-def ls_sync_status(
-    ls_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """Liefert den Konflikt-Report (leeres `sections`-Array = in sync)."""
-    ls = _require_v3(db, user, ls_id)
-    rep = ls_sync.detect_conflict(db, user, ls)
-    return JSONResponse({
-        "ok": True,
-        "in_sync": not rep.has_conflict,
-        "file_hash": rep.file_hash,
-        "db_hash": rep.db_hash,
-        "sections": [
-            {"key": s.key, "label": s.label,
-             "app_value": s.app_value, "vault_value": s.vault_value}
-            for s in rep.sections
-        ],
-    })
-
-
-@router.post("/ls/{ls_id}/sync/pull")
-def ls_sync_pull(
-    request: Request,
-    ls_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """Vault → DB. Überschreibt DB-Sektionen mit den Werten aus der MD."""
-    ls = _require_v3(db, user, ls_id)
-    changed = ls_sync.load_from_vault(db, user, ls)
-    audit(db, "ls_sync_pull", actor=user, target=str(ls.id),
-          detail="changed" if changed else "noop", request=request)
-    db.commit()
-    return JSONResponse({"ok": True, "applied": changed})
-
-
-@router.post("/ls/{ls_id}/sync/push")
-def ls_sync_push(
-    request: Request,
-    ls_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """DB → Vault. Baut MD aus dem aktuellen DB-Stand und schreibt sie."""
-    ls = _require_v3(db, user, ls_id)
-    try:
-        ls_sync.save_to_vault(user, ls, db)
-    except RuntimeError as e:
-        raise HTTPException(400, str(e))
-    audit(db, "ls_sync_push", actor=user, target=str(ls.id), request=request)
-    db.commit()
-    return JSONResponse({"ok": True, "hash": ls.content_hash})
+# Sync DB ↔ Vault ist seit v4 one-way. Die ehemaligen Endpoints
+# /sync/status, /sync/pull, /sync/push, /sync/resolve wurden entfernt —
+# jede schreibende Aktion in der App ruft intern ls_sync.save_to_vault
+# direkt auf.
 
 
 @router.post("/ls/{ls_id}/section/{section_key}")
@@ -995,18 +942,13 @@ def ls_section_save(
     db: Annotated[Session, Depends(get_db)],
     body: dict = Body(...),
 ):
-    """Inline-Edit pro Sektion. Erwartet `{value, expected_hash?}`.
+    """Inline-Edit pro Sektion. Erwartet `{value}`.
 
-    Wenn `expected_hash` mitgesendet wird, prüft die App, dass die
-    Datei zwischenzeitlich nicht extern geändert wurde — bei Mismatch
-    409 Conflict (Client sollte auf den Konflikt-Banner umschalten)."""
+    Sync ist seit v4 one-way (DB → Vault); externe Änderungen in der
+    Obsidian-MD werden nicht mehr gesondert behandelt — beim nächsten
+    App-Save überschreibt die App die MD-Datei."""
     ls = _require_v3(db, user, ls_id)
     value = (body.get("value") or "")
-    expected = body.get("expected_hash")
-    if expected and (ls.content_hash or "") != expected:
-        rep = ls_sync.detect_conflict(db, user, ls)
-        if rep.has_conflict:
-            raise HTTPException(409, "Konflikt mit externer Änderung")
 
     if section_key in _SECTION_FIELDS:
         setattr(ls, _SECTION_FIELDS[section_key], value[:200000])
@@ -1284,31 +1226,6 @@ def ls_aufgabe_delete(
           detail=f"auf={auf_id}", request=request)
     db.commit()
     return JSONResponse({"ok": True})
-
-
-@router.post("/ls/{ls_id}/sync/resolve")
-def ls_sync_resolve(
-    request: Request,
-    ls_id: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-    body: dict = Body(...),
-):
-    """Konflikt auflösen. Body: `{choices: {section_key: 'app'|'vault'}}`.
-
-    Für jeden Key mit 'vault' wird der Vault-Stand in die DB übernommen,
-    danach wird die MD aus dem (jetzt vom Lehrer gemixten) DB-Stand neu
-    geschrieben."""
-    ls = _require_v3(db, user, ls_id)
-    choices = body.get("choices") or {}
-    if not isinstance(choices, dict):
-        raise HTTPException(400, "Ungültige Auswahl")
-    ls_sync.apply_resolution(db, user, ls, {k: str(v) for k, v in choices.items()})
-    audit(db, "ls_sync_resolved", actor=user, target=str(ls.id),
-          detail=f"{sum(1 for v in choices.values() if v == 'vault')} sektionen geholt",
-          request=request)
-    db.commit()
-    return JSONResponse({"ok": True, "hash": ls.content_hash})
 
 
 @router.post("/ls/{ls_id}/files/{filename}/delete")
