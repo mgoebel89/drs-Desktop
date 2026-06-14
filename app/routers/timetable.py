@@ -12,7 +12,7 @@ from app.auth import require_user
 from app.db import get_db
 from app.models import (
     Exam, IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
-    LessonSeriesOverride, LsAufgabe, User,
+    LessonSeriesOverride, LsArbeitsblatt, LsAufgabe, User,
 )
 from app.services import aufgabe_sync, ical_client, webuntis_client
 from app.templating import templates
