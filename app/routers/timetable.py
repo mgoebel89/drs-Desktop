@@ -632,7 +632,8 @@ def api_forward_done(
 def _compute_ls_distribution(db: Session, user: User,
                              ls_id: int) -> dict:
     """Liefert die Verteilungs-Übersicht einer LS: alle LessonNotes mit
-    dieser learning_situation_id, gruppiert nach Datum/Block, plus Summen.
+    dieser learning_situation_id, gruppiert nach Datum/Block, plus Summen
+    und pro Block die zugeordneten Aufgaben + Arbeitsblätter.
 
     Stunden-Einheit ist Schulstunde (45 min); 1 Stundenplan-Block zählt
     als 2 Schulstunden (vgl. app/constants.SCHULSTUNDEN_PRO_BLOCK).
@@ -642,10 +643,34 @@ def _compute_ls_distribution(db: Session, user: User,
         LessonNote.user_id == user.id,
         LessonNote.learning_situation_id == ls_id,
     ).order_by(LessonNote.lesson_date, LessonNote.block_start).all()
+
+    # M2M: lesson_note → ls_aufgabe → arbeitsblatt
+    note_ids = [n.id for n in notes]
+    aufgaben_by_note: dict[int, list[int]] = {}
+    ab_by_note: dict[int, list[int]] = {}
+    if note_ids:
+        # Aufgabe-Map einmal laden
+        rows = db.query(
+            LessonNoteAufgabe.lesson_note_id,
+            LessonNoteAufgabe.ls_aufgabe_id,
+            LsAufgabe.arbeitsblatt_id,
+        ).join(LsAufgabe, LsAufgabe.id == LessonNoteAufgabe.ls_aufgabe_id
+        ).filter(LessonNoteAufgabe.lesson_note_id.in_(note_ids)
+        ).order_by(LessonNoteAufgabe.position).all()
+        for nid, aid, ab_id in rows:
+            aufgaben_by_note.setdefault(nid, []).append(int(aid))
+            if ab_id:
+                lst = ab_by_note.setdefault(nid, [])
+                if ab_id not in lst:
+                    lst.append(int(ab_id))
+
     blocks_out = [{
+        "note_id": n.id,
         "date": n.lesson_date, "block_start": n.block_start or "",
         "klassen": n.klassen_key or "", "subjects": n.subjects_key or "",
         "theme": n.theme or "",
+        "aufgabe_ids": aufgaben_by_note.get(n.id, []),
+        "ab_ids": ab_by_note.get(n.id, []),
     } for n in notes]
     return {
         "count_blocks": len(notes),
@@ -675,6 +700,23 @@ def api_ls_distribution(
         budget_status = "under"
     else:
         budget_status = "over"
+
+    # Arbeitsblätter dieser LS mit ihren Aufgabe-IDs (für Multi-Picker)
+    abs_ = db.query(LsArbeitsblatt).filter(
+        LsArbeitsblatt.learning_situation_id == ls_id
+    ).order_by(LsArbeitsblatt.position).all()
+    aufgaben_by_ab: dict[int, list[int]] = {}
+    for a in db.query(LsAufgabe).filter(
+        LsAufgabe.learning_situation_id == ls_id,
+        LsAufgabe.arbeitsblatt_id.isnot(None),
+    ).order_by(LsAufgabe.arbeitsblatt_id, LsAufgabe.nummer).all():
+        aufgaben_by_ab.setdefault(a.arbeitsblatt_id, []).append(int(a.id))
+    arbeitsblaetter_out = [{
+        "id": ab.id, "position": ab.position,
+        "title": ab.title or f"Arbeitsblatt {ab.position}",
+        "aufgabe_ids": aufgaben_by_ab.get(ab.id, []),
+    } for ab in abs_]
+
     return JSONResponse({
         "ok": True,
         "ls_id": ls_id,
@@ -684,7 +726,83 @@ def api_ls_distribution(
         "count_blocks": info["count_blocks"],
         "budget_status": budget_status,
         "blocks": info["blocks"],
+        "arbeitsblaetter": arbeitsblaetter_out,
     })
+
+
+@router.post("/api/ls/{ls_id}/unassign-block")
+def api_ls_unassign_block(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Entfernt eine LS-Zuordnung von einem konkreten Block (LessonNote).
+
+    Body: {date, klassen, subjects, block_start}
+    Löscht zudem alle LessonNoteAufgabe-Verknüpfungen dieser Note.
+    Theme bleibt unangetastet.
+    """
+    d = (body.get("date") or "").strip()
+    if len(d) != 10:
+        raise HTTPException(400, "Ungültiges Datum")
+    kk = (body.get("klassen") or "")[:255]
+    sk = (body.get("subjects") or "")[:255]
+    bs = (body.get("block_start") or "")[:5]
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id, LessonNote.lesson_date == d,
+        LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+        LessonNote.block_start == bs,
+    ).first()
+    if n and n.learning_situation_id == ls_id:
+        db.query(LessonNoteAufgabe).filter(
+            LessonNoteAufgabe.lesson_note_id == n.id
+        ).delete(synchronize_session=False)
+        n.learning_situation_id = None
+        n.updated_at = datetime.utcnow()
+        from app.auth import audit
+        audit(db, "ls_unassigned_from_block", actor=user, target=str(ls_id),
+              detail=f"{d}|{kk}|{sk}|{bs}", request=request)
+        db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/ls/{ls_id}/prune-empty-blocks")
+def api_ls_prune_empty(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Hebt die LS-Zuordnung an allen Blöcken auf, die KEINE konkrete
+    Aufgabe-Zuordnung haben (Komfort-Aufräumen nach Reihen-Verteilung).
+    Blöcke mit mindestens einer zugeordneten Aufgabe bleiben erhalten."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404, "Lernsituation nicht gefunden")
+    notes = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id,
+        LessonNote.learning_situation_id == ls_id,
+    ).all()
+    note_ids_with_aufgaben = {row[0] for row in db.query(
+        LessonNoteAufgabe.lesson_note_id
+    ).filter(LessonNoteAufgabe.lesson_note_id.in_(
+        [n.id for n in notes] or [-1]
+    )).distinct().all()}
+    removed = 0
+    for n in notes:
+        if n.id in note_ids_with_aufgaben:
+            continue
+        n.learning_situation_id = None
+        n.updated_at = datetime.utcnow()
+        removed += 1
+    if removed:
+        from app.auth import audit
+        audit(db, "ls_pruned_empty_blocks", actor=user, target=str(ls_id),
+              detail=f"{removed} Blöcke entfernt", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "removed": removed})
 
 
 @router.get("/api/ls/list")

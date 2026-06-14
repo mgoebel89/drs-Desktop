@@ -215,10 +215,35 @@
     .v4-dist .stats { font-size:12px; color:var(--text); }
     .v4-dist table { width:100%; margin-top:.5rem; border-collapse:collapse;
       font-size:11px; }
-    .v4-dist table th, .v4-dist table td { padding:3px 6px;
-      border-bottom:1px solid #eee; text-align:left; }
+    .v4-dist table th, .v4-dist table td { padding:4px 6px;
+      border-bottom:1px solid #eee; text-align:left; vertical-align:middle; }
     .v4-dist table th { color:var(--blau); font-weight:600; }
     .v4-dist .empty { color:var(--muted); font-style:italic; font-size:12px; }
+    .v4-dist .ab-pills { display:flex; flex-wrap:wrap; gap:.2rem; }
+    .v4-dist .ab-pills label {
+      display:inline-flex; align-items:center; gap:3px;
+      font-size:10px; padding:1px 6px; border-radius:8px;
+      background:#eee; color:#444; cursor:pointer; user-select:none;
+      border:1px solid transparent;
+    }
+    .v4-dist .ab-pills label.picked {
+      background:#d4edda; color:#1b5e20; border-color:#5ec27a;
+    }
+    .v4-dist .ab-pills input { display:none; }
+    .v4-dist .row-del {
+      padding:1px 7px; font-size:11px; color:var(--pink);
+      border:1px solid var(--pink); background:transparent;
+      border-radius:4px; cursor:pointer;
+    }
+    .v4-dist .row-del:hover { background:#ffe6ec; }
+    .v4-dist .dist-actions { display:flex; gap:.5rem; align-items:center;
+      flex-wrap:wrap; margin-top:.4rem; }
+    .v4-dist .dist-actions button {
+      padding:3px 9px; font-size:11px; border:1px solid #ccc;
+      background:#fff; border-radius:4px; cursor:pointer;
+    }
+    .v4-dist .dist-actions button:hover { background:var(--blau-hell); }
+    .v4-dist .saving { font-size:10px; color:var(--muted); font-style:italic; }
   </style>
   <div class="v4-validate" id="v4-validate"></div>
   <div class="v4-dist" id="v4-dist" style="display:none">
@@ -1190,6 +1215,9 @@ async function refreshValidator(){
 refreshValidator();
 
 // ── Verteilungs-Übersicht (Schema v4) ─────────────────────────────────────
+function _distEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
 async function refreshDistribution(){
   const box = document.getElementById('v4-dist');
   const body = document.getElementById('v4-dist-body');
@@ -1225,25 +1253,134 @@ async function refreshDistribution(){
     }
     const stats = '<div class="stats">'+label+' · '
       + d.count_blocks+' Block-Termin'+(d.count_blocks===1?'':'e')+'</div>';
+
+    const abList = d.arbeitsblaetter || [];
     let tbl = '';
     if (d.blocks && d.blocks.length) {
-      const rows = d.blocks.map(b => '<tr>'
-        + '<td>'+b.date+'</td>'
-        + '<td>'+(b.block_start||'')+'</td>'
-        + '<td>'+(b.klassen||'')+'</td>'
-        + '<td>'+(b.theme||'').replace(/</g,'&lt;')+'</td>'
-        + '</tr>').join('');
-      tbl = '<table><thead><tr><th>Datum</th><th>Block</th>'
-        + '<th>Klasse</th><th>Thema</th></tr></thead><tbody>'+rows+'</tbody></table>';
+      const rows = d.blocks.map(b => {
+        const pickedAbIds = new Set(b.ab_ids || []);
+        const pills = abList.map(ab => {
+          const picked = pickedAbIds.has(ab.id);
+          return '<label class="'+(picked?'picked':'')+'">'
+            + '<input type="checkbox" data-ab-id="'+ab.id+'"'
+            + (picked?' checked':'')+'>'
+            + 'AB '+ab.position + (ab.title && ab.title !== ('Arbeitsblatt '+ab.position)
+                ? ' '+_distEsc(ab.title) : '')
+            + '</label>';
+        }).join('');
+        const abPicker = abList.length
+          ? '<div class="ab-pills" data-row-pills>'+pills+'</div>'
+          : '<span class="empty">— keine Arbeitsblätter angelegt —</span>';
+        return '<tr data-block=\''+JSON.stringify({
+            date: b.date, klassen: b.klassen,
+            subjects: b.subjects, block_start: b.block_start})
+          .replace(/'/g, '&#39;')+'\'>'
+          + '<td style="white-space:nowrap">'+_distEsc(b.date)+'</td>'
+          + '<td style="white-space:nowrap">'+_distEsc(b.block_start)+'</td>'
+          + '<td style="white-space:nowrap">'+_distEsc(b.klassen)+'</td>'
+          + '<td>'+abPicker+'</td>'
+          + '<td>'+_distEsc(b.theme || '')+'</td>'
+          + '<td><button type="button" class="row-del" title="Block aus LS entfernen">✕</button></td>'
+          + '</tr>';
+      }).join('');
+      tbl = '<table><thead><tr>'
+        + '<th>Datum</th><th>Block</th><th>Klasse</th>'
+        + '<th>Arbeitsblätter</th><th>Thema</th><th></th>'
+        + '</tr></thead><tbody>'+rows+'</tbody></table>';
     } else {
       tbl = '<div class="empty">— noch keine Blöcke verteilt —</div>';
     }
-    body.innerHTML = bar + stats + tbl;
+    const actions =
+      '<div class="dist-actions">'
+      +   '<button type="button" id="dist-prune">🧹 Leere Blöcke entfernen</button>'
+      +   '<span class="muted" style="font-size:11px">'
+      +     'Löst die LS aus allen Block-Terminen ohne zugeordnete Aufgabe'
+      +   '</span>'
+      + '</div>';
+    body.innerHTML = bar + stats + tbl + actions;
+    _bindDistInteractions(abList);
   } catch(e) {
     box.style.display = 'block';
-    body.innerHTML = '<div class="empty">Fehler: '+String(e.message||e).replace(/</g,'&lt;')+'</div>';
+    body.innerHTML = '<div class="empty">Fehler: '+_distEsc(String(e.message||e))+'</div>';
   }
 }
+
+function _bindDistInteractions(abList) {
+  const LS_ID = {{ ls.id }};
+  const abById = {};
+  abList.forEach(a => { abById[a.id] = a; });
+
+  document.querySelectorAll('#v4-dist-body tr[data-block]').forEach(tr => {
+    let block;
+    try { block = JSON.parse(tr.dataset.block.replace(/&#39;/g, "'")); }
+    catch (e) { return; }
+
+    // AB-Pills: Toggle speichert die Vereinigung aller aufgabe_ids
+    tr.querySelectorAll('.ab-pills input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        const label = cb.closest('label');
+        label.classList.toggle('picked', cb.checked);
+        const pickedAbIds = Array.from(tr.querySelectorAll(
+          '.ab-pills input[type=checkbox]:checked'
+        )).map(c => parseInt(c.dataset.abId, 10));
+        const aufgabeIds = [];
+        pickedAbIds.forEach(abid => {
+          (abById[abid]?.aufgabe_ids || []).forEach(aid => aufgabeIds.push(aid));
+        });
+        const status = document.createElement('span');
+        status.className = 'saving';
+        status.textContent = ' speichere …';
+        tr.querySelector('.ab-pills').appendChild(status);
+        try {
+          const r = await fetch('/api/lesson-note/aufgaben', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              date: block.date, klassen: block.klassen,
+              subjects: block.subjects, block_start: block.block_start,
+              ls_id: LS_ID, aufgabe_ids: aufgabeIds,
+            }),
+          });
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.detail || 'HTTP '+r.status);
+          status.remove();
+          // Komplett re-rendern (Thema ändert sich evtl.)
+          refreshDistribution();
+        } catch(e) {
+          status.textContent = ' ✗ ' + e.message;
+        }
+      });
+    });
+
+    // ✕-Knopf: Block aus LS entfernen
+    const delBtn = tr.querySelector('.row-del');
+    if (delBtn) delBtn.addEventListener('click', async () => {
+      if (!confirm('Block '+block.date+' '+block.block_start+' aus dieser Lernsituation entfernen?')) return;
+      try {
+        const r = await fetch('/api/ls/'+LS_ID+'/unassign-block', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(block),
+        });
+        const d = await r.json();
+        if (!r.ok || !d.ok) throw new Error(d.detail || 'HTTP '+r.status);
+        refreshDistribution();
+      } catch(e) { alert('Fehler: '+e.message); }
+    });
+  });
+
+  // Massen-Aufräumen: alle Blöcke ohne Aufgabe lösen
+  const pruneBtn = document.getElementById('dist-prune');
+  if (pruneBtn) pruneBtn.addEventListener('click', async () => {
+    if (!confirm('Alle Block-Termine ohne zugeordnete Aufgabe aus dieser Lernsituation entfernen?\n\nBlöcke mit gewählten Arbeitsblättern bleiben.')) return;
+    try {
+      const r = await fetch('/api/ls/'+LS_ID+'/prune-empty-blocks', {method:'POST'});
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.detail || 'HTTP '+r.status);
+      alert((d.removed || 0)+' Block-Termin'+(d.removed===1?'':'e')+' entfernt.');
+      refreshDistribution();
+    } catch(e) { alert('Fehler: '+e.message); }
+  });
+}
+
 refreshDistribution();
 
 // ── SCORM-Download (Schema v4 / Phase 8) ──────────────────────────────────
