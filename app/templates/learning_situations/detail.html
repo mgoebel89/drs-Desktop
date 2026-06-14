@@ -505,6 +505,28 @@
         <textarea data-auf-field="text" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ a.text_md or '' }}</textarea>
         <label style="font-size:11px;margin-top:.3rem;display:block">Lösungsskizze</label>
         <textarea data-auf-field="loesungsskizze" rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px">{{ a.loesungsskizze_md or '' }}</textarea>
+
+        {# SCORM-Auswertung (Schema v4 + Migration 0022) #}
+        <div class="auf-scorm" data-current-typ="{{ a.aufgabentyp or '' }}"
+             style="margin-top:.5rem;padding:.5rem .7rem;background:#f0ecff;border-radius:6px;border:1px solid #d8d0f4">
+          <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+            <label style="font-size:11px;color:#5e3fc0;font-weight:600;margin:0">🏷 SCORM-Auswertung</label>
+            <select data-auf-field="aufgabentyp" style="font-size:12px;padding:2px 5px;flex:1;min-width:200px">
+              <option value=""{% if not a.aufgabentyp %} selected{% endif %}>{{ aufgabentyp_labels[''] }}</option>
+              {% for t in aufgabentypen %}
+                <option value="{{ t }}"{% if a.aufgabentyp == t %} selected{% endif %}>{{ aufgabentyp_labels[t] }}</option>
+              {% endfor %}
+            </select>
+            <span style="font-size:11px;color:var(--muted)">Punkte:</span>
+            <input data-auf-field="punkte" type="number" min="0" max="99"
+                   value="{{ a.punkte if a.punkte is not none else 1 }}"
+                   style="width:50px;font-size:12px;padding:2px 5px">
+          </div>
+          <div class="scorm-editor" style="margin-top:.4rem">
+            {# Inhalt wird per JS aus auf_schluessel[a.id] + Typ gerendert #}
+          </div>
+          <script type="application/json" data-auf-schluessel="{{ a.id }}">{{ auf_schluessel.get(a.id, {})|tojson }}</script>
+        </div>
       </div>
       {% else %}
       <p class="muted" style="font-size:11px;margin-top:.3rem">Noch keine Aufgaben. Lege die erste über den +-Knopf an.</p>
@@ -901,6 +923,242 @@
         } catch(e) { status.textContent = '✗ '+e.message; }
       });
     });
+  });
+})();
+
+// ── SCORM-Auswertung (Aufgabentyp + Antwort-Schlüssel, Schema v4) ────────
+(function(){
+  const LS_ID = {{ ls.id }};
+
+  function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  async function saveSchluessel(aid, schluessel) {
+    try {
+      const r = await fetch('/ls/'+LS_ID+'/aufgabe/'+aid, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({field:'antwort_schluessel_json', value: schluessel}),
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(()=>'');
+        console.warn('SCORM-Schluessel speichern fehlgeschlagen:', t);
+      }
+    } catch (e) { console.warn('SCORM-Schluessel:', e); }
+  }
+  async function saveTyp(aid, typ) {
+    try {
+      const r = await fetch('/ls/'+LS_ID+'/aufgabe/'+aid, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({field:'aufgabentyp', value: typ}),
+      });
+      if (!r.ok) throw new Error(await r.text().catch(()=>'HTTP '+r.status));
+    } catch (e) { alert('Aufgabentyp speichern: '+e.message); }
+  }
+  async function savePunkte(aid, n) {
+    try {
+      await fetch('/ls/'+LS_ID+'/aufgabe/'+aid, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({field:'punkte', value: n}),
+      });
+    } catch (e) { /* silent */ }
+  }
+
+  function renderEditor(box, typ, schluessel) {
+    const ed = box.querySelector('.scorm-editor');
+    schluessel = schluessel || {};
+    if (typ === 'mc' || typ === 'mr') {
+      const opts = schluessel.options || ['', ''];
+      const correct = schluessel.correct;
+      const inputType = typ === 'mc' ? 'radio' : 'checkbox';
+      const correctSet = typ === 'mc'
+        ? (typeof correct === 'number' ? new Set([correct]) : new Set())
+        : new Set(Array.isArray(correct) ? correct : []);
+      let html = '<div style="font-size:11px;color:#5e3fc0;margin-bottom:.2rem">'
+        + 'Antwort-Optionen (Häkchen = richtige Antwort'+(typ==='mc'?'':'en')+'):</div>';
+      html += '<div class="scorm-opts">';
+      opts.forEach((o, i) => {
+        html += '<div class="scorm-opt" style="display:flex;gap:.3rem;align-items:center;margin-bottom:.2rem">'
+          + '<input type="'+inputType+'" name="correct-'+box.dataset.aid+'" '
+          + 'data-idx="'+i+'" '+(correctSet.has(i)?'checked':'')+'>'
+          + '<input type="text" value="'+escapeHtml(o)+'" data-idx="'+i+'" '
+          + 'placeholder="Option '+(i+1)+'" '
+          + 'style="flex:1;font-size:12px;padding:2px 5px">'
+          + '<button type="button" data-del="'+i+'" '
+          + 'style="border:none;background:transparent;color:var(--pink);cursor:pointer;font-size:14px" '
+          + 'title="Option entfernen">✕</button>'
+          + '</div>';
+      });
+      html += '</div>';
+      html += '<button type="button" data-add '
+        + 'style="margin-top:.2rem;padding:2px 8px;font-size:11px;'
+        + 'background:#fff;border:1px solid #d8d0f4;border-radius:4px;cursor:pointer">+ Option</button>';
+      ed.innerHTML = html;
+    } else if (typ === 'shortanswer') {
+      const kind = schluessel.kind || 'text';
+      const expected = schluessel.expected || '';
+      const tolerance = schluessel.tolerance ?? '';
+      const caseSens = !!schluessel.case_sensitive;
+      ed.innerHTML =
+        '<div style="display:grid;grid-template-columns:90px 1fr 90px 90px;gap:.4rem;align-items:end">'
+        + '  <div><label style="font-size:11px">Art</label>'
+        +     '<select data-key="kind" style="width:100%;font-size:12px;padding:2px 5px">'
+        +       '<option value="text"'+(kind==='text'?' selected':'')+'>Text</option>'
+        +       '<option value="numeric"'+(kind==='numeric'?' selected':'')+'>Zahl</option>'
+        +     '</select></div>'
+        + '  <div><label style="font-size:11px">Erwartete Antwort</label>'
+        +     '<input data-key="expected" value="'+escapeHtml(expected)+'" '
+        +       'style="width:100%;font-size:12px;padding:2px 5px"></div>'
+        + '  <div data-show-if-numeric><label style="font-size:11px">Toleranz</label>'
+        +     '<input data-key="tolerance" type="number" step="any" value="'+escapeHtml(tolerance)+'" '
+        +       'style="width:100%;font-size:12px;padding:2px 5px" placeholder="z. B. 0.05"></div>'
+        + '  <div data-show-if-text><label style="font-size:11px">Groß/klein</label>'
+        +     '<label style="font-size:12px"><input data-key="case_sensitive" type="checkbox" '
+        +       (caseSens?'checked':'')+'> beachten</label></div>'
+        + '</div>';
+      // Show/hide kind-spezifische Felder
+      const updKind = () => {
+        const k = ed.querySelector('[data-key="kind"]').value;
+        ed.querySelector('[data-show-if-numeric]').style.display = (k==='numeric')?'':'none';
+        ed.querySelector('[data-show-if-text]').style.display = (k==='text')?'':'none';
+      };
+      updKind();
+      ed.querySelector('[data-key="kind"]').addEventListener('change', updKind);
+    } else if (typ === 'freitext') {
+      ed.innerHTML = '<div style="font-size:11px;color:#5e3fc0">'
+        + 'Schüler bekommt ein freies Eingabefeld. SCORM trackt nur, dass '
+        + 'beantwortet wurde — keine Auto-Bewertung. Lehrer sieht die '
+        + 'Eingabe im Moodle-Tracking-Bericht.</div>';
+    } else {
+      // "" = nicht-interaktiv
+      ed.innerHTML = '<div style="font-size:11px;color:var(--muted);font-style:italic">'
+        + 'Diese Aufgabe ist im SCORM-Paket nicht interaktiv (nur Lesefluss).</div>';
+    }
+  }
+
+  function collectSchluessel(box, typ) {
+    const ed = box.querySelector('.scorm-editor');
+    if (typ === 'mc' || typ === 'mr') {
+      const opts = [];
+      ed.querySelectorAll('input[type="text"][data-idx]').forEach(inp => {
+        opts.push(inp.value);
+      });
+      if (typ === 'mc') {
+        const r = ed.querySelector('input[type="radio"]:checked');
+        const correct = r ? parseInt(r.dataset.idx, 10) : null;
+        return correct === null ? {options: opts} : {options: opts, correct};
+      } else {
+        const correct = Array.from(
+          ed.querySelectorAll('input[type="checkbox"][data-idx]:checked')
+        ).map(cb => parseInt(cb.dataset.idx, 10));
+        return {options: opts, correct};
+      }
+    } else if (typ === 'shortanswer') {
+      const kind = ed.querySelector('[data-key="kind"]').value;
+      const expected = ed.querySelector('[data-key="expected"]').value;
+      const out = {kind, expected};
+      if (kind === 'numeric') {
+        const t = ed.querySelector('[data-key="tolerance"]').value;
+        if (t !== '') out.tolerance = parseFloat(t);
+      } else {
+        out.case_sensitive = ed.querySelector('[data-key="case_sensitive"]').checked;
+      }
+      return out;
+    }
+    return {};
+  }
+
+  function attachEditorEvents(box) {
+    const aid = box.dataset.aid;
+    const typSel = box.querySelector('[data-auf-field="aufgabentyp"]');
+    const punkteInp = box.querySelector('[data-auf-field="punkte"]');
+    const ed = box.querySelector('.scorm-editor');
+
+    function reRender() {
+      const typ = typSel.value;
+      const schluessel = (typ === box.dataset.currentTyp)
+        ? readInitialSchluessel(aid) : {};
+      renderEditor(box, typ, schluessel);
+      bindEditorChange();
+    }
+    function bindEditorChange() {
+      const typ = typSel.value;
+      if (typ === 'mc' || typ === 'mr') {
+        ed.querySelectorAll('input,button').forEach(el => {
+          el.addEventListener('change', persist);
+          if (el.tagName === 'INPUT' && el.type === 'text')
+            el.addEventListener('blur', persist);
+        });
+        ed.querySelectorAll('button[data-add]').forEach(b => {
+          b.addEventListener('click', () => {
+            const cur = collectSchluessel(box, typ);
+            cur.options = cur.options || [];
+            cur.options.push('');
+            renderEditor(box, typ, cur);
+            bindEditorChange();
+            persist();
+          });
+        });
+        ed.querySelectorAll('button[data-del]').forEach(b => {
+          b.addEventListener('click', () => {
+            const cur = collectSchluessel(box, typ);
+            const idx = parseInt(b.dataset.del, 10);
+            cur.options = (cur.options || []).filter((_, i) => i !== idx);
+            if (typ === 'mc') {
+              if (cur.correct === idx) delete cur.correct;
+              else if (typeof cur.correct === 'number' && cur.correct > idx)
+                cur.correct -= 1;
+            } else {
+              cur.correct = (cur.correct || [])
+                .filter(i => i !== idx)
+                .map(i => i > idx ? i - 1 : i);
+            }
+            renderEditor(box, typ, cur);
+            bindEditorChange();
+            persist();
+          });
+        });
+      } else if (typ === 'shortanswer') {
+        ed.querySelectorAll('input,select').forEach(el => {
+          el.addEventListener('change', persist);
+          if (el.tagName === 'INPUT' && el.type === 'text')
+            el.addEventListener('blur', persist);
+        });
+      }
+    }
+    function persist() {
+      const typ = typSel.value;
+      const schluessel = collectSchluessel(box, typ);
+      saveSchluessel(aid, schluessel);
+    }
+
+    typSel.addEventListener('change', async () => {
+      const newTyp = typSel.value;
+      await saveTyp(aid, newTyp);
+      box.dataset.currentTyp = newTyp;
+      renderEditor(box, newTyp, {});  // Frischer Editor — Schlüssel wurde verworfen
+      bindEditorChange();
+    });
+    punkteInp.addEventListener('change', () => {
+      savePunkte(aid, parseInt(punkteInp.value || '0', 10));
+    });
+    // Initial-Render
+    renderEditor(box, typSel.value, readInitialSchluessel(aid));
+    bindEditorChange();
+  }
+
+  function readInitialSchluessel(aid) {
+    const s = document.querySelector('script[data-auf-schluessel="'+aid+'"]');
+    if (!s) return {};
+    try { return JSON.parse(s.textContent) || {}; }
+    catch (e) { return {}; }
+  }
+
+  // Aufgabe-Boxen finden und data-aid annotieren
+  document.querySelectorAll('.v3-aufgabe').forEach(aufBox => {
+    const scorm = aufBox.querySelector('.auf-scorm');
+    if (!scorm) return;
+    scorm.dataset.aid = aufBox.dataset.aufId;
+    attachEditorEvents(scorm);
   });
 })();
 

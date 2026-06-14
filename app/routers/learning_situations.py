@@ -524,14 +524,23 @@ def ls_detail(
 
     from app.constants import (PHASEN as _PHASEN,
                                 PHASEN_LABELS as _PHASEN_LABELS,
+                                AUFGABENTYPEN as _AUFGABENTYPEN,
+                                AUFGABENTYP_LABELS as _AUFGABENTYP_LABELS,
                                 parse_phasen_csv as _parse_phasen)
+    import json as _json
     # Phasen-Sets vor-rendern, damit das Template nicht selbst parsen muss
     ab_phasen: dict[int, set[str]] = {}
     auf_phasen: dict[int, set[str]] = {}
+    auf_schluessel: dict[int, dict] = {}
     for ab in arbeitsblaetter:
         ab_phasen[ab.id] = set(_parse_phasen(ab.phasen or ""))
         for a in getattr(ab, "_aufgaben", []):
             auf_phasen[a.id] = set(_parse_phasen(a.phasen or ""))
+            try:
+                auf_schluessel[a.id] = _json.loads(
+                    a.antwort_schluessel_json or "{}") if a.antwort_schluessel_json else {}
+            except Exception:
+                auf_schluessel[a.id] = {}
     return templates.TemplateResponse(request, "learning_situations/detail.html", {
         "ls": ls,
         "files": files,
@@ -544,6 +553,9 @@ def ls_detail(
         "phasen_labels": _PHASEN_LABELS,
         "ab_phasen": ab_phasen,
         "auf_phasen": auf_phasen,
+        "aufgabentypen": _AUFGABENTYPEN,
+        "aufgabentyp_labels": _AUFGABENTYP_LABELS,
+        "auf_schluessel": auf_schluessel,
     })
 
 
@@ -1157,6 +1169,35 @@ def ls_aufgabe_update(
         if isinstance(raw, list):
             raw = ", ".join(str(x) for x in raw)
         a.phasen = serialize_phasen(parse_phasen_csv(str(raw or "")))
+    elif field == "aufgabentyp":
+        from app.constants import AUFGABENTYPEN
+        v = (value or "").strip()
+        if v and v not in AUFGABENTYPEN:
+            raise HTTPException(400, "Unbekannter Aufgabentyp")
+        a.aufgabentyp = v
+        # Bei Typ-Wechsel den alten Schlüssel verwerfen, weil die
+        # JSON-Struktur typabhängig ist und nicht mehr passt.
+        a.antwort_schluessel_json = ""
+    elif field == "antwort_schluessel_json":
+        # Erwartet entweder dict (wird zu JSON serialisiert) oder String
+        import json as _json
+        raw = body.get("value")
+        if isinstance(raw, (dict, list)):
+            a.antwort_schluessel_json = _json.dumps(raw, ensure_ascii=False)
+        else:
+            s = str(raw or "").strip()
+            if s:
+                # Validierung: muss parse-bar sein
+                try:
+                    _json.loads(s)
+                except Exception:
+                    raise HTTPException(400, "antwort_schluessel_json ist kein gültiges JSON")
+            a.antwort_schluessel_json = s
+    elif field == "punkte":
+        try:
+            a.punkte = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Punkte muss eine Zahl sein")
     else:
         raise HTTPException(400, "Unbekanntes Feld")
     ls_sync.save_to_vault(user, ls, db)
