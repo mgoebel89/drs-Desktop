@@ -1301,7 +1301,7 @@ refreshValidator();
 function _distEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function _renderBudgetBar(dauer, verteilt, klassenLabel){
+function _renderBudgetBar(dauer, verteilt, klassenLabel, lsId){
   if (dauer <= 0) return '<div class="stats"><em>Keine geplante Dauer hinterlegt</em></div>';
   const pct = Math.min(100, Math.round(100 * verteilt / dauer));
   let barClass = 'bar';
@@ -1319,9 +1319,21 @@ function _renderBudgetBar(dauer, verteilt, klassenLabel){
   }
   const widthPct = verteilt > dauer ? 100 : pct;
   const prefix = klassenLabel ? ('<strong style="color:var(--blau)">'+_distEsc(klassenLabel)+':</strong> ') : '';
+  // Pro-Klasse Verteilen-Link (öffnet Stundenplan-Reihen-Modal mit dieser LS vorausgewählt)
+  let addLink = '';
+  if (klassenLabel && klassenLabel !== '(ohne Klasse)' && lsId && verteilt < dauer) {
+    const noch = dauer - verteilt;
+    const url = '/timetable?distribute_ls=' + lsId
+      + '&klassen=' + encodeURIComponent(klassenLabel);
+    addLink = ' <a href="'+url+'" '
+      + 'style="margin-left:.5rem;font-size:11px;padding:2px 9px;'
+      + 'border:1px solid var(--blau);border-radius:4px;'
+      + 'background:#fff;color:var(--blau);text-decoration:none">'
+      + '+ '+noch+' Schulstd. verteilen</a>';
+  }
   return '<div class="bar-wrap"><div class="'+barClass+'" '
     + 'style="width:'+widthPct+'%"></div></div>'
-    + '<div class="stats">'+prefix+label+'</div>';
+    + '<div class="stats">'+prefix+label+addLink+'</div>';
 }
 
 async function refreshDistribution(){
@@ -1342,11 +1354,12 @@ async function refreshDistribution(){
       bars = perClass.map(p => _renderBudgetBar(
         p.dauer_stunden || dauer,
         p.verteilt_stunden || 0,
-        p.klassen_key || '(ohne Klasse)'
+        p.klassen_key || '(ohne Klasse)',
+        {{ ls.id }}
       )).join('<div style="height:.3rem"></div>');
     } else {
       // Keine Klassen-Zuordnung: nur Gesamt-Bar
-      bars = _renderBudgetBar(dauer, d.verteilt_stunden || 0, '');
+      bars = _renderBudgetBar(dauer, d.verteilt_stunden || 0, '', {{ ls.id }});
     }
     const summary = '<div class="stats" style="margin-top:.3rem">'
       + d.count_blocks+' Block-Termin'+(d.count_blocks===1?'':'e')

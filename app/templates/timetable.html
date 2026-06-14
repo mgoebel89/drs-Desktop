@@ -1477,8 +1477,12 @@ async function seriesModalOpen(prefill) {
     (d.items || []).forEach(ls => {
       _smLsBudgets[ls.id] = ls.dauer_stunden || 0;
       const budget = ls.dauer_stunden ? '  ('+ls.dauer_stunden+' Std.)' : '';
-      const label = ls.display_name
-        + (ls.klassen_key ? '  ['+ls.klassen_key+']' : '') + budget;
+      // Alle zugeordneten Klassen anzeigen (M2M, nicht nur Legacy)
+      const klassen = (ls.klassen && ls.klassen.length)
+        ? ls.klassen.join(', ')
+        : (ls.klassen_key || '');
+      const klassenTag = klassen ? '  ['+klassen+']' : '';
+      const label = ls.display_name + klassenTag + budget;
       opts.push('<option value="'+ls.id+'">'+esc(label)+'</option>');
     });
     _smLs.innerHTML = opts.join('');
@@ -1763,12 +1767,17 @@ _smWeekFrom.addEventListener('change', () => {
 });
 _smLs.addEventListener('change', _smLoadDistribution);
 
-// Tiefer Einstieg: ?distribute_ls=<id> → Modal mit vorausgewählter LS öffnen
+// Tiefer Einstieg: ?distribute_ls=<id>[&klassen=<key>] → Modal mit
+// vorausgewählter LS öffnen; klassen sortiert LSn dieser Klasse nach oben
+// und liefert dem Lehrer einen Kontext, in welcher Klasse er gerade
+// verteilen will (Block-Klick in der Grid setzt die Klasse jedoch
+// individuell pro Pick).
 (function _maybeOpenFromQuery() {
   const sp = new URLSearchParams(location.search);
   const lsId = sp.get('distribute_ls');
   if (lsId) {
-    setTimeout(() => seriesModalOpen({ ls_id: lsId }), 100);
+    const klassen = sp.get('klassen') || '';
+    setTimeout(() => seriesModalOpen({ ls_id: lsId, klassen }), 100);
   }
 })();
 
