@@ -26,7 +26,7 @@
     .lf-pills .placeholder { color:var(--muted); font-size:12px;
       font-style:italic; padding:2px 4px; }
     .lf-picker {
-      display:none; position:absolute; z-index:1100;
+      display:none; position:fixed; z-index:1200;
       background:#fff; border:1px solid #ddd; border-radius:8px;
       box-shadow:0 8px 24px rgba(0,0,0,.18);
       max-height:300px; overflow:auto; min-width:280px;
@@ -150,9 +150,12 @@
     }
 
     function openPicker(){
+      // Picker ist position:fixed → reine Viewport-Koordinaten, kein
+      // scrollX/scrollY-Offset (sonst landet er off-screen, wenn der
+      // Parent position:relative hat).
       const rect = pillsBox.getBoundingClientRect();
-      picker.style.left = (rect.left + window.scrollX) + 'px';
-      picker.style.top = (rect.bottom + window.scrollY + 2) + 'px';
+      picker.style.left = rect.left + 'px';
+      picker.style.top = (rect.bottom + 2) + 'px';
       picker.style.minWidth = rect.width + 'px';
       picker.classList.add('open');
     }
@@ -171,6 +174,9 @@
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') closePicker();
     });
+    // Bei Scroll/Resize schließen, damit Popover nicht "schwebt"
+    window.addEventListener('scroll', closePicker, true);
+    window.addEventListener('resize', closePicker);
 
     fetch('/api/ls/'+LS_ID+'/lernfelder')
       .then(r => r.json())
