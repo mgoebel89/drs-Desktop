@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>{{ ls.display_name|e }}</title>
+<link rel="stylesheet" href="shared/style.css">
+<script src="shared/api.js"></script>
+</head>
+<body>
+<header class="scorm-header">
+  <h1>{{ ls.display_name|e }}</h1>
+  {% if ls.lernfeld %}<div class="lf">{{ ls.lernfeld|e }}</div>{% endif %}
+</header>
+
+<nav class="scorm-nav">
+  <strong>Übersicht:</strong>
+  <a href="index.html" class="active">Auftrag</a>
+  {% for ab in arbeitsblaetter %}
+    <a href="ab-{{ '%02d' % ab.position }}.html">{{ ab.title|e if ab.title else ('Arbeitsblatt ' ~ ab.position) }}</a>
+  {% endfor %}
+</nav>
+
+<main>
+  <section class="auftrag">
+    <h2>📋 Auftrag</h2>
+    {% if auftragsbild_path %}
+      <img src="{{ auftragsbild_path|e }}" alt="Auftragsbild" class="auftrag-bild">
+    {% endif %}
+    <div class="md">{{ auftrag_html|safe }}</div>
+  </section>
+
+  {% if lernsituation_html %}
+  <section>
+    <h2>Lernsituation</h2>
+    <div class="md">{{ lernsituation_html|safe }}</div>
+  </section>
+  {% endif %}
+
+  {% if kompetenzen_html %}
+  <section>
+    <h2>Was du nach dieser Lernsituation kannst</h2>
+    <div class="md">{{ kompetenzen_html|safe }}</div>
+  </section>
+  {% endif %}
+
+  {% if uebergreifende_html %}
+  <section>
+    <h2>Übergreifende Aspekte</h2>
+    <div class="md">{{ uebergreifende_html|safe }}</div>
+  </section>
+  {% endif %}
+
+  {% if attachments %}
+  <section>
+    <h2>📎 Unterlagen</h2>
+    <ul class="anhang-list">
+      {% for a in attachments %}
+        <li>
+          <strong>{{ a.kategorie_label|e }}:</strong>
+          <a href="{{ a.zip_path|e }}" target="_blank" rel="noopener">{{ a.dateiname|e }}</a>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</main>
+
+<script>
+window.addEventListener('load', () => { if (window.SCORM) SCORM.init(); });
+window.addEventListener('beforeunload', () => { if (window.SCORM) SCORM.finish(); });
+</script>
+</body>
+</html>

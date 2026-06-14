@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="LS-{{ ls.id }}" version="1.0"
+  xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+  xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.imsproject.org/xsd/imscp_rootv1p1p2 imscp_rootv1p1p2.xsd
+                      http://www.imsglobal.org/xsd/imsmd_rootv1p2p1 imsmd_rootv1p2p1.xsd
+                      http://www.adlnet.org/xsd/adlcp_rootv1p2 adlcp_rootv1p2.xsd">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="ORG-{{ ls.id }}">
+    <organization identifier="ORG-{{ ls.id }}">
+      <title>{{ ls.display_name|e }}</title>
+      <item identifier="ITEM-INDEX" identifierref="RES-SCO">
+        <title>Auftrag und Übersicht</title>
+      </item>
+      {% for ab in arbeitsblaetter %}
+      <item identifier="ITEM-AB-{{ ab.id }}" identifierref="RES-SCO" parameters="?page=ab-{{ '%02d' % ab.position }}.html">
+        <title>{{ ab.title|e if ab.title else 'Arbeitsblatt ' ~ ab.position }}</title>
+      </item>
+      {% endfor %}
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="RES-SCO" type="webcontent" adlcp:scormtype="sco" href="index.html">
+      <file href="index.html"/>
+      {% for ab in arbeitsblaetter %}<file href="ab-{{ '%02d' % ab.position }}.html"/>
+      {% endfor %}<file href="shared/api.js"/>
+      <file href="shared/aufgaben.js"/>
+      <file href="shared/style.css"/>
+      {% for f in asset_files %}<file href="{{ f|e }}"/>
+      {% endfor %}
+    </resource>
+  </resources>
+</manifest>

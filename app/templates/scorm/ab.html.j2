@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>{{ ab.title|e if ab.title else ('Arbeitsblatt ' ~ ab.position) }} — {{ ls.display_name|e }}</title>
+<link rel="stylesheet" href="shared/style.css">
+<script src="shared/api.js"></script>
+</head>
+<body>
+<header class="scorm-header">
+  <h1>{{ ab.title|e if ab.title else ('Arbeitsblatt ' ~ ab.position) }}</h1>
+  {% if ab_phasen_labels %}
+    <div class="phasen">
+      {% for pl in ab_phasen_labels %}<span class="phase-pill">{{ pl|e }}</span>{% endfor %}
+    </div>
+  {% endif %}
+</header>
+
+<nav class="scorm-nav">
+  <strong>Übersicht:</strong>
+  <a href="index.html">Auftrag</a>
+  {% for ab2 in arbeitsblaetter %}
+    <a href="ab-{{ '%02d' % ab2.position }}.html"{% if ab2.id == ab.id %} class="active"{% endif %}>{{ ab2.title|e if ab2.title else ('Arbeitsblatt ' ~ ab2.position) }}</a>
+  {% endfor %}
+</nav>
+
+<main>
+  {% if hinweis_html %}
+  <section class="hinweis">
+    <h3>💡 Bearbeitungshinweis</h3>
+    <div class="md">{{ hinweis_html|safe }}</div>
+  </section>
+  {% endif %}
+
+  {% if content_html %}
+  <section>
+    <div class="md">{{ content_html|safe }}</div>
+  </section>
+  {% endif %}
+
+  <section class="aufgaben">
+    {% for a in aufgaben %}
+      <div class="aufgabe" data-aufid="{{ a.id }}" data-typ="{{ a.aufgabentyp or '' }}" data-punkte="{{ a.punkte or 0 }}">
+        <div class="aufgabe-head">
+          <span class="nr">Aufgabe {{ a.nummer }}</span>
+          {% if a.titel %}<span class="aufgabe-titel">{{ a.titel|e }}</span>{% endif %}
+          {% if a.aufgabentyp %}<span class="punkte">{{ a.punkte or 0 }} Pkt.</span>{% endif %}
+        </div>
+        {% if a.phasen_labels %}
+          <div class="phasen">
+            {% for pl in a.phasen_labels %}<span class="phase-pill small">{{ pl|e }}</span>{% endfor %}
+          </div>
+        {% endif %}
+        <div class="md">{{ a.text_html|safe }}</div>
+        {% if a.aufgabentyp %}
+        <div class="auf-interactive">
+          <script type="application/json" data-schluessel>{{ a.schluessel_json|safe }}</script>
+        </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+
+  <div class="ab-actions">
+    <button type="button" id="ab-finish">Arbeitsblatt abschließen</button>
+    <span id="ab-status" class="status"></span>
+  </div>
+</main>
+
+<script src="shared/aufgaben.js"></script>
+<script>
+window.addEventListener('load', () => { if (window.SCORM) SCORM.init(); renderAufgaben(); });
+window.addEventListener('beforeunload', () => { if (window.SCORM) SCORM.finish(); });
+</script>
+</body>
+</html>

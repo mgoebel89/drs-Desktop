@@ -245,6 +245,11 @@
        title="Diese Lernsituation auf mehrere Stundenplan-Blöcke verteilen">
       📅 Im Stundenplan verteilen
     </a>
+    <button type="button" id="scorm-dl-btn" class="btn btn-sec"
+            title="SCORM-1.2-Paket (Schülersicht) als ZIP herunterladen — Upload in Moodle als 'Lernpaket'-Aktivität">
+      📦 SCORM-Paket herunterladen
+    </button>
+    <span id="scorm-dl-status" class="muted" style="font-size:11px;align-self:center"></span>
     <div style="flex:1"></div>
     <a class="btn btn-sec" href="/ls/{{ ls.id }}/delete"
        style="color:#c62828;border-color:#c62828">
@@ -1241,13 +1246,70 @@ async function refreshDistribution(){
 }
 refreshDistribution();
 
-// Validator + Distribution gemeinsam aktualisieren, wenn Pflichtfelder
-// gespeichert werden (Auftrag/Sektionen/Phasen/Lernfelder/Dauer)
+// ── SCORM-Download (Schema v4 / Phase 8) ──────────────────────────────────
+async function refreshScormButton(){
+  const btn = document.getElementById('scorm-dl-btn');
+  const stat = document.getElementById('scorm-dl-status');
+  if (!btn) return;
+  try {
+    const r = await fetch('/api/ls/'+{{ ls.id }}+'/scorm/validate');
+    const d = await r.json();
+    if (d.ok) {
+      btn.disabled = false;
+      btn.title = 'SCORM-1.2-Paket herunterladen — Upload in Moodle als Lernpaket-Aktivität';
+      stat.textContent = '';
+    } else {
+      btn.disabled = true;
+      const labels = (d.problems || []).map(p => '• ' + p.label).join('\n');
+      btn.title = 'SCORM-Export nicht möglich:\n' + labels;
+      stat.textContent = '⚠ SCORM-Export blockiert (' + (d.problems||[]).length + ' Punkte)';
+    }
+  } catch(e) { /* silent */ }
+}
+(function(){
+  const btn = document.getElementById('scorm-dl-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const stat = document.getElementById('scorm-dl-status');
+    stat.textContent = '⏳ Baue SCORM-Paket …';
+    try {
+      const r = await fetch('/api/ls/'+{{ ls.id }}+'/scorm.zip');
+      if (!r.ok) {
+        const t = await r.text().catch(()=>'');
+        throw new Error('HTTP '+r.status+' '+t);
+      }
+      const blob = await r.blob();
+      const cd = r.headers.get('Content-Disposition') || '';
+      let filename = 'LS-{{ ls.id }}_lernsituation.zip';
+      const m = cd.match(/filename\*=UTF-8''([^;]+)/i)
+            || cd.match(/filename="?([^";]+)/i);
+      if (m) filename = decodeURIComponent(m[1]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      stat.textContent = '✓ Heruntergeladen ('+ Math.round(blob.size/1024) +' KB)';
+      setTimeout(()=>stat.textContent='', 4000);
+    } catch(e) {
+      stat.textContent = '✗ '+e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  refreshScormButton();
+})();
+
+// Validator + Distribution + SCORM gemeinsam aktualisieren, wenn
+// Pflichtfelder gespeichert werden (Auftrag/Sektionen/Phasen/Lernfelder/
+// Dauer/Aufgabentyp/Antwort-Schlüssel)
 (function(){
   const origValidator = refreshValidator;
   window.refreshValidator = async function(){
     await origValidator();
     refreshDistribution();
+    refreshScormButton();
   };
 })();
 

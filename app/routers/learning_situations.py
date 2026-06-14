@@ -811,6 +811,54 @@ def ls_validate_endpoint(
     return JSONResponse(validate_pflicht_v4(db, ls))
 
 
+@router.get("/api/ls/{ls_id}/scorm/validate")
+def ls_scorm_validate(
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Erweiterte Pflichtfeld-Prüfung für den SCORM-Export."""
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    from app.services.scorm_builder import validate_for_scorm
+    return JSONResponse(validate_for_scorm(db, ls))
+
+
+@router.get("/api/ls/{ls_id}/scorm.zip")
+def ls_scorm_download(
+    request: Request,
+    ls_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Erzeugt das SCORM-1.2-Paket dieser LS on-the-fly und liefert es
+    als Attachment-Download (Schüler-Sicht, ohne Lösungsskizzen +
+    Lehrerhinweise)."""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    from app.services.scorm_builder import build_scorm_package
+    ls = db.get(LearningSituation, ls_id)
+    if not ls or ls.user_id != user.id:
+        raise HTTPException(404)
+    try:
+        data = build_scorm_package(db, user, ls)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    filename = f"LS-{ls.id:04d}_{ls.slug or 'lernsituation'}.zip"
+    audit(db, "scorm_built", actor=user, target=str(ls.id),
+          detail=f"{len(data)} bytes", request=request)
+    db.commit()
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
 def _require_v3(db: Session, user: User, ls_id: int) -> LearningSituation:
     ls = db.get(LearningSituation, ls_id)
     if not ls or ls.user_id != user.id:
