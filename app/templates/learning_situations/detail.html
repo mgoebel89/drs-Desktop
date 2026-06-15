@@ -432,6 +432,10 @@
       🗑 Lernsituation löschen
     </a>
   </div>
+  <div id="scorm-dl-problems" style="display:none;margin-top:.5rem;padding:.6rem .9rem;background:#fff3e0;border:1px solid #f5b942;border-radius:6px;font-size:12px;color:#8a4f00">
+    <div style="font-weight:600;margin-bottom:.2rem">⚠ SCORM-Export blockiert — bitte folgende Punkte ergänzen:</div>
+    <ul id="scorm-dl-problems-list" style="margin:.3rem 0 0 1.2rem;padding:0"></ul>
+  </div>
 
   {% if aufgaben %}
   <div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap;
@@ -1543,6 +1547,8 @@ refreshDistribution();
 async function refreshScormButton(){
   const btn = document.getElementById('scorm-dl-btn');
   const stat = document.getElementById('scorm-dl-status');
+  const probBox = document.getElementById('scorm-dl-problems');
+  const probList = document.getElementById('scorm-dl-problems-list');
   if (!btn) return;
   try {
     const r = await fetch('/api/ls/'+{{ ls.id }}+'/scorm/validate');
@@ -1551,11 +1557,20 @@ async function refreshScormButton(){
       btn.disabled = false;
       btn.title = 'SCORM-1.2-Paket herunterladen — Upload in Moodle als Lernpaket-Aktivität';
       stat.textContent = '';
+      if (probBox) probBox.style.display = 'none';
     } else {
       btn.disabled = true;
-      const labels = (d.problems || []).map(p => '• ' + p.label).join('\n');
+      const probs = d.problems || [];
+      const labels = probs.map(p => '• ' + p.label).join('\n');
       btn.title = 'SCORM-Export nicht möglich:\n' + labels;
-      stat.textContent = '⚠ SCORM-Export blockiert (' + (d.problems||[]).length + ' Punkte)';
+      stat.textContent = '⚠ SCORM-Export blockiert (' + probs.length + ' Punkt' + (probs.length===1?'':'e') + ')';
+      // Sichtbare Liste der Probleme direkt unter dem Knopf
+      if (probBox && probList) {
+        probList.innerHTML = probs.map(p =>
+          '<li>' + String(p.label || '').replace(/</g, '&lt;') + '</li>'
+        ).join('');
+        probBox.style.display = 'block';
+      }
     }
   } catch(e) { /* silent */ }
 }
