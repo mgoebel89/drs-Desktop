@@ -854,22 +854,37 @@
 
   if(SCHEMA < 3) return;
 
-  // ── Sektion speichern (Top-Level Felder)
+  // ── Sektion speichern (Top-Level Felder) — Klick auf Speichern UND
+  //    debounced Auto-Save bei Tipp-Pause / Verlassen des Feldes
   document.querySelectorAll('.v3-section').forEach(box => {
     const key = box.dataset.key;
     const input = box.querySelector('[data-input]');
     const btn = box.querySelector('[data-save]');
     const status = box.querySelector('[data-status]');
-    btn.addEventListener('click', async () => {
+
+    async function doSave(){
       status.textContent = 'speichere …';
       try{
-        const d = await postJSON(`/ls/${LS_ID}/section/${key}`, {value: input.value});
+        await postJSON(`/ls/${LS_ID}/section/${key}`, {value: input.value});
         status.textContent = '✓ gespeichert';
-        setTimeout(() => status.textContent = '', 1500);
+        setTimeout(() => { if(status.textContent === '✓ gespeichert') status.textContent = ''; }, 1500);
+        // Validator + SCORM-Knopf neu prüfen (Pflichtfelder können nun erfüllt sein)
+        if (typeof refreshValidator === 'function') refreshValidator();
       }catch(e){
-        if(/409/.test(e.message)) status.textContent = '⚠ Konflikt — siehe Banner';
-        else status.textContent = '✗ ' + e.message;
+        status.textContent = '✗ ' + e.message;
       }
+    }
+
+    btn.addEventListener('click', doSave);
+
+    let timer = null;
+    input.addEventListener('input', () => {
+      status.textContent = '✎';
+      clearTimeout(timer);
+      timer = setTimeout(doSave, 1200);  // 1.2s Tipp-Pause = Auto-Save
+    });
+    input.addEventListener('blur', () => {
+      if (timer) { clearTimeout(timer); timer = null; doSave(); }
     });
   });
 
