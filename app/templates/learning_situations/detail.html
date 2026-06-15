@@ -374,11 +374,34 @@
     .v4-dist .saving { font-size:10px; color:var(--muted); font-style:italic; }
   </style>
   <div class="v4-validate" id="v4-validate"></div>
-  <div class="v4-dist" id="v4-dist" style="display:none">
-    <h3>Verteilung im Stundenplan</h3>
-    <div id="v4-dist-body"></div>
-  </div>
 
+  <style>
+    .ls-tabs { display:flex; gap:.2rem; margin-top:1rem;
+      border-bottom:2px solid var(--blau); padding:0 .2rem; }
+    .ls-tabs button {
+      padding:.5rem 1rem; font-size:13px; font-family:inherit;
+      background:transparent; border:none; cursor:pointer;
+      color:var(--muted); border-bottom:3px solid transparent;
+      margin-bottom:-2px; border-radius:6px 6px 0 0;
+    }
+    .ls-tabs button:hover { background:var(--blau-hell); color:var(--blau); }
+    .ls-tabs button.active {
+      color:var(--blau); border-bottom-color:var(--blau);
+      font-weight:600; background:var(--blau-hell);
+    }
+    .ls-tab { display:none; padding-top:1rem; }
+    .ls-tab.active { display:block; }
+  </style>
+
+  <nav class="ls-tabs" id="ls-tabs">
+    <button type="button" data-tab="uebersicht" class="active">📋 Übersicht</button>
+    <button type="button" data-tab="inhalte">📝 Inhalte</button>
+    <button type="button" data-tab="arbeitsblaetter">📄 Arbeitsblätter</button>
+    <button type="button" data-tab="anhaenge">📎 Anhänge</button>
+    <button type="button" data-tab="verteilung">📅 Verteilung</button>
+  </nav>
+
+  <section class="ls-tab active" data-tab="uebersicht">
   {% if request.query_params.get('ws_error') %}
   <div style="background:#fde2e2;border:1px solid #f5b5b5;border-radius:6px;padding:.7rem 1rem;margin-top:.6rem">
     Arbeitsblatt konnte nicht erzeugt werden: {{ request.query_params.get('ws_error').replace('+', ' ') }}
@@ -448,8 +471,12 @@
     </div>
     <button class="btn" id="btn-migrate-v3">Auf Schema v3 migrieren</button>
   </div>
+  </section><!-- /uebersicht-tab (v2) -->
   {% else %}
-  <h2 style="margin-top:1.6rem;display:flex;align-items:center;gap:.8rem">
+  </section><!-- /uebersicht-tab (v3+) -->
+
+  <section class="ls-tab" data-tab="inhalte">
+  <h2 style="margin-top:0;display:flex;align-items:center;gap:.8rem">
     Auftrag / Handlungssituation
     <span class="muted" style="font-size:11px;font-weight:normal">— didaktischer Kern (Schema v4)</span>
   </h2>
@@ -560,7 +587,10 @@
       padding:.3rem .5rem; }
   </style>
 
-  <h2 style="margin-top:1.6rem;display:flex;align-items:center;gap:.8rem">
+  </section><!-- /inhalte-tab -->
+
+  <section class="ls-tab" data-tab="anhaenge">
+  <h2 style="margin-top:0;display:flex;align-items:center;gap:.8rem">
     Anhänge
     <span class="muted" style="font-size:11px;font-weight:normal">— Schaltpläne, Datenblätter, Bilder (Schema v4)</span>
   </h2>
@@ -587,7 +617,10 @@
     <div id="att-groups"></div>
   </div>
 
-  <h2 style="margin-top:1.6rem;display:flex;align-items:center;gap:.8rem">
+  </section><!-- /anhaenge-tab (v3+ Anhänge; Materialien folgt am Ende) -->
+
+  <section class="ls-tab" data-tab="arbeitsblaetter">
+  <h2 style="margin-top:0;display:flex;align-items:center;gap:.8rem">
     Arbeitsblätter
     <button class="btn-sec" id="btn-ab-add" style="padding:4px 10px;font-size:12px">+ Neues Arbeitsblatt</button>
   </h2>
@@ -692,10 +725,12 @@
   {% else %}
     <p class="muted">Noch keine Arbeitsblätter. Lege das erste über den +-Knopf an.</p>
   {% endif %}
+  </section><!-- /arbeitsblaetter-tab (v3+) -->
   {% endif %}
 
   {% if aufgaben %}
-  <h2 style="margin-top:1.6rem">Aufgaben aus der Inhalts-MD</h2>
+  <section class="ls-tab" data-tab="arbeitsblaetter">
+  <h2 style="margin-top:0">Aufgaben aus der Inhalts-MD</h2>
   <table>
     <thead><tr><th style="width:60px">Nr</th><th>Titel</th><th>Phasen</th></tr></thead>
     <tbody>
@@ -715,9 +750,11 @@
     {% endfor %}
     </tbody>
   </table>
+  </section><!-- /arbeitsblaetter-tab (v2-Aufgaben) -->
   {% endif %}
 
-  <h2 style="margin-top:1.6rem">Materialien</h2>
+  <section class="ls-tab" data-tab="anhaenge">
+  <h2 style="margin-top:0">Materialien <span class="muted" style="font-size:11px;font-weight:normal">— SMB-Ordner der LS</span></h2>
   {% if not smb_configured %}
     <p class="muted">SMB nicht eingerichtet — <a href="/profile">jetzt konfigurieren</a>.</p>
   {% elif smb_error %}
@@ -758,6 +795,14 @@
   {% endif %}
 
   {% endif %}
+  </section><!-- /anhaenge-tab (Materialien) -->
+
+  <section class="ls-tab" data-tab="verteilung">
+  <div class="v4-dist" id="v4-dist">
+    <h3 style="margin-top:0">Verteilung im Stundenplan</h3>
+    <div id="v4-dist-body"></div>
+  </div>
+  </section><!-- /verteilung-tab -->
 </div>
 
 <script>
@@ -1666,6 +1711,45 @@ async function refreshScormButton(){
   });
 
   load();
+})();
+
+// ── Tab-Switching (Schema v4) ─────────────────────────────────────────────
+(function(){
+  const tabs = document.getElementById('ls-tabs');
+  if (!tabs) return;
+  const STORAGE_KEY = 'ls_detail_active_tab_{{ ls.id }}';
+
+  function activate(name) {
+    let found = false;
+    document.querySelectorAll('#ls-tabs button[data-tab]').forEach(b => {
+      const on = b.dataset.tab === name;
+      b.classList.toggle('active', on);
+      if (on) found = true;
+    });
+    document.querySelectorAll('section.ls-tab[data-tab]').forEach(s => {
+      s.classList.toggle('active', s.dataset.tab === name);
+    });
+    if (!found) return false;
+    try { sessionStorage.setItem(STORAGE_KEY, name); } catch(e) {}
+    try { history.replaceState(null, '', '#tab-' + name); } catch(e) {}
+    return true;
+  }
+
+  tabs.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-tab]');
+    if (!btn) return;
+    activate(btn.dataset.tab);
+  });
+
+  // Initial-Tab: aus URL-Hash, sonst sessionStorage, sonst Übersicht
+  let initial = '';
+  if (location.hash.startsWith('#tab-')) initial = location.hash.slice(5);
+  if (!initial) {
+    try { initial = sessionStorage.getItem(STORAGE_KEY) || ''; } catch(e) {}
+  }
+  if (!initial || !activate(initial)) {
+    activate('uebersicht');
+  }
 })();
 </script>
 {% endblock %}
