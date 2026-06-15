@@ -1164,14 +1164,32 @@ def api_get_block_aufgaben(
         ]
 
     # LS dieses Lehrers, bevorzugt für die Klasse — sonst alle
+    # Berücksichtigt sowohl Legacy-klassen_key als auch LsKlasse-M2M
+    # (Parallelklassen), damit eine LS, die der Lehrer für mehrere
+    # Klassen verteilt hat, im Side-Panel JEDER zugeordneten Klasse
+    # erscheint.
+    from app.models import LsKlasse
     ls_q = db.query(LearningSituation).filter(LearningSituation.user_id == user.id)
     if klassen:
-        prefer = ls_q.filter(
-            (LearningSituation.klassen_key == klassen) |
-            (LearningSituation.klassen_key == "")
-        ).order_by(LearningSituation.updated_at.desc()).all()
+        m2m_ls_ids = {row[0] for row in db.execute(
+            select(LsKlasse.learning_situation_id).where(
+                LsKlasse.klassen_key == klassen)
+        ).all()}
+        all_user_ls = ls_q.order_by(LearningSituation.updated_at.desc()).all()
+        prefer = [ls for ls in all_user_ls
+                  if ls.klassen_key == klassen
+                  or ls.klassen_key == ""
+                  or ls.id in m2m_ls_ids]
     else:
         prefer = ls_q.order_by(LearningSituation.updated_at.desc()).all()
+
+    # Wenn eine LS bereits zugeordnet, aber durch den Klassen-Filter
+    # fallengelassen wurde (z. B. Bestand ohne M2M-Eintrag), trotzdem
+    # in die Optionen aufnehmen, damit das Dropdown nicht leer steht.
+    if selected_ls_id and not any(ls.id == selected_ls_id for ls in prefer):
+        extra = db.get(LearningSituation, selected_ls_id)
+        if extra and extra.user_id == user.id:
+            prefer = [extra] + prefer
 
     ls_options = [
         {"id": ls.id, "display_name": ls.display_name,
@@ -1183,22 +1201,28 @@ def api_get_block_aufgaben(
     if selected_ls_id:
         ls = db.get(LearningSituation, selected_ls_id)
         if ls and ls.user_id == user.id:
-            # Sync sicherstellen (best-effort)
-            try:
-                aufgabe_sync.sync_from_md(db, user, ls)
-                db.commit()
-            except Exception:
-                db.rollback()
+            # Bei v2-LS noch MD-Sync versuchen (für Bestand)
+            if (ls.schema_version or 2) < 3:
+                try:
+                    aufgabe_sync.sync_from_md(db, user, ls)
+                    db.commit()
+                except Exception:
+                    db.rollback()
             for a in db.query(LsAufgabe).filter(
                 LsAufgabe.learning_situation_id == selected_ls_id
             ).order_by(LsAufgabe.nummer).all():
-                # Body + Lösungsskizze on-demand
-                p = aufgabe_sync.get_aufgabe_md(user, ls, a.nummer)
+                # DB-Werte haben Vorrang (Schema v3+ inline-Edit);
+                # MD-Fallback nur wenn DB leer
+                body = a.text_md or ""
+                loes = a.loesungsskizze_md or ""
+                if not body and not loes:
+                    p = aufgabe_sync.get_aufgabe_md(user, ls, a.nummer) or {}
+                    body = p.get("body", "")
+                    loes = p.get("loesungsskizze", "")
                 aufgaben.append({
                     "id": a.id, "nummer": a.nummer, "titel": a.titel,
                     "anchor": a.anchor, "phasen": a.phasen,
-                    "body": (p or {}).get("body", ""),
-                    "loesungsskizze": (p or {}).get("loesungsskizze", ""),
+                    "body": body, "loesungsskizze": loes,
                 })
 
     return JSONResponse({
