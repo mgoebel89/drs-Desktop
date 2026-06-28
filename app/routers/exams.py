@@ -558,6 +558,8 @@ def exams_detail(
         "sum_max": ctx["sum_max"],
         "scales": grading.list_scales_for(db, user),
         "scale_labels": scale_labels,
+        "nm_blaetter": NM_BLAETTER,
+        "nm_spalten": NM_SPALTEN,
     })
 
 
@@ -1132,6 +1134,97 @@ def exams_export_csv(
     return Response(
         content=buf.getvalue().encode("utf-8"),
         media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
+    )
+
+
+# ── drs-notenmanager JSON-Export ─────────────────────────────────────────
+# Schnittstelle drs-notenmanager.grades.v1 (siehe
+# drs-notenmanager/docs/grade-import-schema.md). Erlaubte Zielangaben:
+
+NM_BLAETTER: list[str] = (
+    [f"LF{n:02d}" for n in range(1, 14)]      # LF01 … LF13
+    + [f"BBU{n}" for n in range(1, 5)]        # BBU1 … BBU4
+    + [f"Sozi {n}" for n in range(1, 5)]      # Sozi 1 … Sozi 4 (Leerzeichen!)
+    + [f"Reli {n}" for n in range(1, 5)]      # Reli 1 … Reli 4
+    + ["MSRT 1", "MSRT 2", "WPU E", "Sp", "Dkom"]
+)
+
+NM_SPALTEN: list[str] = (
+    [f"Note {n}" for n in range(1, 6)]        # Note 1 … Note 5
+    + ["EPO 1", "EPO 2", "Bemerkung", "Zeugnis"]
+)
+
+
+@router.get("/exams/{ex_id}/export.notenmanager.json")
+def exams_export_notenmanager(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    blatt: str,
+    spalte: str,
+    beschriftung: str = "",
+    faktor: str = "",
+):
+    """Endnoten als JSON im Format `drs-notenmanager.grades.v1`.
+
+    Erzeugt genau einen Import-Block (eine Notenspalte) mit der berechneten
+    Endnote pro Teilnehmer. Die Tendenz-Labels der MSS-Schulnoten-Skala
+    (z. B. '2+') sind direkt das vom Notenmanager erwartete `note`-Format.
+    `blatt`/`spalte` wählt der Lehrer (Zielsheet + Spalte in der
+    Gesamtnotenliste); `beschriftung`/`faktor` sind optionale Spaltenköpfe.
+    """
+    ex = _get_exam(db, user, ex_id)
+
+    blatt = (blatt or "").strip()
+    spalte = (spalte or "").strip()
+    if blatt not in NM_BLAETTER:
+        raise HTTPException(400, f"Unbekanntes Blatt: {blatt!r}")
+    if spalte not in NM_SPALTEN:
+        raise HTTPException(400, f"Unbekannte Spalte: {spalte!r}")
+
+    ctx = _scoring_ctx(db, user, ex)
+    participants = _exam_participants(db, ex)
+
+    comments = {r.student_id: (r.comment or "") for r in ex.results}
+    noten = []
+    for s, g in participants:
+        _, _, note = _student_total(ctx, s.id, g)
+        noten.append({
+            "nachname": s.nachname or "",
+            "vorname": s.vorname or "",
+            "note": note or None,
+            "bemerkung": comments.get(s.id, "") or "",
+        })
+    noten.sort(key=lambda n: (n["nachname"].lower(), n["vorname"].lower()))
+
+    block: dict = {"blatt": blatt, "spalte": spalte}
+    if beschriftung.strip():
+        block["beschriftung"] = beschriftung.strip()
+    if faktor.strip():
+        try:
+            block["faktor"] = float(faktor.replace(",", "."))
+        except ValueError:
+            pass
+    block["noten"] = noten
+
+    payload = {
+        "schema": "drs-notenmanager.grades.v1",
+        "klasse": ex.klassen_key or "",
+        "quelle": f"DRS-LXC Prüfung „{ex.title}“",
+        "exportiert_am": datetime.now().isoformat(timespec="seconds"),
+        "imports": [block],
+    }
+
+    audit(db, "exam_notenmanager_export", actor=user, target=str(ex_id),
+          detail=f"{blatt}/{spalte}, {len(noten)} Schüler", request=request)
+    db.commit()
+
+    filename = f"{slugify(ex.title)}_{ex.datum or 'export'}_notenmanager.json"
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2),
+        media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
     )
 

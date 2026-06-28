@@ -43,6 +43,7 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 | **Bewertungs-Modul** | ✓ | Schülerverwaltung (Klassen, Moodle-CSV-Import), Prüfungen mit Notenskalen (MSS Schulnoten / MSS Punkte), Bewertungs-Matrix mit Auto-Save, Stufen-Schnellauswahl (3/4/5 Stufen) |
 | **PDF-Export Bewertung** | ✓ | Pro Schüler ein S/W-PDF (Playwright), ZIP aller PDFs einer Klasse |
 | **Prüfungs-MD Export+Import** | ✓ | Brücke zur Offline-App / Obsidian. Bewertungen als Markdown-Tabelle, Stufen als Labels oder Zahlen |
+| **Notenmanager-JSON-Export** | ✓ | Endnoten als `drs-notenmanager.grades.v1`-JSON für die Gesamtnotenliste. Lehrer wählt Blatt+Spalte (+Beschriftung/Faktor); Tendenz-Labels passen 1:1 ins `note`-Feld. Endpoint `/exams/{id}/export.notenmanager.json` |
 | **Stundenplan ↔ Prüfungen** | ✓ | Block-Panel zeigt Klassen-Prüfungen; Schnellaktion „Neue Prüfung" |
 | **Bewertung v2** | ✓ | Klassenübergreifende Teilnehmer-Auswahl (Checkbox), Gruppenarbeit (Gruppen- + Einzel-Blöcke, Scope je Feedbackpunkt), verwaltete Notenschlüssel (Burger-Menü), Feedback-Vorlagen, PDF im Aufgabenblatt-Layout, ZIP + Lehrer-Zusammenfassung. Migration 0013 |
 | **Bewertung v3** | ✓ | Wizard-Eingabe (Overlay, ein Schüler/Schritt, Auto-Save) für Einzel + Gruppen getrennt. Pro Feedbackpunkt `eval_type` (Punkte/Schulnote/Stufen) + Gewicht %. Endnote = gewichteter Prozent-Schnitt → Note via Schlüssel. Migration 0014 |

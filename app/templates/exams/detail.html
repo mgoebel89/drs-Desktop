@@ -187,6 +187,40 @@
       <label class="btn btn-sec" style="cursor:pointer">⬆ MD importieren<input id="md-import-file" type="file" accept=".md,text/markdown" style="display:none"></label>
       <span id="md-import-status" class="muted" style="align-self:center;font-size:12px"></span>
     </div>
+
+    <h3 style="margin-top:2rem">DRS Notenmanager (Gesamtnotenliste)</h3>
+    <p class="muted" style="font-size:12px;margin:.2rem 0 .8rem">
+      Endnoten als JSON im Format <code>drs-notenmanager.grades.v1</code> zum
+      Import in die Gesamtnotenliste. Es zählt die berechnete Endnote pro
+      Teilnehmer. <strong>Hinweis:</strong> Der Notenmanager erwartet
+      Schulnoten (1, 1-, 2+, … 6) — die Prüfung sollte die Skala
+      „MSS Schulnoten" nutzen.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem;max-width:760px">
+      <div>
+        <label style="font-size:11px;display:block">Blatt (Zielsheet)</label>
+        <select id="nm-blatt" style="width:100%">
+          {% for b in nm_blaetter %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;display:block">Spalte</label>
+        <select id="nm-spalte" style="width:100%">
+          {% for sp in nm_spalten %}<option value="{{ sp }}">{{ sp }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;display:block">Beschriftung (Zeile 40)</label>
+        <input id="nm-beschriftung" value="{{ exam.title }}" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;display:block">Faktor (Zeile 39)</label>
+        <input id="nm-faktor" value="1" style="width:100%">
+      </div>
+    </div>
+    <div style="margin-top:.8rem">
+      <button type="button" class="btn" id="nm-export-btn">⬇ Notenmanager-JSON herunterladen</button>
+    </div>
   </div>
 </div>
 
@@ -486,6 +520,18 @@ if(mdInput)mdInput.addEventListener('change',async ev=>{
   const st=document.getElementById('md-import-status'); st.textContent='importiere …';
   const d=await postJSON('/exams/'+EXAM_ID+'/import.md',{md:await f.text()});
   if(d.ok){st.textContent='✓ '+d.imported+' importiert — neu laden …';setTimeout(()=>location.reload(),1000);}else st.textContent='✗ Fehler';
+});
+
+// ── Notenmanager-JSON-Export ──
+const nmBtn=document.getElementById('nm-export-btn');
+if(nmBtn)nmBtn.addEventListener('click',()=>{
+  const q=new URLSearchParams({
+    blatt:document.getElementById('nm-blatt').value,
+    spalte:document.getElementById('nm-spalte').value,
+    beschriftung:document.getElementById('nm-beschriftung').value,
+    faktor:document.getElementById('nm-faktor').value,
+  });
+  window.location.href='/exams/'+EXAM_ID+'/export.notenmanager.json?'+q.toString();
 });
 
 </script>
