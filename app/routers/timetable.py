@@ -1449,3 +1449,28 @@ def api_today(
         return JSONResponse({"ok": True, "lessons": lessons})
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
+
+
+@router.get("/api/dashboard/events")
+def api_dashboard_events(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    days: int = 21,
+):
+    """JSON: kommende iCal-Termine (nächste `days` Tage) für die Startseite.
+    Wird asynchron geladen, damit ein langsamer/fehlerhafter Kalender-Abruf
+    die Startseite nicht blockiert."""
+    days = max(1, min(days, 60))
+    start = date.today()
+    end = start + timedelta(days=days)
+    cals = (
+        db.query(IcalCalendar)
+        .filter(IcalCalendar.user_id == user.id, IcalCalendar.enabled.is_(True))
+        .all()
+    )
+    events: list[dict] = []
+    for cal in cals:
+        evs, _err = ical_client.get_events_for_calendar(cal, start, end)
+        events.extend(evs)
+    events.sort(key=lambda e: e.get("start") or "")
+    return JSONResponse({"ok": True, "events": events[:8]})

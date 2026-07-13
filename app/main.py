@@ -28,8 +28,9 @@ from app.routers import exams as exams_router
 from app.routers import grading_scales as grading_scales_router
 from app.routers import feedback_templates as feedback_templates_router
 from app.routers import files as files_router
-from app.models import User
+from app.models import Exam, LessonNote, User
 from app.templating import templates
+from datetime import date
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -66,7 +67,33 @@ def root(request: Request, db: Annotated[Session, Depends(get_db)]):
         return RedirectResponse(url="/login", status_code=303)
     if user.must_change_pw:
         return RedirectResponse(url="/change-password", status_code=303)
-    return templates.TemplateResponse(request, "home.html", {"user": user})
+
+    today = date.today().isoformat()
+    # Anstehende Prüfungen (datum als ISO-String, lexikografisch sortierbar)
+    upcoming_exams = (
+        db.query(Exam)
+        .filter(Exam.owner_user_id == user.id, Exam.datum >= today, Exam.datum != "")
+        .order_by(Exam.datum.asc())
+        .limit(6)
+        .all()
+    )
+    # Nächste Stunden mit gepflegter Notiz (Thema oder Notizen vorhanden)
+    upcoming_notes = (
+        db.query(LessonNote)
+        .filter(
+            LessonNote.user_id == user.id,
+            LessonNote.lesson_date >= today,
+            (LessonNote.theme != "") | (LessonNote.notes != ""),
+        )
+        .order_by(LessonNote.lesson_date.asc(), LessonNote.block_start.asc())
+        .limit(6)
+        .all()
+    )
+    return templates.TemplateResponse(request, "home.html", {
+        "user": user,
+        "upcoming_exams": upcoming_exams,
+        "upcoming_notes": upcoming_notes,
+    })
 
 
 @app.get("/health")

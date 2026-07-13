@@ -1,16 +1,90 @@
 {% extends "base.html" %}
+{% block title %}Übersicht{% endblock %}
 {% block content %}
-<div class="card">
-  <h1>Willkommen, {{ user.full_name or user.username }}</h1>
-  <p>DRS-Lehrerwerkzeug: Stundenplan mit Notizen und das Bewertungsmodul.</p>
-
-  <h2>Schnellzugriff</h2>
-  <p>
-    <a class="btn" href="/timetable">Stundenplan</a>
-    <a class="btn btn-sec" href="/exams">Prüfungen</a>
-    <a class="btn btn-sec" href="/students">Schüler</a>
-    <a class="btn btn-sec" href="/profile">Profil &amp; API-Keys</a>
-    {% if user.role == 'admin' %}<a class="btn btn-sec" href="/admin/users">Nutzerverwaltung</a>{% endif %}
-  </p>
+<div class="row-spread">
+  <h1 style="margin-bottom:0">Übersicht</h1>
+  <span class="muted">{{ user.full_name or user.username }}</span>
 </div>
+<p class="muted" style="margin:.3rem 0 1.2rem">DRS-Lehrerwerkzeug — Stundenplan mit Notizen und Bewertung.</p>
+
+<div class="dash-grid">
+
+  <div class="card dash-card">
+    <div class="dash-card-head"><span class="dash-icon">🗓️</span><h3>Nächste Stunden mit Notizen</h3></div>
+    <div class="dash-card-body">
+      {% if upcoming_notes %}
+      <ul class="dash-list">
+        {% for n in upcoming_notes %}
+        <li>
+          <span class="dash-date">{{ n.lesson_date[8:10] }}.{{ n.lesson_date[5:7] }}.{% if n.block_start %} {{ n.block_start }}{% endif %}</span>
+          <div class="dash-main">
+            <strong>{{ n.theme or (n.notes[:70] ~ ('…' if n.notes|length > 70 else '')) }}</strong>
+            <div class="muted">{{ n.subject_override or n.subjects_key }}{% if n.klassen_key %} · {{ n.klassen_key }}{% endif %}{% if n.is_exam %} · <span style="color:var(--pink)">Prüfung</span>{% endif %}</div>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="dash-empty">Keine anstehenden Stunden mit Notizen.</div>
+      {% endif %}
+    </div>
+    <div class="dash-card-foot"><a href="/timetable">Zum Stundenplan →</a></div>
+  </div>
+
+  <div class="card dash-card">
+    <div class="dash-card-head"><span class="dash-icon">📋</span><h3>Anstehende Prüfungen</h3></div>
+    <div class="dash-card-body">
+      {% if upcoming_exams %}
+      <ul class="dash-list">
+        {% for e in upcoming_exams %}
+        <li>
+          <span class="dash-date">{{ e.datum[8:10] }}.{{ e.datum[5:7] }}.</span>
+          <div class="dash-main">
+            <strong>{{ e.title }}</strong>
+            {% if e.klassen_key %}<div class="muted">{{ e.klassen_key }}</div>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="dash-empty">Keine anstehenden Prüfungen.</div>
+      {% endif %}
+    </div>
+    <div class="dash-card-foot"><a href="/exams">Zu den Prüfungen →</a></div>
+  </div>
+
+  <div class="card dash-card">
+    <div class="dash-card-head"><span class="dash-icon">📅</span><h3>Anstehende Termine</h3></div>
+    <div class="dash-card-body">
+      <ul class="dash-list" id="dash-events"><li class="dash-empty">wird geladen …</li></ul>
+    </div>
+    <div class="dash-card-foot"><a href="/timetable">Zum Stundenplan →</a></div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  var box = document.getElementById('dash-events');
+  if (!box) return;
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  fetch('/api/dashboard/events?days=21').then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok || !d.events || !d.events.length) {
+      box.innerHTML = '<li class="dash-empty">Keine anstehenden Termine.</li>';
+      return;
+    }
+    box.innerHTML = d.events.map(function(ev) {
+      var iso = ev.start || '';
+      var dd = iso.length >= 10 ? iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.' : '';
+      var time = (!ev.all_day && iso.length >= 16) ? ' ' + iso.slice(11, 16) : '';
+      var dot = ev.calendar_color ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + esc(ev.calendar_color) + ';margin-right:6px"></span>' : '';
+      var sub = [ev.calendar_label, ev.location].filter(Boolean).map(esc).join(' · ');
+      return '<li><span class="dash-date">' + dd + time + '</span><div class="dash-main"><strong>' + dot + esc(ev.summary || '(ohne Titel)') + '</strong>' +
+        (sub ? '<div class="muted">' + sub + '</div>' : '') + '</div></li>';
+    }).join('');
+  }).catch(function() {
+    box.innerHTML = '<li class="dash-empty">Termine konnten nicht geladen werden.</li>';
+  });
+})();
+</script>
 {% endblock %}
