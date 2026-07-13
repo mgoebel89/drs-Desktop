@@ -12,15 +12,17 @@ from app.routers import auth as auth_router
 from app.routers import setup as setup_router
 from app.routers import users as users_router
 from app.routers import profile as profile_router
-from app.routers import worksheets as worksheets_router
+# Phase 1 (Verschlankung): Module ausgeblendet — Router bleiben im Code, werden aber
+# nicht mehr gemountet. Aufräumen (Löschen) erfolgt in Phase 3.
+# from app.routers import worksheets as worksheets_router
 from app.routers import settings as settings_router
 from app.routers import help as help_router
 from app.routers import timetable as timetable_router
-from app.routers import preview as preview_router
-from app.routers import obsidian as obsidian_router
-from app.routers import learning_situations as ls_router
-from app.routers import lernfelder as lernfelder_router
-from app.routers import wizard as wizard_router
+# from app.routers import preview as preview_router
+# from app.routers import obsidian as obsidian_router
+# from app.routers import learning_situations as ls_router
+# from app.routers import lernfelder as lernfelder_router
+# from app.routers import wizard as wizard_router
 from app.routers import students as students_router
 from app.routers import exams as exams_router
 from app.routers import grading_scales as grading_scales_router
@@ -38,15 +40,15 @@ app.include_router(setup_router.router)
 app.include_router(auth_router.router)
 app.include_router(users_router.router)
 app.include_router(profile_router.router)
-app.include_router(worksheets_router.router)
+# app.include_router(worksheets_router.router)   # Phase 1: ausgeblendet
 app.include_router(settings_router.router)
 app.include_router(help_router.router)
 app.include_router(timetable_router.router)
-app.include_router(preview_router.router)
-app.include_router(obsidian_router.router)
-app.include_router(ls_router.router)
-app.include_router(lernfelder_router.router)
-app.include_router(wizard_router.router)
+# app.include_router(preview_router.router)       # Phase 1: ausgeblendet (LS/SMB-Vorschau)
+# app.include_router(obsidian_router.router)      # Phase 1: ausgeblendet (LS)
+# app.include_router(ls_router.router)            # Phase 1: ausgeblendet (Lernsituationen)
+# app.include_router(lernfelder_router.router)    # Phase 1: ausgeblendet (LS-Stammdaten)
+# app.include_router(wizard_router.router)        # Phase 1: ausgeblendet (Wizard)
 app.include_router(students_router.router)
 app.include_router(exams_router.router)
 app.include_router(grading_scales_router.router)

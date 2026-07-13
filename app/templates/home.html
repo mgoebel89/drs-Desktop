@@ -2,13 +2,13 @@
 {% block content %}
 <div class="card">
   <h1>Willkommen, {{ user.full_name or user.username }}</h1>
-  <p>Dies ist das DRS-Unterrichtsmaterial-System. Die Module Konfigurationstool,
-     Planungs-Skill, PDF-Export und WebUntis folgen in den nächsten Schritten.</p>
+  <p>DRS-Lehrerwerkzeug: Stundenplan mit Notizen und das Bewertungsmodul.</p>
 
   <h2>Schnellzugriff</h2>
   <p>
-    <a class="btn" href="/worksheets">Aufgabenblätter</a>
-    <a class="btn btn-sec" href="/worksheets/new">+ Neues Aufgabenblatt</a>
+    <a class="btn" href="/timetable">Stundenplan</a>
+    <a class="btn btn-sec" href="/exams">Prüfungen</a>
+    <a class="btn btn-sec" href="/students">Schüler</a>
     <a class="btn btn-sec" href="/profile">Profil &amp; API-Keys</a>
     {% if user.role == 'admin' %}<a class="btn btn-sec" href="/admin/users">Nutzerverwaltung</a>{% endif %}
   </p>

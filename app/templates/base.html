@@ -40,9 +40,6 @@
   <div class="drawer-group">Unterricht</div>
   <a href="/" class="drawer-link{% if path == '/' %} active{% endif %}">Start</a>
   <a href="/timetable" class="drawer-link{% if path.startswith('/timetable') %} active{% endif %}">Stundenplan</a>
-  <a href="/learning-situations" class="drawer-link{% if path.startswith('/learning-situations') or path.startswith('/ls/') %} active{% endif %}">Lernsituationen</a>
-  <a href="/lernfelder" class="drawer-link{% if path.startswith('/lernfelder') %} active{% endif %}">Lernfelder</a>
-  <a href="/worksheets" class="drawer-link{% if path.startswith('/worksheets') %} active{% endif %}">Aufgabenblätter</a>
 
   <div class="drawer-group">Bewertungen</div>
   <a href="/exams" class="drawer-link{% if path.startswith('/exams') %} active{% endif %}">Prüfungen</a>
@@ -51,9 +48,6 @@
   <a href="/feedback-templates" class="drawer-link{% if path.startswith('/feedback-templates') %} active{% endif %}">Feedback-Vorlagen</a>
 
   <div class="drawer-group">Werkzeuge</div>
-  {% if ai_enabled() %}
-  <a href="/wizard" class="drawer-link{% if path.startswith('/wizard') %} active{% endif %}">Wizard</a>
-  {% endif %}
   <a href="/help" class="drawer-link{% if path.startswith('/help') %} active{% endif %}">Hilfe</a>
 
   <div class="drawer-group">Konto</div>
