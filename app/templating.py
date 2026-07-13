@@ -63,3 +63,15 @@ def _ai_enabled() -> bool:
 
 
 templates.env.globals["ai_enabled"] = _ai_enabled
+
+
+def _static_version() -> int:
+    """Cache-Busting: Zeitstempel der drs.css. Ändert sich die Datei, ändert
+    sich der ?v=-Parameter, und der Browser lädt die CSS garantiert neu."""
+    try:
+        return int((BASE_DIR / "static" / "drs.css").stat().st_mtime)
+    except OSError:
+        return 0
+
+
+templates.env.globals["static_version"] = _static_version
