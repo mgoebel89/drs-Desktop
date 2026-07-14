@@ -472,6 +472,85 @@ async def timetable_arbeitsplan_pdf(
     )
 
 
+# ── Stundenplanänderungs-/Beurlaubungsformular ───────────────────────────────
+
+_TAG_LANG_6 = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+               "Samstag"]
+
+
+@router.get("/api/timetable/aenderung/preview")
+def api_aenderung_preview(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    week: str | None = None,
+):
+    """Zeigt dem Wizard, welche Vertretungen/Ausfälle der Woche ins Formular
+    kämen — Quelle der Wahrheit bleibt der Server beim eigentlichen Erzeugen."""
+    from app.services import stundenplanaenderung_pdf as spa
+
+    ref = _parse_iso_date(week)
+    monday = ref - timedelta(days=ref.weekday())
+    ch = spa.collect_week_changes(db, user, monday)
+
+    def _fmt(d):
+        return f"{_TAG_LANG_6[d.weekday()][:2]}, {d.strftime('%d.%m.%Y')}"
+
+    return {
+        "has_changes": ch["has_changes"],
+        "von": _fmt(ch["von"]) if ch["von"] else "",
+        "bis": _fmt(ch["bis"]) if ch["bis"] else "",
+        "eintraege": [
+            {"tag": _TAG_LANG_6[e["day_idx"]],
+             "datum": e["datum"].strftime("%d.%m.%Y"),
+             "block": e["block_ord"] + 1,
+             "klasse": e["klasse"], "vertretung": e["vertretung"]}
+            for e in ch["eintraege"]
+        ],
+    }
+
+
+@router.post("/timetable/aenderung.pdf")
+def timetable_aenderung_pdf(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    payload: Annotated[dict, Body(...)],
+):
+    """Erzeugt das ausgefüllte Stundenplanänderungs-PDF für die gewählte Woche.
+
+    Body: {week, grund, felder{...}}. Die Tabelle wird serverseitig aus den
+    Ausnahmen der Woche gebaut, der untere Schulleitungs-Block bleibt leer."""
+    from urllib.parse import quote
+
+    from fastapi.responses import Response
+
+    from app.auth import audit
+    from app.services import stundenplanaenderung_pdf as spa
+
+    ref = _parse_iso_date(payload.get("week"))
+    monday = ref - timedelta(days=ref.weekday())
+    ch = spa.collect_week_changes(db, user, monday)
+    if not ch["has_changes"]:
+        raise HTTPException(
+            400, "In dieser Woche gibt es keine Vertretungen oder Ausfälle.")
+    grund = (payload.get("grund") or "").strip()
+    if grund not in spa.GRUND_OPTIONEN:
+        raise HTTPException(400, "Bitte eine Begründung auswählen.")
+
+    felder = payload.get("felder") or {}
+    pdf_bytes = spa.render_form(db, user, monday, grund, felder, changes=ch)
+
+    audit(db, "stundenplanaenderung_pdf", actor=user,
+          target=monday.isoformat(), request=request)
+    db.commit()
+
+    filename = f"stundenplanaenderung_{monday.isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{quote(filename)}"'},
+    )
+
+
 # WebUntis-Diagnose — ausgeblendet, seit der Stundenplan manuell gepflegt wird.
 # Löschen (inkl. timetable_diagnose.html) in Phase 3.
 # @router.get("/timetable/diagnose", response_class=HTMLResponse)

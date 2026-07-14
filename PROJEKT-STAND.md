@@ -170,6 +170,25 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ### Zuletzt fertiggestellt (2026-07-15)
 
+- **Stundenplanänderungs-/Beurlaubungsformular**: Button „📝 Stundenplanänderung"
+  im Stundenplan (bezieht sich auf die angezeigte Woche). Die Schul-PDF-Vorlage
+  `app/forms/stundenplanaenderung.pdf` ist ein echtes AcroForm (201 Felder) und
+  wird **direkt befüllt** (pypdf) → sieht 1:1 aus, der untere Schulleitungs-Block
+  bleibt leer und im Reader interaktiv. Quelle = eigene `tt_exceptions` der Woche:
+  **Ausfall** → „entfällt, Klasse informiert", **Vertretung** → Name; Verlegung/
+  Zusatz ignoriert. Block → Formularzeilen: 1→1./2., 2→3./4., 3→5./6., 4→7./8.,
+  5→A1/A2, 6→A3/A4 (beide Zeilen identisch; 9./10. bleiben leer). Feld-Zuordnung
+  rein über **Geometrie** (die Feldnamen sind chaotisch), schmale Spalten auf
+  Auto-Schriftgröße. Kopf = Profilname + erster/letzter geänderter Tag + heutiges
+  Datum, Radio automatisch „erforderlich". Wizard wählt **eine** von 6 Begründungen
+  und füllt deren Felder. **Profil-Unterschrift** (`user.signature_data`) wird per
+  reportlab-Overlay auf die Linie gelegt. Keine Änderung in der Woche → kein PDF,
+  nur Hinweis. Dateien: `app/services/stundenplanaenderung_pdf.py`,
+  `app/forms/stundenplanaenderung.pdf`, `app/routers/timetable.py`
+  (`GET /api/timetable/aenderung/preview`, `POST /timetable/aenderung.pdf`),
+  `app/templates/timetable.html`, neue Deps `pypdf`+`reportlab`.
+  **Noch offen:** End-to-End-Test im Container (Login-Passwort fehlte lokal) —
+  v. a. Sitz/Größe der Unterschrift auf der Linie prüfen.
 - **Schüler-Austritt**: Bearbeiten-Modal eines Schülers hat einen Austritts-
   Kasten (erscheint, wenn „in der Klasse aktiv" aus ist): Grund
   (Abschluss/Abgang) + letzter Schultag. Backend `POST /api/schueler/{id}/save`

@@ -244,6 +244,20 @@ window.MathJax = {
   .mini-modal .mm-actions {
     display: flex; gap: .5rem; justify-content: flex-end; margin-top: .8rem;
   }
+  /* Stundenplanänderungs-Formular-Wizard */
+  .aend-list { max-height: 34vh; overflow: auto; border: 1px solid var(--border);
+    border-radius: 8px; margin: .3rem 0 .2rem; }
+  .aend-list table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .aend-list th { background: var(--blau-hell); color: var(--blau); text-align: left;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .3px; padding: 4px 8px; }
+  .aend-list td { padding: 4px 8px; border-top: 1px solid var(--border); }
+  .aend-list td.vert { color: var(--pink); }
+  .aend-reasons { display: flex; flex-direction: column; gap: 2px; margin: .2rem 0; }
+  .aend-reasons label { display: flex; align-items: flex-start; gap: .45rem;
+    font-size: 12.5px; margin: 0; cursor: pointer; padding: 2px 0; }
+  .aend-reasons input { margin-top: 2px; }
+  #mm-aend-fields label { font-weight: 600; }
+  #mm-aend-fields .aend-hint { font-size: 11px; color: var(--muted); margin: .2rem 0; }
   /* Quick-Look-Popover für 'Letzte Stunde' */
   .quick-popover {
     display: none; position: fixed; z-index: 1100;
@@ -350,6 +364,10 @@ window.MathJax = {
          href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
          target="_blank" rel="noopener"
          title="Wochen-Arbeitsplan dieser Woche als PDF im Browser öffnen">📄 Arbeitsplan (PDF)</a>
+      <button type="button" class="btn btn-sec" id="btnAenderung"
+              style="padding:5px 10px;font-size:12px"
+              data-week="{{ grid.monday.isoformat() }}"
+              title="Stundenplanänderungs-/Beurlaubungsformular für diese Woche">📝 Stundenplanänderung</button>
       <a class="btn btn-sec" style="padding:5px 10px;font-size:12px"
          href="/timetable/settings" title="Zeitraster, Schuljahr, Ferien, Grundstundenplan">⚙ Einstellungen</a>
     </div>
@@ -650,6 +668,21 @@ window.MathJax = {
   <div class="mm-actions">
     <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
     <button type="button" class="btn" id="mm-zusatz-save">Eintragen</button>
+  </div>
+</div>
+
+<!-- Mini-Modal: Stundenplanänderungs-/Beurlaubungsformular -->
+<div class="mini-modal" id="mm-aenderung" role="dialog" aria-modal="true" style="max-width:540px">
+  <h3>📝 Stundenplanänderung</h3>
+  <div class="mm-sub" id="mm-aend-sub"></div>
+  <div id="mm-aend-list" class="aend-list"></div>
+  <label style="font-weight:600;margin-top:.6rem">Begründung (eine auswählen)</label>
+  <div id="mm-aend-reasons"></div>
+  <div id="mm-aend-fields" style="margin-top:.2rem"></div>
+  <div class="mm-hint mm-hint-err" id="mm-aend-err" style="display:none"></div>
+  <div class="mm-actions">
+    <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
+    <button type="button" class="btn" id="mm-aend-go">PDF erstellen</button>
   </div>
 </div>
 
@@ -1176,8 +1209,8 @@ function mmShow(id) {
 }
 function mmHideAll() {
   _mmBackdrop.classList.remove('open');
-  ['mm-cancel', 'mm-move', 'mm-subst', 'mm-zusatz']
-    .forEach(id => document.getElementById(id).classList.remove('open'));
+  ['mm-cancel', 'mm-move', 'mm-subst', 'mm-zusatz', 'mm-aenderung']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('open'); });
 }
 document.querySelectorAll('[data-mm-close]').forEach(b =>
   b.addEventListener('click', mmHideAll));
@@ -1487,6 +1520,154 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     } catch (e) { console.error(e); }
   });
 });
+
+/* ── Stundenplanänderungs-Formular ──────────────────────────────────────
+ * Button → Vorschau der Vertretungen/Ausfälle der Woche holen; keine
+ * Änderungen → Hinweis, sonst Wizard (Begründung wählen) → POST → PDF im
+ * neuen Tab. Die Tabelle baut der Server aus den Ausnahmen, hier nur Anzeige. */
+(function () {
+  const btn = document.getElementById('btnAenderung');
+  if (!btn) return;
+  const REASONS = [
+    { key: 'pruefung', label: 'Teilnahme an Abschluss-/Zwischenprüfung',
+      fields: [{ k: 'fuer', ph: 'für (z. B. Fachstufe I Mechatroniker)' },
+               { k: 'in', ph: 'in (Ort)' }] },
+    { key: 'sitzung', label: 'Teilnahme an einer Sitzung',
+      fields: [{ k: 'bezeichnung', ph: 'Bezeichnung / Ort' }] },
+    { key: 'fortbildung', label: 'Fortbildung',
+      fields: [{ k: 'ort', ph: 'Fortbildung in (Ort)' },
+               { k: 'thema', ph: 'Thema' },
+               { k: 'antrag_am', ph: 'Antrag bei SL am (Datum)' }] },
+    { key: 'beurlaubung', label: 'Beurlaubung aus persönlichen Gründen',
+      hint: 'Die schriftliche Begründung legst du der Schulleitung separat vor.',
+      fields: [] },
+    { key: 'klassenfahrt', label: 'Klassenfahrt / Klassenwanderung',
+      fields: [{ k: 'klasse', ph: 'mit der Klasse' },
+               { k: 'nach', ph: 'nach (Ziel)' },
+               { k: 'befoerderung', ph: 'Beförderungsmittel' },
+               { k: 'von', ph: 'von (Datum oder Unterrichtsstunden)' },
+               { k: 'bis', ph: 'bis (Datum oder Unterrichtsstunden)' }] },
+    { key: 'sonstige', label: 'sonstige Gründe',
+      fields: [{ k: 'text', ph: 'Begründung' }] },
+  ];
+  const sub = document.getElementById('mm-aend-sub');
+  const list = document.getElementById('mm-aend-list');
+  const reasonsBox = document.getElementById('mm-aend-reasons');
+  const fieldsBox = document.getElementById('mm-aend-fields');
+  const err = document.getElementById('mm-aend-err');
+  const go = document.getElementById('mm-aend-go');
+  let week = null;
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : s;
+    return d.innerHTML;
+  }
+
+  function renderFields() {
+    const sel = reasonsBox.querySelector('input[name=aend-reason]:checked');
+    fieldsBox.innerHTML = '';
+    if (!sel) return;
+    const r = REASONS.find(x => x.key === sel.value);
+    if (r.hint) {
+      const h = document.createElement('div');
+      h.className = 'aend-hint';
+      h.textContent = r.hint;
+      fieldsBox.appendChild(h);
+    }
+    r.fields.forEach(f => {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = f.ph;
+      inp.dataset.k = f.k;
+      inp.style.marginTop = '.3rem';
+      fieldsBox.appendChild(inp);
+    });
+  }
+
+  function buildReasons() {
+    reasonsBox.innerHTML = '';
+    REASONS.forEach(r => {
+      const lab = document.createElement('label');
+      const inp = document.createElement('input');
+      inp.type = 'radio';
+      inp.name = 'aend-reason';
+      inp.value = r.key;
+      inp.addEventListener('change', renderFields);
+      lab.appendChild(inp);
+      lab.appendChild(document.createTextNode(' ' + r.label));
+      reasonsBox.appendChild(lab);
+    });
+  }
+
+  btn.addEventListener('click', async () => {
+    week = btn.dataset.week;
+    err.style.display = 'none';
+    try {
+      const res = await fetch('/api/timetable/aenderung/preview?week='
+        + encodeURIComponent(week));
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Konnte die Woche nicht laden.');
+      if (!d.has_changes) {
+        alert('In dieser Woche sind keine Vertretungen oder Ausfälle '
+          + 'eingetragen — es gibt nichts zu beantragen.');
+        return;
+      }
+      sub.textContent = `Zeitraum ${d.von} bis ${d.bis} · `
+        + `${d.eintraege.length} Änderung(en) kommen ins Formular:`;
+      let html = '<table><thead><tr><th>Tag</th><th>Block</th>'
+        + '<th>Klasse</th><th>Vertretung</th></tr></thead><tbody>';
+      d.eintraege.forEach(e => {
+        html += `<tr><td>${esc(e.tag)}, ${esc(e.datum)}</td>`
+          + `<td>Block ${e.block}</td><td>${esc(e.klasse)}</td>`
+          + `<td class="vert">${esc(e.vertretung)}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      list.innerHTML = html;
+      buildReasons();
+      fieldsBox.innerHTML = '';
+      mmShow('mm-aenderung');
+    } catch (e) { alert(e.message); }
+  });
+
+  go.addEventListener('click', async () => {
+    err.style.display = 'none';
+    const sel = reasonsBox.querySelector('input[name=aend-reason]:checked');
+    if (!sel) {
+      err.textContent = 'Bitte eine Begründung auswählen.';
+      err.style.display = 'block';
+      return;
+    }
+    const felder = {};
+    fieldsBox.querySelectorAll('input[data-k]').forEach(i => {
+      felder[i.dataset.k] = i.value;
+    });
+    go.disabled = true;
+    go.textContent = 'Erzeuge …';
+    try {
+      const res = await fetch('/timetable/aenderung.pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week, grund: sel.value, felder }),
+      });
+      if (!res.ok) {
+        let m = 'Konnte das PDF nicht erstellen.';
+        try { const j = await res.json(); m = j.detail || m; } catch (_) { /* egal */ }
+        throw new Error(m);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      mmHideAll();
+    } catch (e) {
+      err.textContent = e.message;
+      err.style.display = 'block';
+    } finally {
+      go.disabled = false;
+      go.textContent = 'PDF erstellen';
+    }
+  });
+})();
 
 /* ── Monats-Sprung ──────────────────────────────────────────────────────
  * Reiner Client-Kalender: kein Server-Roundtrip fürs Blättern, erst der

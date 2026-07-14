@@ -20,3 +20,5 @@ markdown-it-py>=3.0
 latex2mathml>=3.77
 python-slugify>=8.0
 PyYAML>=6.0
+pypdf>=4.0
+reportlab>=4.0
