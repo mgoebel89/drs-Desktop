@@ -2,187 +2,139 @@
 {% block title %}{{ j.name }}{% endblock %}
 {% block content %}
 
-{% if request.query_params.get('ok') %}
-  <div class="flash flash-ok">✓ {{ request.query_params.get('ok').replace('+', ' ') }}</div>
-{% endif %}
-{% if request.query_params.get('err') %}
-  <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
-{% endif %}
-
-<div class="card">
-  <p class="muted" style="margin:0 0 .3rem"><a href="/stammdaten/jahrgaenge">← Jahrgänge</a></p>
-  <h1>{{ j.name }}{% if not j.active %} <span class="muted">— stillgelegt</span>{% endif %}</h1>
-
-  {% if pool %}
-  <div class="flash flash-warn" style="display:block">
-    <strong>{{ pool|length }} Schüler warten auf eine Klasse.</strong>
-    Sie wurden importiert, aber noch keiner Klasse dieses Jahrgangs zugeordnet.
-    Die Zuordnung per Wischen kommt im nächsten Schritt; bis dahin geht es über die
-    <a href="/students">Schülerliste</a>.
-  </div>
-  {% endif %}
+<p class="muted" style="margin-bottom:.3rem"><a href="/stammdaten">← Stammdaten</a></p>
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap">
+  <h1 style="margin:0">{{ j.name }}</h1>
+  {% if not j.active %}<span class="muted">stillgelegt</span>{% endif %}
+  <button class="btn-sec" type="button" id="btnJahrgangEdit" style="margin-left:auto">Bearbeiten</button>
 </div>
 
+{% if pool %}
+<div class="flash flash-warn" style="display:block">
+  <strong>{{ pool|length }} Schüler warten auf eine Klasse.</strong>
+  Sie wurden importiert, aber noch keiner Klasse dieses Jahrgangs zugeordnet.
+  Die Zuordnung per Wischen kommt im nächsten Schritt; bis dahin geht es über die
+  <a href="/students">Schülerliste</a>.
+</div>
+{% endif %}
+
 <div class="card">
-  <h2>Klassen</h2>
-  <p class="muted">Die Klassen dieses Jahrgangs — sie tragen die Schüler. Beim Anlegen entsteht
-    automatisch die passende Lerngruppe für den Stundenplan.</p>
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.9rem">
+    <h2 style="margin:0">Klassen</h2>
+    <button class="btn" type="button" id="btnKlasse" style="margin-left:auto">+ Klasse</button>
+  </div>
 
   {% if klassen %}
-  <table>
-    <thead><tr><th>Klasse</th><th>Schüler</th><th></th><th></th></tr></thead>
-    <tbody>
+  <div class="card-grid">
     {% for k in klassen %}
-    <tr{% if not k.active %} style="opacity:.55"{% endif %}>
-      <td><strong>{{ k.name }}</strong>{% if not k.active %} <span class="muted">— stillgelegt</span>{% endif %}</td>
-      <td>
-        {% if schuelerzahl[k.id] %}
-          <a href="/students">{{ schuelerzahl[k.id] }}</a>
-        {% else %}<span class="muted">0</span>{% endif %}
-      </td>
-      <td>
-        <form method="post" action="/stammdaten/schulklassen/{{ k.id }}" class="sd-inline">
-          <input name="name" value="{{ k.name }}" style="max-width:150px">
-          <input name="kuerzel" value="{{ k.kuerzel }}" style="max-width:90px" placeholder="Kürzel">
-          <label class="sd-check"><input type="checkbox" name="active" value="1"
-                 {% if k.active %}checked{% endif %}> aktiv</label>
-          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="/stammdaten/schulklassen/{{ k.id }}/delete"
-              onsubmit="return confirm('Klasse „{{ k.name }}“ löschen? Hat sie noch Schüler, wird sie nur stillgelegt.');">
-          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
-        </form>
-      </td>
-    </tr>
+    <button type="button" class="obj-card{% if not k.active %} inaktiv{% endif %}"
+            data-klasse="{{ k.id }}">
+      <div class="obj-card-head">
+        <span data-icon="klasse"></span>
+        <span class="obj-card-title">{{ k.name }}</span>
+      </div>
+      <div class="obj-card-meta">
+        {{ schuelerzahl[k.id] }} Schüler{% if not k.active %} · stillgelegt{% endif %}
+      </div>
+    </button>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
   <p class="muted">Noch keine Klasse in diesem Jahrgang.</p>
   {% endif %}
-
-  <h3 style="margin-top:1.2rem">Klasse hinzufügen</h3>
-  <form method="post" action="/stammdaten/jahrgaenge/{{ j.id }}/klassen" class="sd-form">
-    <div>
-      <label>Name</label>
-      <input name="name" required placeholder="BSMT 23 a">
-    </div>
-    <div>
-      <label>Kürzel (optional)</label>
-      <input name="kuerzel" placeholder="MT23a">
-    </div>
-    <div>
-      <label>Stundenplan-Schlüssel <span class="muted">(leer = Name)</span></label>
-      <input name="klassen_key" placeholder="BSMT 23 a">
-    </div>
-    <div><button class="btn" type="submit">+ Hinzufügen</button></div>
-  </form>
-  <p class="muted">Der Schlüssel ist der technische Name, an dem die Stundennotizen hängen. Er lässt
-    sich <strong>später nicht mehr ändern</strong> — bei Klassen aus dem Altbestand also exakt den
-    Untis-Schlüssel eintragen.</p>
 </div>
 
 <div class="card">
-  <h2>Lernfelder &amp; Fächer</h2>
-  <p class="muted">Nur diese Fächer stehen im Stundenplan zur Auswahl, wenn eine Lerngruppe dieses
-    Jahrgangs eingetragen wird.</p>
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.5rem">
+    <h2 style="margin:0">Lernfelder &amp; Fächer</h2>
+    <button class="btn" type="button" id="btnFach" style="margin-left:auto">+ Lernfeld</button>
+  </div>
+  <p class="muted" style="margin-bottom:.9rem">Nur diese Fächer stehen im Stundenplan zur Auswahl,
+    wenn eine Lerngruppe dieses Jahrgangs eingetragen wird.</p>
 
   {% if jf %}
-  <table>
-    <thead>
-      <tr><th>Fach</th><th>Stunden</th><th>Zeitraum</th><th></th><th></th></tr>
-    </thead>
-    <tbody>
+  <div class="card-grid">
     {% for x in jf %}
-    <tr>
-      <td>
-        <strong>{{ x.fach.display_name or x.fach.subjects_key }}</strong>
-        <span class="muted"><code>{{ x.fach.subjects_key }}</code></span>
-      </td>
-      <td colspan="3">
-        <form method="post" action="/stammdaten/jahrgaenge/{{ j.id }}/faecher/{{ x.id }}" class="sd-inline">
-          <input type="number" name="stundenansatz" value="{{ x.stundenansatz }}" min="0"
-                 style="max-width:80px" title="Stundenansatz">
-          <input type="date" name="zeitraum_von" value="{{ x.zeitraum_von }}" style="max-width:150px">
-          <input type="date" name="zeitraum_bis" value="{{ x.zeitraum_bis }}" style="max-width:150px">
-          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="/stammdaten/jahrgaenge/{{ j.id }}/faecher/{{ x.id }}/delete"
-              onsubmit="return confirm('„{{ x.fach.display_name or x.fach.subjects_key }}“ aus diesem Jahrgang entfernen? Das Fach selbst und alle bisherigen Stunden bleiben erhalten.');">
-          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
-        </form>
-      </td>
-    </tr>
+    <button type="button" class="obj-card" data-fach="{{ x.id }}"
+            data-stunden="{{ x.stundenansatz }}"
+            data-von="{{ x.zeitraum_von }}" data-bis="{{ x.zeitraum_bis }}"
+            data-name="{{ x.fach.display_name or x.fach.subjects_key }}">
+      <div class="obj-card-head">
+        <span data-icon="fach"></span>
+        <span class="obj-card-title">{{ x.fach.display_name or x.fach.subjects_key }}</span>
+      </div>
+      <div class="obj-card-meta">
+        {% if x.stundenansatz %}{{ x.stundenansatz }} Stunden{% else %}kein Stundenansatz{% endif %}
+        {% if x.zeitraum_von or x.zeitraum_bis %}
+          · {{ x.zeitraum_von or '…' }} bis {{ x.zeitraum_bis or '…' }}
+        {% endif %}
+      </div>
+      <div class="key">{{ x.fach.subjects_key }}</div>
+    </button>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
   <p class="muted">Noch kein Lernfeld zugeordnet — im Stundenplan steht dann der volle Fächer-Katalog
     zur Auswahl.</p>
   {% endif %}
-
-  <h3 style="margin-top:1.2rem">Lernfeld zuordnen</h3>
-  {% if katalog %}
-  <form method="post" action="/stammdaten/jahrgaenge/{{ j.id }}/faecher" class="sd-form">
-    <div>
-      <label>Fach aus dem Katalog</label>
-      <select name="fach_id" required>
-        {% for f in katalog %}
-        <option value="{{ f.id }}">{{ f.display_name or f.subjects_key }} ({{ f.subjects_key }})</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div>
-      <label>Stundenansatz</label>
-      <input type="number" name="stundenansatz" min="0" value="0">
-    </div>
-    <div>
-      <label>Zeitraum von / bis (optional)</label>
-      <div class="sd-inline">
-        <input type="date" name="zeitraum_von">
-        <input type="date" name="zeitraum_bis">
-      </div>
-    </div>
-    <div><button class="btn" type="submit">+ Zuordnen</button></div>
-  </form>
-  {% else %}
-  <p class="muted">Alle Fächer des Katalogs sind bereits zugeordnet.
-    <a href="/stammdaten/faecher">Neues Fach anlegen</a></p>
-  {% endif %}
 </div>
 
 <div class="card">
-  <h2>Lerngruppen dieses Jahrgangs</h2>
-  <p class="muted">Das, was im Stundenplan steht. Der Schlüssel ist unveränderlich.</p>
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.5rem">
+    <h2 style="margin:0">Lerngruppen</h2>
+    <a class="btn-sec" href="/stammdaten/lerngruppen" style="margin-left:auto">Alle Lerngruppen</a>
+  </div>
+  <p class="muted" style="margin-bottom:.9rem">Das, was im Stundenplan steht. Der Schlüssel ist
+    unveränderlich — an ihm hängen die Stundennotizen.</p>
+
   {% if gruppen %}
-  <table>
-    <thead><tr><th>Lerngruppe</th><th>Art</th><th>Klassen</th><th>Schlüssel</th></tr></thead>
-    <tbody>
+  <div class="card-grid">
     {% for g in gruppen %}
-    <tr{% if not g.active %} style="opacity:.55"{% endif %}>
-      <td><strong>{{ g.display_name or g.klassen_key }}</strong></td>
-      <td>
+    <button type="button" class="obj-card{% if not g.active %} inaktiv{% endif %}"
+            data-lerngruppe="{{ g.id }}">
+      <div class="obj-card-head">
+        <span data-icon="lerngruppe"></span>
+        <span class="obj-card-title">{{ g.display_name or g.klassen_key }}</span>
+      </div>
+      <div class="obj-card-meta">
         {% if g.art == 'kombi' %}zusammengelegt
         {% elif g.art == 'gruppe' %}Teilgruppe
         {% else %}Klasse{% endif %}
-      </td>
-      <td class="muted">
-        {% for k in gruppen_klassen[g.id] %}{{ k.name }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}
-      </td>
-      <td><code style="font-size:11px">{{ g.klassen_key }}</code></td>
-    </tr>
+        {% if gruppen_klassen[g.id] %}
+          · {% for k in gruppen_klassen[g.id] %}{{ k.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% endif %}
+      </div>
+      <div class="key">{{ g.klassen_key }}</div>
+    </button>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
   <p class="muted">Noch keine Lerngruppe.</p>
   {% endif %}
-  <p style="margin-top:.8rem">
-    <a class="btn-sec" href="/stammdaten/lerngruppen">Lerngruppen verwalten / zusammenlegen</a>
-  </p>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/stammdaten.js?v={{ static_version() }}"></script>
+<script>
+  DRS.mountIcons();
+  var JID = {{ j.id }};
+
+  document.getElementById('btnJahrgangEdit')
+    .addEventListener('click', function () { DRSStammdaten.jahrgangModal(JID); });
+  document.getElementById('btnKlasse')
+    .addEventListener('click', function () { DRSStammdaten.klasseAnlegen(JID); });
+  document.getElementById('btnFach')
+    .addEventListener('click', function () { DRSStammdaten.fachZuordnen(JID); });
+
+  document.querySelectorAll('[data-klasse]').forEach(function (c) {
+    c.addEventListener('click', function () { DRSStammdaten.klasseModal(c.dataset.klasse); });
+  });
+  document.querySelectorAll('[data-lerngruppe]').forEach(function (c) {
+    c.addEventListener('click', function () { DRSStammdaten.lerngruppeModal(c.dataset.lerngruppe); });
+  });
+  document.querySelectorAll('[data-fach]').forEach(function (c) {
+    c.addEventListener('click', function () { DRSStammdaten.fachModal(c.dataset); });
+  });
+</script>
 {% endblock %}

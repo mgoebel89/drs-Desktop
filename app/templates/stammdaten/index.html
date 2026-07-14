@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Stammdaten{% endblock %}
+{% block content %}
+
+<h1 style="margin-bottom:.2rem">Stammdaten</h1>
+<p class="muted" style="margin-bottom:1.2rem">
+  Ein <strong>Jahrgang</strong> trägt die Lernfelder, seine <strong>Klassen</strong> tragen die
+  Schüler. Was im Stundenplan steht, ist die <strong>Lerngruppe</strong> — eine Klasse, mehrere
+  zusammengelegte Klassen oder eine Teilgruppe.
+</p>
+
+<div class="tile-grid">
+  <div class="tile">
+    <div class="tile-head"><span data-icon="jahrgang"></span><span class="tile-title">Jahrgänge</span></div>
+    <div class="tile-zahl">{{ summe.jahrgaenge }}</div>
+    <div class="tile-sub">
+      {{ summe.klassen }} {{ 'Klasse' if summe.klassen == 1 else 'Klassen' }}
+      · {{ summe.schueler }} {{ 'Schüler' if summe.schueler == 1 else 'Schüler' }}
+    </div>
+    <button class="btn" type="button" id="btnJahrgang">+ Jahrgang anlegen</button>
+  </div>
+
+  <div class="tile">
+    <div class="tile-head"><span data-icon="lerngruppe"></span><span class="tile-title">Lerngruppen</span></div>
+    <div class="tile-zahl">{{ summe.gruppen }}</div>
+    <div class="tile-sub">
+      {% if summe.kombis %}{{ summe.kombis }} zusammengelegt / geteilt{% else %}alles Einzelklassen{% endif %}
+    </div>
+    <a class="btn-sec" href="/stammdaten/lerngruppen">Verwalten</a>
+  </div>
+
+  <div class="tile">
+    <div class="tile-head"><span data-icon="fach"></span><span class="tile-title">Fächer</span></div>
+    <div class="tile-zahl">{{ summe.faecher }}</div>
+    <div class="tile-sub">Lernfeld-Katalog</div>
+    <a class="btn-sec" href="/stammdaten/faecher">Katalog öffnen</a>
+  </div>
+
+  <div class="tile{% if summe.offen %} tile-warn{% endif %}">
+    <div class="tile-head"><span data-icon="pruefen"></span><span class="tile-title">Zuordnung</span></div>
+    <div class="tile-zahl">{{ summe.offen }}</div>
+    <div class="tile-sub">
+      {% if summe.offen %}Lerngruppen ohne Jahrgang{% else %}alles zugeordnet{% endif %}
+    </div>
+    <a class="{% if summe.offen %}btn{% else %}btn-sec{% endif %}" href="/stammdaten/zuordnung">Prüfen</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row-spread" style="display:flex;align-items:center;gap:1rem;margin-bottom:.9rem">
+    <h2 style="margin:0">Jahrgänge</h2>
+    <span style="margin-left:auto">
+      {% if alle %}
+        <a class="btn-sec" href="/stammdaten">Nur aktive</a>
+      {% elif inaktiv_count %}
+        <a class="btn-sec" href="/stammdaten?alle=1">Auch stillgelegte ({{ inaktiv_count }})</a>
+      {% endif %}
+    </span>
+  </div>
+
+  {% if jahrgaenge %}
+  <div class="card-grid">
+    {% for j in jahrgaenge %}
+    <button type="button" class="obj-card{% if not j.active %} inaktiv{% endif %}"
+            data-jahrgang="{{ j.id }}">
+      <div class="obj-card-head">
+        <span data-icon="jahrgang"></span>
+        <span class="obj-card-title">{{ j.name }}</span>
+      </div>
+      <div class="obj-card-meta">
+        {{ zahlen[j.id].klassen }} {{ 'Klasse' if zahlen[j.id].klassen == 1 else 'Klassen' }}
+        · {{ zahlen[j.id].schueler }} Schüler
+        · {{ zahlen[j.id].faecher }} {{ 'Lernfeld' if zahlen[j.id].faecher == 1 else 'Lernfelder' }}
+      </div>
+      {% if zahlen[j.id].pool %}
+      <div class="obj-card-meta" style="color:var(--pink)">
+        {{ zahlen[j.id].pool }} Schüler noch ohne Klasse
+      </div>
+      {% endif %}
+      {% if not j.active %}<div class="obj-card-meta">stillgelegt</div>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  <p class="muted" style="margin-top:.9rem">Ein Klick öffnet den Jahrgang — dort stehen seine Klassen,
+    Lernfelder und Lerngruppen. Umbenennen und Stilllegen geht dort über „Bearbeiten".</p>
+  {% else %}
+  <p class="muted">Noch kein Jahrgang angelegt. Der Assistent führt dich in vier Schritten durch
+    Name, Klassen und Lernfelder.</p>
+  <p><button class="btn" type="button" id="btnJahrgangLeer">+ Ersten Jahrgang anlegen</button></p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/stammdaten.js?v={{ static_version() }}"></script>
+<script>
+  DRS.mountIcons();
+  document.querySelectorAll('[data-jahrgang]').forEach(function (c) {
+    c.addEventListener('click', function () {
+      location.href = '/stammdaten/jahrgaenge/' + c.dataset.jahrgang;
+    });
+  });
+  ['btnJahrgang', 'btnJahrgangLeer'].forEach(function (id) {
+    var b = document.getElementById(id);
+    if (b) b.addEventListener('click', DRSStammdaten.jahrgangWizard);
+  });
+</script>
+{% endblock %}

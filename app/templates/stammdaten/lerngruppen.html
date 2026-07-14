@@ -1,80 +1,70 @@
 {% extends "base.html" %}
 {% block title %}Lerngruppen{% endblock %}
 {% block content %}
+
+<p class="muted" style="margin-bottom:.3rem"><a href="/stammdaten">← Stammdaten</a></p>
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.4rem;flex-wrap:wrap">
+  <h1 style="margin:0">Lerngruppen</h1>
+  <button class="btn" type="button" id="btnBilden" style="margin-left:auto">+ Lerngruppe bilden</button>
+</div>
+<p class="muted" style="margin-bottom:1.2rem">
+  Eine Lerngruppe ist das, was im <strong>Stundenplan</strong> steht: eine einzelne Klasse, mehrere
+  <strong>zusammengelegte</strong> Klassen oder eine <strong>Teilgruppe</strong>. Jede hat ihren
+  eigenen Schlüssel — deshalb bleiben die Notizen der zusammengelegten Stunde sauber getrennt von
+  denen der Einzelstunden.
+</p>
+
+{% if request.query_params.get('ok') %}
+  <div class="flash flash-ok">✓ {{ request.query_params.get('ok').replace('+', ' ') }}</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+  <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
+{% endif %}
+
+{% if suggest %}
+<div class="flash flash-warn" style="display:block">
+  <strong>Aus deinem Bestand gefunden:</strong> Diese Schlüssel kommen in Notizen, Schülerlisten oder
+  Prüfungen vor, sind aber noch keine Lerngruppe. Übernimm sie unverändert — dann bleiben die
+  bisherigen Stundennotizen hängen.
+  <ul style="margin:.5rem 0 .6rem 1.1rem">
+    {% for s in suggest %}
+    <li><code>{{ s.key }}</code> <span class="muted">— {{ s.count }}× in {{ s.sources|join(', ') }}</span></li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/stammdaten/klassen/import" style="margin:0">
+    <button class="btn" type="submit">Alle {{ suggest|length }} übernehmen</button>
+  </form>
+</div>
+{% endif %}
+
 <div class="card">
-  <h1>Lerngruppen</h1>
-  <p class="muted">Eine Lerngruppe ist das, was im <strong>Stundenplan</strong> steht: eine einzelne
-    Klasse, mehrere <strong>zusammengelegte</strong> Klassen (z.&nbsp;B. MT23a + MT23b) oder eine
-    <strong>Teilgruppe</strong> einer Klasse. Jede Lerngruppe hat ihren eigenen Schlüssel — deshalb
-    bleiben die Notizen der zusammengelegten Stunde sauber getrennt von denen der Einzelstunden.</p>
-
-  {% if request.query_params.get('ok') %}
-    <div class="flash flash-ok">✓ {{ request.query_params.get('ok').replace('+', ' ') }}</div>
-  {% endif %}
-  {% if request.query_params.get('err') %}
-    <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
-  {% endif %}
-
-  {% if suggest %}
-  <div class="flash flash-warn" style="display:block">
-    <strong>Aus deinem Bestand gefunden:</strong> Diese Schlüssel kommen in Notizen, Schülerlisten oder
-    Prüfungen vor, sind aber noch keine Lerngruppe. Übernimm sie unverändert — dann bleiben die
-    bisherigen Stundennotizen hängen.
-    <ul style="margin:.5rem 0 .6rem 1.1rem">
-      {% for s in suggest %}
-      <li><code>{{ s.key }}</code> <span class="muted">— {{ s.count }}× in {{ s.sources|join(', ') }}</span></li>
-      {% endfor %}
-    </ul>
-    <form method="post" action="/stammdaten/klassen/import" style="margin:0">
-      <button class="btn" type="submit">Alle {{ suggest|length }} übernehmen</button>
-    </form>
-  </div>
-  {% endif %}
-
   {% if gruppen %}
-  <table>
-    <thead>
-      <tr><th>Lerngruppe</th><th>Art</th><th>Jahrgang</th><th>Klassen</th><th>Schlüssel</th><th></th><th></th></tr>
-    </thead>
-    <tbody>
+  <div class="card-grid">
     {% for g in gruppen %}
-    <tr{% if not g.active %} style="opacity:.55"{% endif %}>
-      <td><strong>{{ g.display_name or g.klassen_key }}</strong></td>
-      <td>
+    <button type="button" class="obj-card{% if not g.active %} inaktiv{% endif %}"
+            data-lerngruppe="{{ g.id }}">
+      <div class="obj-card-head">
+        <span data-icon="lerngruppe"></span>
+        <span class="obj-card-title">{{ g.display_name or g.klassen_key }}</span>
+      </div>
+      <div class="obj-card-meta">
         {% if g.art == 'kombi' %}zusammengelegt
         {% elif g.art == 'gruppe' %}Teilgruppe
         {% else %}Klasse{% endif %}
-      </td>
-      <td class="muted">
-        {% if g.jahrgang %}<a href="/stammdaten/jahrgaenge/{{ g.jahrgang.id }}">{{ g.jahrgang.name }}</a>
-        {% else %}<span style="color:var(--pink)">— fehlt</span>{% endif %}
-      </td>
-      <td class="muted">
+        {% if g.jahrgang %} · {{ g.jahrgang.name }}
+        {% else %} · <span style="color:var(--pink)">kein Jahrgang</span>{% endif %}
+      </div>
+      <div class="obj-card-meta">
         {% for k in mitglieder[g.id] %}{{ k.name }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}
-      </td>
-      <td><code style="font-size:11px" title="unveränderlich">{{ g.klassen_key }}</code></td>
-      <td>
-        <form method="post" action="/stammdaten/lerngruppen/{{ g.id }}" class="sd-inline">
-          <input name="display_name" value="{{ g.display_name }}" style="max-width:150px">
-          <input name="kuerzel" value="{{ g.kuerzel }}" style="max-width:90px" placeholder="Kürzel">
-          <label class="sd-check"><input type="checkbox" name="active" value="1"
-                 {% if g.active %}checked{% endif %}> aktiv</label>
-          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="/stammdaten/lerngruppen/{{ g.id }}/delete"
-              onsubmit="return confirm('Lerngruppe „{{ g.display_name or g.klassen_key }}“ löschen? Hängen Stunden oder Notizen daran, wird sie nur stillgelegt.');">
-          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
-        </form>
-      </td>
-    </tr>
+        {% if not g.active %} · stillgelegt{% endif %}
+      </div>
+      <div class="key">{{ g.klassen_key }}</div>
+    </button>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
   <p class="muted">Noch keine Lerngruppe. Lege eine Klasse in einem
-    <a href="/stammdaten/jahrgaenge">Jahrgang</a> an — die passende Lerngruppe entsteht automatisch.</p>
+    <a href="/stammdaten">Jahrgang</a> an — die passende Lerngruppe entsteht automatisch.</p>
   {% endif %}
 
   <p style="margin-top:1rem">
@@ -85,130 +75,16 @@
     {% endif %}
   </p>
 </div>
+{% endblock %}
 
-<div class="card">
-  <h2>Lerngruppe bilden</h2>
-  <p class="muted">Für Zusammenlegungen und Teilgruppen. Einzelne Klassen brauchen das nicht — deren
-    Lerngruppe entsteht beim Anlegen der Klasse automatisch.</p>
-
-  <form method="post" action="/stammdaten/lerngruppen/bilden" id="bilden">
-    <div class="sd-form">
-      <div>
-        <label>Art</label>
-        <select name="art" id="art">
-          <option value="kombi">Klassen zusammenlegen</option>
-          <option value="gruppe">Teilgruppe einer Klasse</option>
-        </select>
-      </div>
-      <div>
-        <label>Jahrgang</label>
-        <select name="jahrgang_id" id="jahrgang" required>
-          {% for j in jahrgaenge %}
-          <option value="{{ j.id }}">{{ j.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Anzeigename</label>
-        <input name="display_name" placeholder="MT23 (zusammen)">
-      </div>
-      <div>
-        <label>Schlüssel <span class="muted">(unveränderlich!)</span></label>
-        <input name="klassen_key" required placeholder="BSMT 23 a|BSMT 23 b">
-      </div>
-    </div>
-
-    <div id="box-kombi" style="margin-top:.8rem">
-      <label>Welche Klassen werden zusammengelegt?</label>
-      <div class="lg-pick">
-        {% for k in klassen %}
-        <label class="sd-check" data-jahrgang="{{ k.jahrgang_id }}">
-          <input type="checkbox" name="schulklasse_ids" value="{{ k.id }}"> {{ k.name }}
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div id="box-gruppe" style="margin-top:.8rem;display:none">
-      <label>Klasse wählen — dann die Schüler der Teilgruppe ankreuzen</label>
-      <select id="gruppe-klasse" style="max-width:260px">
-        <option value="">— Klasse wählen —</option>
-        {% for k in klassen %}
-        <option value="{{ k.id }}" data-jahrgang="{{ k.jahrgang_id }}">{{ k.name }}</option>
-        {% endfor %}
-      </select>
-      <div class="lg-pick" id="gruppe-schueler" style="margin-top:.6rem"></div>
-    </div>
-
-    <p style="margin-top:1rem">
-      <button class="btn" type="submit">Lerngruppe anlegen</button>
-    </p>
-  </form>
-
-  <p class="muted">Der Schlüssel wird <strong>einmalig</strong> vergeben und ist danach gesperrt: An ihm
-    hängen die Stundennotizen dieser Gruppe. Für eine Zusammenlegung aus dem Altbestand exakt den
-    bisherigen Untis-Schlüssel eintragen (z.&nbsp;B. mit <code>|</code> getrennt).</p>
-</div>
-
-<style>
-  .lg-pick { display: flex; flex-wrap: wrap; gap: .5rem .9rem; }
-  .lg-pick .sd-check { border: 1px solid var(--line, #ddd); border-radius: 6px; padding: 5px 9px; }
-</style>
-
+{% block scripts %}
+<script src="/static/stammdaten.js?v={{ static_version() }}"></script>
 <script>
-(function () {
-  const art = document.getElementById('art');
-  const jahrgang = document.getElementById('jahrgang');
-  const boxKombi = document.getElementById('box-kombi');
-  const boxGruppe = document.getElementById('box-gruppe');
-  const gKlasse = document.getElementById('gruppe-klasse');
-  const gSchueler = document.getElementById('gruppe-schueler');
-
-  // Nur Klassen des gewählten Jahrgangs zeigen — sonst legt man versehentlich
-  // Klassen aus zwei Jahrgängen zusammen.
-  function filterJahrgang() {
-    const jid = jahrgang.value;
-    boxKombi.querySelectorAll('label[data-jahrgang]').forEach(l => {
-      const passt = l.dataset.jahrgang === jid;
-      l.style.display = passt ? '' : 'none';
-      if (!passt) l.querySelector('input').checked = false;
-    });
-    [...gKlasse.options].forEach(o => {
-      if (!o.value) return;
-      o.hidden = o.dataset.jahrgang !== jid;
-    });
-    if (gKlasse.selectedOptions[0] && gKlasse.selectedOptions[0].hidden) {
-      gKlasse.value = '';
-      gSchueler.innerHTML = '';
-    }
-  }
-
-  function toggleArt() {
-    const gruppe = art.value === 'gruppe';
-    boxKombi.style.display = gruppe ? 'none' : '';
-    boxGruppe.style.display = gruppe ? '' : 'none';
-  }
-
-  art.addEventListener('change', toggleArt);
-  jahrgang.addEventListener('change', filterJahrgang);
-
-  gKlasse.addEventListener('change', async () => {
-    gSchueler.innerHTML = '';
-    if (!gKlasse.value) return;
-    const r = await fetch(`/api/stammdaten/schulklassen/${gKlasse.value}/schueler`);
-    if (!r.ok) { gSchueler.textContent = 'Konnte Schüler nicht laden.'; return; }
-    const list = await r.json();
-    if (!list.length) { gSchueler.innerHTML = '<span class="muted">Diese Klasse hat noch keine Schüler.</span>'; return; }
-    for (const s of list) {
-      const l = document.createElement('label');
-      l.className = 'sd-check';
-      l.innerHTML = `<input type="checkbox" name="student_ids" value="${s.id}"> ${s.name}`;
-      gSchueler.appendChild(l);
-    }
+  DRS.mountIcons();
+  document.getElementById('btnBilden')
+    .addEventListener('click', DRSStammdaten.lerngruppeWizard);
+  document.querySelectorAll('[data-lerngruppe]').forEach(function (c) {
+    c.addEventListener('click', function () { DRSStammdaten.lerngruppeModal(c.dataset.lerngruppe); });
   });
-
-  toggleArt();
-  filterJahrgang();
-})();
 </script>
 {% endblock %}

@@ -129,8 +129,14 @@ input:focus, select:focus, textarea:focus {
   font-family: inherit; text-decoration: none;
 }
 .btn:hover { opacity: .87; }
+/* Gleiche Box wie .btn — .btn-sec wird sowohl als <button> als auch als <a>
+   benutzt; ohne eigenes Padding klebte der Rahmen am Text (der <a> bekommt kein
+   Browser-Standardpadding). Engere Varianten überschreiben per inline-style. */
 .btn-sec {
+  display: inline-flex; align-items: center; gap: 6px;
   background: transparent; color: var(--blau); border: 1px solid var(--blau);
+  border-radius: 6px; padding: 9px 20px; font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: inherit; text-decoration: none;
 }
 .btn-sec:hover { background: var(--blau-hell); }
 .btn-danger { background: var(--pink); color: #fff; }
@@ -316,4 +322,123 @@ tr:hover td { background: #fafafa; }
     font-size: 16px; /* verhindert Auto-Zoom in iOS */
   }
   .btn { padding: 11px 18px; }
+}
+
+/* ===== Kacheln, Karten, Chips ===== */
+
+.tile-grid {
+  display: grid; gap: 14px; margin-bottom: 1.4rem;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; display: flex; flex-direction: column; gap: 6px;
+}
+.tile-head { display: flex; align-items: center; gap: 9px; color: var(--blau); }
+.tile-head .tile-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.tile-zahl { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.tile-sub { color: var(--muted); font-size: 12px; min-height: 18px; }
+.tile .btn, .tile .btn-sec { width: 100%; justify-content: center; margin-top: 8px; }
+.tile-warn { border: 2px solid var(--gelb); }
+.tile-warn .tile-head, .tile-warn .tile-zahl { color: #8a5a00; }
+
+.card-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+/* Karte als Ganzes klickbar -> Detail-Modal. Bewusst ein <button>, kein <a>:
+   verschachtelte Links brechen im Browser auseinander (siehe Dashboard-Karten). */
+.obj-card {
+  text-align: left; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px; cursor: pointer; font: inherit; color: inherit;
+  display: flex; flex-direction: column; gap: 4px; transition: border-color .12s, box-shadow .12s;
+}
+.obj-card:hover { border-color: var(--blau); box-shadow: var(--shadow); }
+.obj-card-head { display: flex; align-items: center; gap: 8px; color: var(--blau); }
+.obj-card-title { font-weight: 600; color: var(--text); font-size: 15px; }
+.obj-card-meta { color: var(--muted); font-size: 12px; }
+.obj-card.inaktiv { opacity: .55; }
+.obj-card .key { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--blau-hell); color: var(--blau-dunkel);
+  border-radius: 8px; padding: 6px 11px; font-size: 14px;
+}
+.chip button {
+  background: none; border: 0; color: inherit; cursor: pointer; font-size: 15px;
+  line-height: 1; padding: 0;
+}
+.chip-add {
+  border: 1px dashed var(--border); background: none; color: var(--muted);
+  border-radius: 8px; padding: 6px 11px; font-size: 14px; cursor: pointer;
+}
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.drs-icon { display: inline-flex; }
+
+/* ===== Overlay, Modal, Assistent ===== */
+
+.drs-overlay {
+  position: fixed; inset: 0; z-index: 60; background: rgba(15, 25, 35, .45);
+  display: flex; align-items: center; justify-content: center; padding: 24px 16px;
+}
+.drs-modal, .wiz {
+  background: var(--surface); border-radius: 12px; width: 100%; max-width: 560px;
+  max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.2);
+}
+.wiz { max-width: 720px; }
+.drs-modal-head, .wiz-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; border-bottom: 1px solid var(--border);
+}
+.drs-modal-head h3, .wiz-head h3 { font-size: 16px; margin: 0; }
+.drs-x {
+  margin-left: auto; background: none; border: 0; font-size: 22px; line-height: 1;
+  color: var(--muted); cursor: pointer; padding: 0 4px;
+}
+.drs-modal-body, .wiz-body { padding: 16px; overflow: auto; flex: 1 1 auto; }
+.drs-modal-foot, .wiz-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-top: 1px solid var(--border); background: #fafbfb;
+  border-radius: 0 0 12px 12px;
+}
+.wiz-foot .btn { margin-left: auto; }
+.drs-modal-foot { justify-content: flex-end; }
+.wiz-hint { color: var(--muted); font-size: 12px; }
+
+.wiz-steps { display: flex; gap: 6px; margin-left: auto; }
+.wiz-step {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px;
+}
+.wiz-num {
+  width: 18px; height: 18px; border-radius: 50%; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; font-size: 11px;
+}
+.wiz-step.active { color: var(--blau); border-color: var(--blau); }
+.wiz-step.active .wiz-num { background: var(--blau); color: #fff; }
+.wiz-step.done .wiz-num { background: var(--gruen); color: #173404; }
+.wiz .flash { margin: 12px 16px -4px; }
+
+.drs-field { display: block; margin-bottom: 14px; }
+.drs-field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.drs-field .muted { display: block; margin-top: 3px; }
+.drs-adv { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.drs-adv summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.drs-adv-body { padding-top: 10px; }
+.drs-facts { margin: .6rem 0 .6rem 1.1rem; font-size: 14px; }
+
+.drs-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(12px);
+  background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px;
+  font-size: 13px; z-index: 80; opacity: 0; pointer-events: none; transition: opacity .16s, transform .16s;
+}
+.drs-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 760px) {
+  .drs-overlay { padding: 0; align-items: stretch; }
+  .drs-modal, .wiz { max-width: none; max-height: 100vh; border-radius: 0; }
+  .wiz-step .wiz-label { display: none; }
+  .drs-modal-foot, .wiz-foot { border-radius: 0; }
 }
