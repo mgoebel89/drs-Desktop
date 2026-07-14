@@ -677,6 +677,15 @@ window.MathJax = {
   <h3>📝 Stundenplanänderung</h3>
   <div class="mm-sub" id="mm-aend-sub"></div>
   <div id="mm-aend-list" class="aend-list"></div>
+  <label style="font-weight:600;margin-top:.6rem">Zeitraum</label>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <span class="muted" style="font-size:12px">von</span>
+    <input type="date" id="mm-aend-von" style="flex:1;min-width:130px">
+    <span class="muted" style="font-size:12px">bis</span>
+    <input type="date" id="mm-aend-bis" style="flex:1;min-width:130px">
+  </div>
+  <div class="mm-hint">Vorbelegt mit dem erkannten Zeitraum — bei Bedarf ändern
+    (z. B. Antrag aus Versicherungsgründen ohne eingetragene Stunden).</div>
   <label style="font-weight:600;margin-top:.6rem">Begründung (eine auswählen)</label>
   <div id="mm-aend-reasons"></div>
   <div id="mm-aend-fields" style="margin-top:.2rem"></div>
@@ -1553,6 +1562,8 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   ];
   const sub = document.getElementById('mm-aend-sub');
   const list = document.getElementById('mm-aend-list');
+  const vonInp = document.getElementById('mm-aend-von');
+  const bisInp = document.getElementById('mm-aend-bis');
   const reasonsBox = document.getElementById('mm-aend-reasons');
   const fieldsBox = document.getElementById('mm-aend-fields');
   const err = document.getElementById('mm-aend-err');
@@ -1609,22 +1620,26 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
         + encodeURIComponent(week));
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || 'Konnte die Woche nicht laden.');
-      if (!d.has_changes) {
-        alert('In dieser Woche sind keine Vertretungen oder Ausfälle '
-          + 'eingetragen — es gibt nichts zu beantragen.');
-        return;
+      // Zeitraum vorbelegen (leer, wenn keine Änderung → Versicherungsfall).
+      vonInp.value = d.von_iso || '';
+      bisInp.value = d.bis_iso || '';
+      if (d.has_changes) {
+        sub.textContent = `${d.eintraege.length} Änderung(en) kommen ins Formular:`;
+        let html = '<table><thead><tr><th>Tag</th><th>Block</th>'
+          + '<th>Klasse</th><th>Vertretung</th></tr></thead><tbody>';
+        d.eintraege.forEach(e => {
+          html += `<tr><td>${esc(e.tag)}, ${esc(e.datum)}</td>`
+            + `<td>Block ${e.block}</td><td>${esc(e.klasse)}</td>`
+            + `<td class="vert">${esc(e.vertretung)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        list.innerHTML = html;
+      } else {
+        sub.textContent = 'Keine Vertretung/kein Ausfall in dieser Woche — '
+          + 'das Formular bleibt in der Tabelle leer. Trag den Zeitraum von Hand '
+          + 'ein (z. B. für einen Antrag aus Versicherungsgründen).';
+        list.innerHTML = '';
       }
-      sub.textContent = `Zeitraum ${d.von} bis ${d.bis} · `
-        + `${d.eintraege.length} Änderung(en) kommen ins Formular:`;
-      let html = '<table><thead><tr><th>Tag</th><th>Block</th>'
-        + '<th>Klasse</th><th>Vertretung</th></tr></thead><tbody>';
-      d.eintraege.forEach(e => {
-        html += `<tr><td>${esc(e.tag)}, ${esc(e.datum)}</td>`
-          + `<td>Block ${e.block}</td><td>${esc(e.klasse)}</td>`
-          + `<td class="vert">${esc(e.vertretung)}</td></tr>`;
-      });
-      html += '</tbody></table>';
-      list.innerHTML = html;
       buildReasons();
       fieldsBox.innerHTML = '';
       mmShow('mm-aenderung');
@@ -1648,7 +1663,8 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     try {
       const res = await fetch('/timetable/aenderung.pdf', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week, grund: sel.value, felder }),
+        body: JSON.stringify({ week, grund: sel.value, felder,
+                               von: vonInp.value, bis: bisInp.value }),
       });
       if (!res.ok) {
         let m = 'Konnte das PDF nicht erstellen.';

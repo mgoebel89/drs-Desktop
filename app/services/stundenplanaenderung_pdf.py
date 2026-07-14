@@ -86,6 +86,7 @@ GRUND_OPTIONEN: dict[str, dict] = {
 _CHECKBOX_ON = "/Ja"          # ON-State aller Begründungs-Checkboxen
 _RADIO_GROUP = "Group1"
 _RADIO_ERFORDERLICH = "/1"    # rechte Option „erforderlich"
+_RADIO_NICHT = "/0"           # linke Option „nicht erforderlich"
 
 
 # ── Geometrie: Tabellen-Feldkarte aus der Vorlage ────────────────────────────
@@ -221,22 +222,41 @@ def _fmt_tag(d: date) -> str:
     return f"{_WEEKDAY_LONG[d.weekday()][:2]}, {d.strftime('%d.%m.%Y')}"
 
 
+def _fmt_iso(iso: str | None) -> str:
+    """'2026-07-20' → 'Mo, 20.07.2026'. Leere/ungültige Eingabe → ''."""
+    if not iso:
+        return ""
+    try:
+        return _fmt_tag(date.fromisoformat(iso.strip()))
+    except ValueError:
+        return iso.strip()   # Freitext unverändert übernehmen
+
+
 def render_form(db: Session, user: User, monday: date,
                 grund_key: str, grund_felder: dict[str, str],
-                changes: dict | None = None) -> bytes:
-    """Befüllt die Vorlage und gibt die PDF-Bytes zurück."""
+                changes: dict | None = None,
+                von: str | None = None, bis: str | None = None) -> bytes:
+    """Befüllt die Vorlage und gibt die PDF-Bytes zurück.
+
+    `von`/`bis` sind optionale ISO-Datumsstrings aus dem Wizard und haben
+    Vorrang vor dem automatisch erkannten Zeitraum (erster/letzter geänderter
+    Tag). So lässt sich das Formular auch aus Versicherungsgründen ohne
+    eingetragene Stunden mit selbst gewähltem Zeitraum stellen.
+    """
     if changes is None:
         changes = collect_week_changes(db, user, monday)
 
     tab = _table_map()
     text_values: dict[str, str] = {}
 
-    # Kopf
+    # Kopf — Zeitraum: manuelle Eingabe schlägt die Automatik.
     text_values["Antragsteller1"] = (user.full_name or user.username or "").strip()
-    if changes["von"]:
-        text_values["am  von1"] = _fmt_tag(changes["von"])
-    if changes["bis"]:
-        text_values["bis1"] = _fmt_tag(changes["bis"])
+    von_txt = _fmt_iso(von) if von else (_fmt_tag(changes["von"]) if changes["von"] else "")
+    bis_txt = _fmt_iso(bis) if bis else (_fmt_tag(changes["bis"]) if changes["bis"] else "")
+    if von_txt:
+        text_values["am  von1"] = von_txt
+    if bis_txt:
+        text_values["bis1"] = bis_txt
     text_values["Datum1"] = date.today().strftime("%d.%m.%Y")
 
     # Tabelle: Block → beide Zeilen identisch
@@ -273,8 +293,11 @@ def render_form(db: Session, user: User, monday: date,
     _autosize_fields(writer, table_filled)
 
     # Checkboxen/Radio direkt am Widget setzen (V + AS), damit jeder Reader sie
-    # angekreuzt zeigt.
-    on_states: dict[str, str] = {_RADIO_GROUP: _RADIO_ERFORDERLICH}
+    # angekreuzt zeigt. Radio automatisch nach Lage: betroffene Stunden →
+    # „erforderlich", leere Tabelle (z. B. Versicherungsantrag) → „nicht
+    # erforderlich".
+    radio = _RADIO_ERFORDERLICH if changes["eintraege"] else _RADIO_NICHT
+    on_states: dict[str, str] = {_RADIO_GROUP: radio}
     if opt:
         on_states[opt["checkbox"]] = _CHECKBOX_ON
     _set_button_states(writer, on_states)

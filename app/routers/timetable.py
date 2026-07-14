@@ -499,6 +499,9 @@ def api_aenderung_preview(
         "has_changes": ch["has_changes"],
         "von": _fmt(ch["von"]) if ch["von"] else "",
         "bis": _fmt(ch["bis"]) if ch["bis"] else "",
+        # ISO zum Vorbelegen der Datumsfelder (leer, wenn keine Änderung).
+        "von_iso": ch["von"].isoformat() if ch["von"] else "",
+        "bis_iso": ch["bis"].isoformat() if ch["bis"] else "",
         "eintraege": [
             {"tag": _TAG_LANG_6[e["day_idx"]],
              "datum": e["datum"].strftime("%d.%m.%Y"),
@@ -518,8 +521,10 @@ def timetable_aenderung_pdf(
 ):
     """Erzeugt das ausgefüllte Stundenplanänderungs-PDF für die gewählte Woche.
 
-    Body: {week, grund, felder{...}}. Die Tabelle wird serverseitig aus den
-    Ausnahmen der Woche gebaut, der untere Schulleitungs-Block bleibt leer."""
+    Body: {week, grund, felder{...}, von, bis}. Die Tabelle wird serverseitig
+    aus den Ausnahmen der Woche gebaut, der untere Schulleitungs-Block bleibt
+    leer. `von`/`bis` (ISO) überschreiben den erkannten Zeitraum — so lässt sich
+    das Formular auch ohne eingetragene Stunden (Versicherungsantrag) stellen."""
     from urllib.parse import quote
 
     from fastapi.responses import Response
@@ -530,15 +535,15 @@ def timetable_aenderung_pdf(
     ref = _parse_iso_date(payload.get("week"))
     monday = ref - timedelta(days=ref.weekday())
     ch = spa.collect_week_changes(db, user, monday)
-    if not ch["has_changes"]:
-        raise HTTPException(
-            400, "In dieser Woche gibt es keine Vertretungen oder Ausfälle.")
     grund = (payload.get("grund") or "").strip()
     if grund not in spa.GRUND_OPTIONEN:
         raise HTTPException(400, "Bitte eine Begründung auswählen.")
 
     felder = payload.get("felder") or {}
-    pdf_bytes = spa.render_form(db, user, monday, grund, felder, changes=ch)
+    von = (payload.get("von") or "").strip() or None
+    bis = (payload.get("bis") or "").strip() or None
+    pdf_bytes = spa.render_form(db, user, monday, grund, felder, changes=ch,
+                                von=von, bis=bis)
 
     audit(db, "stundenplanaenderung_pdf", actor=user,
           target=monday.isoformat(), request=request)
