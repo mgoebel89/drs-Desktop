@@ -61,6 +61,14 @@
     <div class="dash-card-foot"><a href="/timetable">Zum Stundenplan →</a></div>
   </div>
 
+  <div class="card dash-card">
+    <div class="dash-card-head"><span class="dash-icon">✅</span><h3>Offene Aufgaben</h3></div>
+    <div class="dash-card-body">
+      <ul class="dash-list" id="dash-tasks"><li class="dash-empty">wird geladen …</li></ul>
+    </div>
+    <div class="dash-card-foot"><a href="/aufgaben">Zu den Aufgaben →</a></div>
+  </div>
+
 </div>
 
 <script>
@@ -84,6 +92,42 @@
     }).join('');
   }).catch(function() {
     box.innerHTML = '<li class="dash-empty">Termine konnten nicht geladen werden.</li>';
+  });
+})();
+
+(function() {
+  var box = document.getElementById('dash-tasks');
+  if (!box) return;
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  var heute = new Date(); heute.setHours(0, 0, 0, 0);
+  fetch('/api/dashboard/tasks?limit=6').then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok) {
+      box.innerHTML = d.reason === 'unconfigured'
+        ? '<li class="dash-empty">Vikunja ist nicht eingerichtet — <a href="/profile#vikunja">im Profil hinterlegen</a>.</li>'
+        : '<li class="dash-empty">Aufgaben konnten nicht geladen werden.</li>';
+      return;
+    }
+    if (!d.tasks.length) {
+      box.innerHTML = '<li class="dash-empty">Keine offenen Aufgaben. 🎉</li>';
+      return;
+    }
+    box.innerHTML = d.tasks.map(function(t) {
+      var dd = '<span class="muted">—</span>';
+      if (t.due_date) {
+        var iso = t.due_date;
+        var faellig = new Date(iso);
+        var txt = iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.';
+        dd = (!isNaN(faellig) && faellig < heute)
+          ? '<span style="color:var(--pink);font-weight:600">' + txt + '</span>' : txt;
+      }
+      return '<li><span class="dash-date">' + dd + '</span><div class="dash-main"><strong>' +
+        esc(t.title) + '</strong></div></li>';
+    }).join('');
+    if (d.total > d.tasks.length) {
+      box.innerHTML += '<li class="dash-empty">… und ' + (d.total - d.tasks.length) + ' weitere.</li>';
+    }
+  }).catch(function() {
+    box.innerHTML = '<li class="dash-empty">Aufgaben konnten nicht geladen werden.</li>';
   });
 })();
 </script>

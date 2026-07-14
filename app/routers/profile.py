@@ -12,6 +12,7 @@ from app.crypto import decrypt_secret, encrypt_secret, mask_key
 from app.db import get_db
 from app.models import IcalCalendar, User
 from app.services import smb_client
+from app.services import vikunja_client as vk
 from app.services.ical_client import test_url as ical_test_url
 from app.services.webuntis_client import test_connection as untis_test
 from app.templating import templates
@@ -54,6 +55,12 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
             "enabled": c.enabled,
             "last_error": c.last_error or "",
         })
+    vk_cfg = vk.load_config(user)
+    vikunja_view = {
+        "url": vk_cfg.url if vk_cfg else "",
+        "project_id": vk_cfg.project_id if vk_cfg else 0,
+        "token_set": bool(vk_cfg and vk_cfg.token),
+    }
     return {
         "user": user,
         "anthropic_masked": mask_key(anth) if anth else "",
@@ -61,6 +68,7 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
         "untis": untis,
         "untis_pw_set": bool(untis.get("password")),
         "smb": smb_view,
+        "vikunja": vikunja_view,
         "ical_calendars": cal_views,
         "signature_set": bool(user.signature_data),
         "paraphe_set": bool(user.paraphe_data),
@@ -266,6 +274,63 @@ def profile_smb_test(
           detail=("ok" if ok else "fail") + f": {msg}", request=request)
     db.commit()
     return JSONResponse({"ok": ok, "message": msg})
+
+
+# ── Vikunja (Aufgaben) ────────────────────────────────────────────────────
+
+@router.post("/profile/vikunja")
+def profile_vikunja(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    url: str = Form(""),
+    token: str = Form(""),
+    project_id: int = Form(0),
+    clear: str = Form(""),
+):
+    if clear:
+        vk.clear_config(user)
+        audit(db, "vikunja_cfg_cleared", actor=user, request=request)
+    else:
+        # Leeres Token-Feld lässt das gespeicherte unangetastet — so kann die
+        # URL oder das Projekt geändert werden, ohne den Token neu einzutippen.
+        existing = vk.load_config(user)
+        cfg = vk.VikunjaConfig(
+            url=url.strip() or (existing.url if existing else ""),
+            token=token.strip() or (existing.token if existing else ""),
+            project_id=project_id or (existing.project_id if existing else 0),
+        )
+        if not cfg.url or not cfg.token:
+            return RedirectResponse("/profile?vikunja_err=1#vikunja", status_code=303)
+        vk.save_config(user, cfg)
+        audit(db, "vikunja_cfg_set", actor=user,
+              detail=f"projekt={cfg.project_id}", request=request)
+    db.commit()
+    return RedirectResponse("/profile#vikunja", status_code=303)
+
+
+@router.post("/profile/vikunja/test")
+def profile_vikunja_test(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ok, msg = vk.test_connection(user)
+    audit(db, "vikunja_test", actor=user,
+          detail=("ok" if ok else "fail") + f": {msg}", request=request)
+    db.commit()
+    return JSONResponse({"ok": ok, "message": msg})
+
+
+@router.get("/profile/vikunja/projects")
+def profile_vikunja_projects(
+    user: Annotated[User, Depends(require_user)],
+):
+    """Projektliste für das Auswahlfeld. Wird nur beim Einrichten gebraucht."""
+    try:
+        return JSONResponse({"ok": True, "projects": vk.list_projects(user)})
+    except vk.VikunjaError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
 
 
 @router.post("/profile/untis/test")

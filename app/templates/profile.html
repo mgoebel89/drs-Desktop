@@ -73,6 +73,93 @@
   });
   </script>
 
+  <h2 id="vikunja">Aufgaben (Vikunja)</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:.6rem">
+    Anbindung an deine Vikunja-Instanz. Es wird genau <strong>ein Projekt</strong> genutzt —
+    alle Aufgaben der App liegen dort. Der API-Token (Vikunja: Einstellungen → API-Tokens,
+    Rechte für Aufgaben lesen/schreiben + Projekte lesen) wird verschlüsselt gespeichert und
+    verlässt den Server nie.
+  </p>
+  {% if request.query_params.get('vikunja_err') %}
+    <div class="flash flash-err">URL und Token werden beide gebraucht.</div>
+  {% endif %}
+  <form method="post" action="/profile/vikunja" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+    <div>
+      <label>Vikunja-URL (ohne /api/v1)</label>
+      <input name="url" value="{{ vikunja.url }}" placeholder="http://192.168.2.40:3456">
+    </div>
+    <div>
+      <label>API-Token {% if vikunja.token_set %}<span class="muted">(gespeichert — leer lassen um zu behalten)</span>{% endif %}</label>
+      <input name="token" type="password" autocomplete="off">
+    </div>
+    <div>
+      <label>Projekt</label>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <select name="project_id" id="vikunja-project" style="flex:1">
+          {% if vikunja.project_id %}
+          <option value="{{ vikunja.project_id }}" selected>Projekt {{ vikunja.project_id }} (gespeichert)</option>
+          {% else %}
+          <option value="0">— noch keins gewählt —</option>
+          {% endif %}
+        </select>
+        <button class="btn btn-sec" type="button" id="btn-vikunja-projects"
+                style="padding:6px 12px;font-size:12px;white-space:nowrap">Projekte laden</button>
+      </div>
+      <span class="muted" id="vikunja-projects-status"></span>
+    </div>
+    <div style="grid-column:1/3;display:flex;gap:.6rem;margin-top:.4rem">
+      <button class="btn" type="submit">Speichern</button>
+      {% if vikunja.token_set %}
+        <button class="btn btn-sec" type="submit" name="clear" value="1"
+                onclick="return confirm('Vikunja-Zugang entfernen?');">Entfernen</button>
+      {% endif %}
+    </div>
+  </form>
+  <div style="margin-top:.9rem">
+    <button class="btn btn-sec" type="button" id="btn-vikunja-test">Verbindung testen</button>
+    <span id="vikunja-test-status" style="margin-left:.7rem;font-size:13px"></span>
+  </div>
+  <script>
+  document.getElementById('btn-vikunja-test').addEventListener('click', async () => {
+    const status = document.getElementById('vikunja-test-status');
+    const btn = document.getElementById('btn-vikunja-test');
+    btn.disabled = true; status.textContent = 'Teste…'; status.style.color = '#666';
+    try {
+      const res = await fetch('/profile/vikunja/test', {method: 'POST'});
+      const data = await res.json();
+      status.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
+      status.style.color = data.ok ? '#2e7d32' : '#c62828';
+    } catch (e) {
+      status.textContent = '✗ Fehler: ' + e.message;
+      status.style.color = '#c62828';
+    } finally { btn.disabled = false; }
+  });
+
+  // Projektliste erst auf Knopfdruck holen — nur beim Einrichten nötig.
+  // Setzt voraus, dass URL + Token bereits gespeichert sind.
+  document.getElementById('btn-vikunja-projects').addEventListener('click', async () => {
+    const sel = document.getElementById('vikunja-project');
+    const status = document.getElementById('vikunja-projects-status');
+    const btn = document.getElementById('btn-vikunja-projects');
+    btn.disabled = true; status.textContent = 'Lade…'; status.style.color = '#666';
+    try {
+      const res = await fetch('/profile/vikunja/projects');
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Fehler');
+      if (!data.projects.length) throw new Error('Keine Projekte gefunden.');
+      const aktuell = sel.value;
+      sel.innerHTML = data.projects.map(p =>
+        '<option value="' + p.id + '"' + (String(p.id) === aktuell ? ' selected' : '') + '>' +
+        p.title.replace(/</g, '&lt;') + ' (#' + p.id + ')</option>').join('');
+      status.textContent = data.projects.length + ' Projekte — auswählen und speichern.';
+      status.style.color = '#2e7d32';
+    } catch (e) {
+      status.textContent = '✗ ' + e.message + ' (URL + Token zuerst speichern)';
+      status.style.color = '#c62828';
+    } finally { btn.disabled = false; }
+  });
+  </script>
+
   <h2>Materialien-Share (SMB)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Verbindung zu einem OMV-/NAS-Share über SMB. Pro Lernsituation wird im

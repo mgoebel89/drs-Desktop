@@ -178,6 +178,25 @@ tr:hover td { background: #fafafa; }
 .dash-card-foot a { color: var(--blau); text-decoration: none; font-weight: 600; }
 .dash-empty { color: var(--muted); font-size: .9rem; padding: 8px 0; }
 
+/* ===== Aufgaben (Vikunja) ===== */
+.task-form {
+  display: grid; grid-template-columns: minmax(0,1fr) 170px 140px auto;
+  gap: .5rem; align-items: end;
+}
+.task-list { list-style: none; margin: .6rem 0 0; padding: 0; }
+.task-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.task-item:last-child { border-bottom: none; }
+.task-check { width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto; cursor: pointer; }
+.task-main { flex: 1; min-width: 0; }
+.task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.task-due.is-overdue { color: var(--pink); font-weight: 600; }
+.task-prio { background: #fff3e0; color: #e65100; }
+.task-label { color: #fff; text-shadow: 0 0 2px rgba(0,0,0,.35); }
+.task-del { flex: 0 0 auto; background: transparent; cursor: pointer; border-radius: 6px; }
+
 /* Stundenplan-Grid: auf schmalen Geräten horizontal scrollen */
 .tt-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
@@ -221,6 +240,10 @@ tr:hover td { background: #fafafa; }
 
   .dash-grid { grid-template-columns: 1fr; }
   .dash-date { min-width: 84px; }
+
+  /* Aufgaben-Formular untereinander statt vierspaltig quetschen */
+  .task-form { grid-template-columns: 1fr; }
+  .task-form .btn { width: 100%; justify-content: center; }
 
   /* Breite Tabellen scrollen statt quetschen */
   .card:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }

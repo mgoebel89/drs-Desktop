@@ -29,6 +29,9 @@ class User(Base):
     # SMB-Anbindung an OMV-Share. JSON {host, share, username, password,
     # vault_subpath, material_subpath}, AES-GCM verschlüsselt.
     smb_creds_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Vikunja-Aufgabenliste. JSON {url, token, project_id}, AES-GCM verschlüsselt.
+    # Genau EIN Projekt pro Nutzer — keine Projektauswahl im Alltag.
+    vikunja_cfg_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # Unterschrift (groß, für Einzel-PDFs) und Paraphe (klein, für die
     # Lehrer-Zusammenfassung). PNG/JPG, max ~500 KB.
     signature_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

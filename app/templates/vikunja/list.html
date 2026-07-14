@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Aufgaben{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Aufgaben</h1>
+  <p class="muted">Offene Aufgaben aus deinem Vikunja-Projekt — fällige zuerst. Abgehakte Aufgaben verschwinden aus der Liste.</p>
+
+  {% if request.query_params.get('err') %}
+    <div class="flash flash-err" style="margin-top:1rem">{{ request.query_params.get('err') }}</div>
+  {% endif %}
+
+  {% if not configured %}
+    <div class="flash flash-warn" style="margin-top:1rem">
+      Vikunja ist noch nicht eingerichtet. Hinterlege URL, API-Token und Projekt unter
+      <a href="/profile#vikunja" style="color:inherit;font-weight:600">Profil → Aufgaben (Vikunja)</a>.
+    </div>
+  {% elif error %}
+    <div class="flash flash-err" style="margin-top:1rem">{{ error }}</div>
+  {% else %}
+
+  <h2 style="margin-top:1.4rem">Neue Aufgabe</h2>
+  <form method="post" action="/aufgaben" class="task-form">
+    <div>
+      <label>Titel</label>
+      <input name="title" placeholder="z. B. Klausur BSMT 22b korrigieren" required>
+    </div>
+    <div>
+      <label>Fällig am (optional)</label>
+      <input name="due_date" type="date">
+    </div>
+    <div>
+      <label>Priorität</label>
+      <select name="priority">
+        {% for value, label in priorities.items() %}
+        <option value="{{ value }}">{{ label or '— keine —' }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div><button class="btn" type="submit">+ Anlegen</button></div>
+  </form>
+
+  <h2 style="margin-top:1.8rem">Offen <span class="muted" id="taskCount">({{ tasks|length }})</span></h2>
+  {% if tasks %}
+  <ul class="task-list" id="taskList">
+    {% for t in tasks %}
+    <li class="task-item" data-id="{{ t.id }}">
+      <input type="checkbox" class="task-check" title="Als erledigt markieren">
+      <div class="task-main">
+        <strong>{{ t.title }}</strong>
+        <div class="task-meta">
+          {% if t.due_date %}
+          <span class="task-due" data-due="{{ t.due_date }}">{{ t.due_date[8:10] }}.{{ t.due_date[5:7] }}.{{ t.due_date[0:4] }}</span>
+          {% else %}
+          <span class="muted">ohne Fälligkeit</span>
+          {% endif %}
+          {% if t.priority >= 3 %}
+          <span class="badge task-prio">{{ priorities.get(t.priority, '') }}</span>
+          {% endif %}
+          {% for lb in t.labels %}
+          <span class="badge task-label" style="background:{{ lb.hex_color or '#eee' }}">{{ lb.title }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <button class="btn-sec task-del" title="Aufgabe löschen"
+              style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Keine offenen Aufgaben. 🎉</p>
+  {% endif %}
+
+  {% endif %}
+</div>
+
+<script>
+(function() {
+  var list = document.getElementById('taskList');
+  if (!list) return;
+  var count = document.getElementById('taskCount');
+
+  // Überfällige Termine rot einfärben (Vergleich clientseitig, Ortszeit).
+  var heute = new Date(); heute.setHours(0, 0, 0, 0);
+  list.querySelectorAll('.task-due').forEach(function(el) {
+    var d = new Date(el.dataset.due);
+    if (!isNaN(d) && d < heute) el.classList.add('is-overdue');
+  });
+
+  function refreshCount() {
+    var n = list.querySelectorAll('.task-item').length;
+    if (count) count.textContent = '(' + n + ')';
+    if (!n) list.innerHTML = '<li class="muted" style="padding:8px 0">Keine offenen Aufgaben. 🎉</li>';
+  }
+
+  function remove(li) {
+    li.style.opacity = '.4';
+    setTimeout(function() { li.remove(); refreshCount(); }, 180);
+  }
+
+  function post(url, li, onFail) {
+    fetch(url, { method: 'POST' })
+      .then(function(r) { return r.json().catch(function() { return { ok: false }; }); })
+      .then(function(d) {
+        if (d && d.ok) remove(li);
+        else onFail(d && d.error ? d.error : 'Vikunja hat die Änderung abgelehnt.');
+      })
+      .catch(function() { onFail('Vikunja ist nicht erreichbar.'); });
+  }
+
+  list.addEventListener('change', function(e) {
+    var box = e.target.closest('.task-check');
+    if (!box) return;
+    var li = box.closest('.task-item');
+    box.disabled = true;
+    post('/api/vikunja/tasks/' + li.dataset.id + '/done', li, function(msg) {
+      box.checked = false; box.disabled = false;
+      alert(msg);
+    });
+  });
+
+  list.addEventListener('click', function(e) {
+    var btn = e.target.closest('.task-del');
+    if (!btn) return;
+    var li = btn.closest('.task-item');
+    var titel = li.querySelector('strong').textContent;
+    if (!confirm('Aufgabe „' + titel + '“ in Vikunja löschen?')) return;
+    btn.disabled = true;
+    post('/api/vikunja/tasks/' + li.dataset.id + '/delete', li, function(msg) {
+      btn.disabled = false;
+      alert(msg);
+    });
+  });
+})();
+</script>
+{% endblock %}
