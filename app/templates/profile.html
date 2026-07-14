@@ -24,6 +24,10 @@
     <div style="margin-top:.6rem"><button class="btn" type="submit">Speichern</button></div>
   </form>
 
+  {# WebUntis wird nicht mehr genutzt: der Stundenplan wird manuell gepflegt
+     (Stundenplan → ⚙ Einstellungen). Sektion ausgeblendet; Endpoints und
+     Credentials bleiben vorerst liegen, Löschen in Phase 3. #}
+  {% if false %}
   <h2>WebUntis-Zugang</h2>
   <form method="post" action="/profile/untis" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
     <div>
@@ -72,6 +76,7 @@
     }
   });
   </script>
+  {% endif %}
 
   <h2 id="vikunja">Aufgaben (Vikunja)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">

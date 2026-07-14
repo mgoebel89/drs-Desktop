@@ -228,6 +228,14 @@ window.MathJax = {
   .mini-modal.open { display: block; }
   .mini-modal h3 { margin: 0 0 .5rem; color: var(--blau); font-size: 15px; }
   .mini-modal .mm-sub { font-size: 11px; color: var(--muted); margin-bottom: .6rem; }
+  .mini-modal label { font-size: 12px; margin: .5rem 0 .2rem; }
+  .mini-modal input[type=text], .mini-modal input:not([type]),
+  .mini-modal input[type=date], .mini-modal select {
+    width: 100%; padding: 8px 10px; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
+  }
+  .mini-modal .mm-hint { font-size: 11px; color: var(--muted); margin-top: .3rem; }
+  .mini-modal .mm-hint-err { color: var(--pink); font-weight: 600; }
   .mini-modal textarea {
     width: 100%; min-height: 80px; padding: .5rem .7rem;
     border: 1px solid #ddd; border-radius: 6px; font-family: inherit;
@@ -511,6 +519,16 @@ window.MathJax = {
   <hr>
   <button type="button" data-act="prev">🔍 Letzte Stunde anzeigen</button>
   <button type="button" data-act="exam">✅ Prüfung umschalten</button>
+  <hr>
+  <button type="button" data-act="cancel">❌ Stunde entfällt …</button>
+  <button type="button" data-act="move">↪ Stunde verschieben …</button>
+  <button type="button" data-act="subst">👤 Vertretung eintragen …</button>
+  <button type="button" data-act="unexc" id="menu-unexc">↩ Änderung aufheben</button>
+</div>
+
+<!-- Rechtsklick auf eine leere Zelle -->
+<div class="block-menu" id="empty-menu" role="menu">
+  <button type="button" data-act="zusatz">➕ Zusatzstunde eintragen …</button>
 </div>
 
 <!-- Mini-Modal: Bemerkung für nächste Stunde (Quick-Edit) -->
@@ -522,6 +540,67 @@ window.MathJax = {
   <div class="mm-actions">
     <button type="button" class="btn btn-sec" id="mm-forward-cancel">Abbrechen</button>
     <button type="button" class="btn" id="mm-forward-save">Speichern</button>
+  </div>
+</div>
+
+<!-- Mini-Modal: Stunde entfällt -->
+<div class="mini-modal" id="mm-cancel" role="dialog" aria-modal="true">
+  <h3>❌ Stunde entfällt</h3>
+  <div class="mm-sub" id="mm-cancel-sub"></div>
+  <input id="mm-cancel-grund" placeholder="Grund (optional), z. B. Konferenz">
+  <div class="mm-actions">
+    <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
+    <button type="button" class="btn btn-danger" id="mm-cancel-save">Als entfallen eintragen</button>
+  </div>
+</div>
+
+<!-- Mini-Modal: Stunde verschieben -->
+<div class="mini-modal" id="mm-move" role="dialog" aria-modal="true">
+  <h3>↪ Stunde verschieben</h3>
+  <div class="mm-sub" id="mm-move-sub"></div>
+  <label style="margin-top:.4rem">Zieldatum</label>
+  <input type="date" id="mm-move-date">
+  <label>Zielblock</label>
+  <select id="mm-move-block"><option value="">— Datum wählen —</option></select>
+  <div class="mm-hint" id="mm-move-hint"></div>
+  <label>Grund (optional)</label>
+  <input id="mm-move-grund" placeholder="z. B. Exkursion">
+  <div class="mm-actions">
+    <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
+    <button type="button" class="btn" id="mm-move-save">Verschieben</button>
+  </div>
+</div>
+
+<!-- Mini-Modal: Vertretung -->
+<div class="mini-modal" id="mm-subst" role="dialog" aria-modal="true">
+  <h3>👤 Vertretung eintragen</h3>
+  <div class="mm-sub" id="mm-subst-sub">Die Stunde bleibt im Plan und lässt sich weiter dokumentieren.</div>
+  <label style="margin-top:.4rem">Wer vertritt?</label>
+  <input id="mm-subst-name" placeholder="Name des Kollegen">
+  <label>Grund (optional)</label>
+  <input id="mm-subst-grund" placeholder="z. B. Fortbildung">
+  <div class="mm-actions">
+    <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
+    <button type="button" class="btn" id="mm-subst-save">Eintragen</button>
+  </div>
+</div>
+
+<!-- Mini-Modal: Zusatzstunde -->
+<div class="mini-modal" id="mm-zusatz" role="dialog" aria-modal="true">
+  <h3>➕ Zusatzstunde</h3>
+  <div class="mm-sub" id="mm-zusatz-sub">Unterricht, den du zusätzlich übernimmst (z. B. Betreuung).</div>
+  <label style="margin-top:.4rem">Klasse</label>
+  <select id="mm-zusatz-klasse"><option value="__frei__">— frei eintippen —</option></select>
+  <input id="mm-zusatz-klasse-frei" placeholder="Klasse, z. B. BFS 24 x" style="margin-top:.3rem">
+  <label>Fach / Aufgabe</label>
+  <input id="mm-zusatz-fach" placeholder="z. B. Betreuung Werkstatt">
+  <label>Raum</label>
+  <input id="mm-zusatz-raum" placeholder="optional">
+  <label>Für welchen Kollegen?</label>
+  <input id="mm-zusatz-kollege" placeholder="optional">
+  <div class="mm-actions">
+    <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
+    <button type="button" class="btn" id="mm-zusatz-save">Eintragen</button>
   </div>
 </div>
 
@@ -946,6 +1025,9 @@ let _menuTargetEl = null;
 
 function blockMenuShow(x, y, el) {
   _menuTargetEl = el;
+  // "Änderung aufheben" nur, wenn an dieser Stunde eine Ausnahme hängt.
+  const unexc = document.getElementById('menu-unexc');
+  if (unexc) unexc.style.display = el.dataset.exceptionId ? '' : 'none';
   _blockMenu.classList.add('open');
   // Erst sichtbar machen, dann an Cursorposition + Bildschirmrand klammern
   const rect = _blockMenu.getBoundingClientRect();
@@ -967,6 +1049,8 @@ document.addEventListener('keydown', (e) => {
     blockMenuHide();
     miniForwardHide();
     quickPrevHide();
+    if (typeof mmHideAll === 'function') mmHideAll();
+    if (typeof emptyMenuHide === 'function') emptyMenuHide();
   }
 });
 window.addEventListener('scroll', blockMenuHide, true);
@@ -982,6 +1066,7 @@ _blockMenu.querySelectorAll('button[data-act]').forEach(btn => {
       subjects: el.dataset.subjectsKey || '',
       block_start: el.dataset.blockStart || '',
     };
+    const lessonEl = el;
     blockMenuHide();
     if (act === 'open') {
       el.click();
@@ -991,9 +1076,218 @@ _blockMenu.querySelectorAll('button[data-act]').forEach(btn => {
       quickPrevOpen(key);
     } else if (act === 'exam') {
       await toggleExamForBlock(key, el);
+    } else if (act === 'cancel') {
+      excOpenCancel(key, lessonEl);
+    } else if (act === 'move') {
+      excOpenMove(key, lessonEl);
+    } else if (act === 'subst') {
+      excOpenSubst(key, lessonEl);
+    } else if (act === 'unexc') {
+      await excRemove(lessonEl.dataset.exceptionId);
     }
   });
 });
+
+// ── Einmalige Änderungen (Ausfall, Verschiebung, Vertretung, Zusatz) ──────
+// Nach jeder Änderung wird neu geladen: Eine Verschiebung kann eine Zelle in
+// einer ANDEREN Woche füllen — das im DOM nachzuziehen wäre fehleranfällig.
+const _emptyMenu = document.getElementById('empty-menu');
+let _emptyTarget = null;
+
+function emptyMenuHide() { _emptyMenu.classList.remove('open'); _emptyTarget = null; }
+
+document.querySelectorAll('td.lessons-td').forEach(td => {
+  td.addEventListener('contextmenu', (e) => {
+    // Rechtsklick auf eine Stunde behandelt deren eigener Listener.
+    if (e.target.closest('.tt-lesson')) return;
+    if (td.classList.contains('free-cell')) return;   // Ferien/Feiertag
+    e.preventDefault();
+    blockMenuHide();
+    _emptyTarget = td;
+    _emptyMenu.classList.add('open');
+    const r = _emptyMenu.getBoundingClientRect();
+    _emptyMenu.style.left = Math.min(e.clientX, window.innerWidth - r.width - 6) + 'px';
+    _emptyMenu.style.top = Math.min(e.clientY, window.innerHeight - r.height - 6) + 'px';
+  });
+});
+document.addEventListener('click', (e) => {
+  if (_emptyMenu.classList.contains('open') && !_emptyMenu.contains(e.target)) emptyMenuHide();
+});
+window.addEventListener('scroll', emptyMenuHide, true);
+
+_emptyMenu.querySelector('button[data-act="zusatz"]').addEventListener('click', () => {
+  const td = _emptyTarget;
+  emptyMenuHide();
+  if (td) excOpenZusatz(td.dataset.date, td.dataset.blockStart);
+});
+
+function mmShow(id) {
+  _mmBackdrop.classList.add('open');
+  document.getElementById(id).classList.add('open');
+}
+function mmHideAll() {
+  _mmBackdrop.classList.remove('open');
+  ['mm-cancel', 'mm-move', 'mm-subst', 'mm-zusatz']
+    .forEach(id => document.getElementById(id).classList.remove('open'));
+}
+document.querySelectorAll('[data-mm-close]').forEach(b =>
+  b.addEventListener('click', mmHideAll));
+
+let _excKey = null;
+
+async function excPost(body) {
+  try {
+    const r = await fetch('/api/timetable/exception', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) { alert(d.error || 'Die Änderung wurde abgelehnt.'); return; }
+    if (d.warn) alert(d.warn);
+    location.reload();
+  } catch (e) {
+    alert('Die Änderung konnte nicht gespeichert werden.');
+  }
+}
+
+async function excRemove(id) {
+  if (!id) return;
+  if (!confirm('Diese Änderung aufheben? Die Stunde steht danach wieder regulär im Plan.')) return;
+  try {
+    const r = await fetch('/api/timetable/exception/' + id + '/delete', {method: 'POST'});
+    const d = await r.json();
+    if (!d.ok) { alert(d.error || 'Aufheben fehlgeschlagen.'); return; }
+    location.reload();
+  } catch (e) { alert('Aufheben fehlgeschlagen.'); }
+}
+
+function _lessonInfo(el) {
+  return el.dataset.day + ' · ' + el.dataset.slot;
+}
+
+function excOpenCancel(key, el) {
+  _excKey = key;
+  document.getElementById('mm-cancel-sub').textContent = _lessonInfo(el);
+  document.getElementById('mm-cancel-grund').value = '';
+  mmShow('mm-cancel');
+}
+document.getElementById('mm-cancel-save').addEventListener('click', () => {
+  excPost({...(_excKey), kind: 'ausfall',
+           grund: document.getElementById('mm-cancel-grund').value});
+});
+
+function excOpenSubst(key, el) {
+  _excKey = key;
+  document.getElementById('mm-subst-sub').textContent =
+    _lessonInfo(el) + ' — die Stunde bleibt im Plan und dokumentierbar.';
+  document.getElementById('mm-subst-name').value = '';
+  document.getElementById('mm-subst-grund').value = '';
+  mmShow('mm-subst');
+}
+document.getElementById('mm-subst-save').addEventListener('click', () => {
+  const name = document.getElementById('mm-subst-name').value.trim();
+  if (!name) { alert('Bitte den Namen der Vertretung angeben.'); return; }
+  excPost({...(_excKey), kind: 'vertretung', vertretung_name: name,
+           grund: document.getElementById('mm-subst-grund').value});
+});
+
+// ── Verschieben: Zielblöcke kommen aus dem Zeitraster der Zielwoche ───────
+const _mvDate = document.getElementById('mm-move-date');
+const _mvBlock = document.getElementById('mm-move-block');
+const _mvHint = document.getElementById('mm-move-hint');
+
+function excOpenMove(key, el) {
+  _excKey = key;
+  document.getElementById('mm-move-sub').textContent =
+    _lessonInfo(el) + ' — wohin soll die Stunde?';
+  _mvDate.value = key.date;
+  _mvHint.textContent = '';
+  document.getElementById('mm-move-grund').value = '';
+  mmShow('mm-move');
+  loadMoveBlocks();
+}
+
+async function loadMoveBlocks() {
+  const d = _mvDate.value;
+  _mvBlock.innerHTML = '<option value="">lädt …</option>';
+  _mvHint.textContent = '';
+  if (!d) { _mvBlock.innerHTML = '<option value="">— Datum wählen —</option>'; return; }
+  try {
+    const r = await fetch('/api/timetable/blocks?week=' + encodeURIComponent(d));
+    const data = await r.json();
+    const tag = data.days.find(x => x.date === d);
+    if (tag && tag.free) {
+      _mvBlock.innerHTML = '<option value="">—</option>';
+      _mvHint.textContent = 'An diesem Tag ist kein Unterricht (' + tag.free_label + ').';
+      _mvHint.className = 'mm-hint mm-hint-err';
+      return;
+    }
+    if (!data.slots.length) {
+      _mvBlock.innerHTML = '<option value="">—</option>';
+      _mvHint.textContent = 'Kein Zeitraster vorhanden.';
+      return;
+    }
+    _mvBlock.innerHTML = data.slots.map(s =>
+      '<option value="' + s.start + '">' + s.name + ' · ' + s.start + '–' + s.end + '</option>'
+    ).join('');
+    _mvHint.className = 'mm-hint';
+    if (tag) _mvHint.textContent = tag.name + ', ' + d.slice(8, 10) + '.' + d.slice(5, 7) + '.';
+  } catch (e) {
+    _mvBlock.innerHTML = '<option value="">—</option>';
+    _mvHint.textContent = 'Blöcke konnten nicht geladen werden.';
+  }
+}
+_mvDate.addEventListener('change', loadMoveBlocks);
+
+document.getElementById('mm-move-save').addEventListener('click', () => {
+  if (!_mvDate.value || !_mvBlock.value) { alert('Bitte Zieldatum und Zielblock wählen.'); return; }
+  excPost({...(_excKey), kind: 'verschiebung',
+           target_date: _mvDate.value, target_block_start: _mvBlock.value,
+           grund: document.getElementById('mm-move-grund').value});
+});
+
+// ── Zusatzstunde ─────────────────────────────────────────────────────────
+const _zkSel = document.getElementById('mm-zusatz-klasse');
+const _zkFrei = document.getElementById('mm-zusatz-klasse-frei');
+let _zusatzSlot = null;
+
+async function excOpenZusatz(datum, blockStart) {
+  _zusatzSlot = {date: datum, block_start: blockStart};
+  document.getElementById('mm-zusatz-sub').textContent =
+    datum.slice(8, 10) + '.' + datum.slice(5, 7) + '. · ab ' + blockStart
+    + ' — Unterricht, den du zusätzlich übernimmst.';
+  ['mm-zusatz-fach', 'mm-zusatz-raum', 'mm-zusatz-kollege', 'mm-zusatz-klasse-frei']
+    .forEach(id => document.getElementById(id).value = '');
+  mmShow('mm-zusatz');
+  try {
+    const r = await fetch('/api/timetable/stammdaten');
+    const d = await r.json();
+    _zkSel.innerHTML = '<option value="__frei__">— frei eintippen —</option>'
+      + (d.klassen || []).map(k =>
+          '<option value="' + k.key.replace(/"/g, '&quot;') + '">' + k.name + '</option>').join('');
+  } catch (e) { /* Freitext geht immer */ }
+  toggleZusatzFrei();
+}
+function toggleZusatzFrei() {
+  _zkFrei.style.display = _zkSel.value === '__frei__' ? '' : 'none';
+}
+_zkSel.addEventListener('change', toggleZusatzFrei);
+
+document.getElementById('mm-zusatz-save').addEventListener('click', () => {
+  const frei = _zkSel.value === '__frei__';
+  const klasse = frei ? _zkFrei.value.trim() : _zkSel.value;
+  const anzeige = frei ? klasse : (_zkSel.options[_zkSel.selectedIndex] || {}).text;
+  const fach = document.getElementById('mm-zusatz-fach').value.trim();
+  if (!klasse) { alert('Bitte eine Klasse angeben.'); return; }
+  if (!fach) { alert('Bitte Fach oder Aufgabe angeben.'); return; }
+  excPost({
+    kind: 'zusatz', date: _zusatzSlot.date, block_start: _zusatzSlot.block_start,
+    klassen: klasse, klassen_display: anzeige, fach_text: fach,
+    raum: document.getElementById('mm-zusatz-raum').value,
+    fuer_kollege: document.getElementById('mm-zusatz-kollege').value,
+  });
+});
+
 
 // ── Mini-Modal: Bemerkung für nächste Stunde ─────────────────────────────
 const _mmBackdrop = document.getElementById('mm-backdrop');

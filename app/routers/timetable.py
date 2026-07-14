@@ -1,5 +1,8 @@
-"""Stundenplan-Seite: zeigt die Lessons des Lehrers aus WebUntis.
-Inklusive Lehrer-Notizen pro Stunde und iCal-Termine."""
+"""Stundenplan-Seite: zeigt den manuell gepflegten Stundenplan des Lehrers.
+
+Die Stunden kommen aus app/services/timetable_grid.py (Grundstundenplan-Version,
+A/B-Woche, Ferien, einmalige Änderungen) — nicht mehr aus WebUntis. Dazu die
+Lehrer-Notizen pro Stunde und die iCal-Termine."""
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
@@ -14,8 +17,7 @@ from app.models import (
     Exam, IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
     LessonSeriesOverride, LsArbeitsblatt, LsAufgabe, User,
 )
-from app.services import (aufgabe_sync, ical_client, timetable_grid,
-                          webuntis_client)
+from app.services import aufgabe_sync, ical_client, timetable_grid
 from app.templating import templates
 
 router = APIRouter()
@@ -443,8 +445,6 @@ async def timetable_arbeitsplan_pdf(
     from app.auth import audit
     from app.services.playwright_pdf import render_pdf
 
-    if not user.untis_creds_enc:
-        raise HTTPException(400, "Keine WebUntis-Zugangsdaten hinterlegt")
     ref = _parse_iso_date(week)
     plan = _collect_week_plan(db, user, ref)
 
@@ -472,14 +472,16 @@ async def timetable_arbeitsplan_pdf(
     )
 
 
-@router.get("/timetable/diagnose", response_class=HTMLResponse)
-def timetable_diagnose(
-    request: Request,
-    user: Annotated[User, Depends(require_user)],
-):
-    results = webuntis_client.diagnose(user)
-    return templates.TemplateResponse(request, "timetable_diagnose.html",
-                                      {"user": user, "results": results})
+# WebUntis-Diagnose — ausgeblendet, seit der Stundenplan manuell gepflegt wird.
+# Löschen (inkl. timetable_diagnose.html) in Phase 3.
+# @router.get("/timetable/diagnose", response_class=HTMLResponse)
+# def timetable_diagnose(
+#     request: Request,
+#     user: Annotated[User, Depends(require_user)],
+# ):
+#     results = webuntis_client.diagnose(user)
+#     return templates.TemplateResponse(request, "timetable_diagnose.html",
+#                                       {"user": user, "results": results})
 
 
 # ── Lehrer-Notizen pro Stunde ──────────────────────────────────────────────
@@ -1447,19 +1449,21 @@ def api_get_block_exams(
     return JSONResponse({"ok": True, "exams": items})
 
 
-@router.get("/api/timetable/today")
-def api_today(
-    user: Annotated[User, Depends(require_user)],
-):
-    """JSON-Endpoint für Editor: heutige Stunden des Nutzers."""
-    if not user.untis_creds_enc:
-        return JSONResponse({"ok": False, "error": "Keine WebUntis-Credentials hinterlegt."},
-                            status_code=400)
-    try:
-        lessons = webuntis_client.get_current_day(user)
-        return JSONResponse({"ok": True, "lessons": lessons})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
+# Heutige Stunden aus WebUntis — Konsument war der ausgeblendete Editor.
+# Ausgeblendet mit dem Untis-Rückbau; löschen in Phase 3.
+# @router.get("/api/timetable/today")
+# def api_today(
+#     user: Annotated[User, Depends(require_user)],
+# ):
+#     """JSON-Endpoint für Editor: heutige Stunden des Nutzers."""
+#     if not user.untis_creds_enc:
+#         return JSONResponse({"ok": False, "error": "Keine WebUntis-Credentials hinterlegt."},
+#                             status_code=400)
+#     try:
+#         lessons = webuntis_client.get_current_day(user)
+#         return JSONResponse({"ok": True, "lessons": lessons})
+#     except Exception as e:
+#         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
 
 
 @router.get("/api/dashboard/events")
