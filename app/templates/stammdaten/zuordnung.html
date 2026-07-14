@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Zuordnung prüfen{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Zuordnung prüfen</h1>
+  <p class="muted">Beim Umbau auf Jahrgänge wurde der Jahrgang aus dem <em>Namen</em> der Lerngruppe
+    geraten (<code>BSMT 23 a</code> → <code>BSMT 23</code>). Hier ziehst du das gerade.
+    <strong>Die Schlüssel werden dabei nie angefasst</strong> — deine Stundennotizen bleiben also
+    in jedem Fall hängen.</p>
+
+  {% if request.query_params.get('ok') %}
+    <div class="flash flash-ok">✓ {{ request.query_params.get('ok').replace('+', ' ') }}</div>
+  {% endif %}
+
+  {% if ohne_klasse %}
+  <div class="flash flash-warn" style="display:block">
+    <strong>{{ ohne_klasse|length }} Schüler ohne Klasse:</strong>
+    {% for s in ohne_klasse[:12] %}{{ s.nachname }}{% if not loop.last %}, {% endif %}{% endfor %}
+    {% if ohne_klasse|length > 12 %} …{% endif %}
+    <br>Ordne sie im jeweiligen Jahrgang zu (<em>Jetzt zuordnen</em>).
+  </div>
+  {% endif %}
+
+  {% if gruppen %}
+  {% for g in gruppen %}
+  <form method="post" action="/stammdaten/zuordnung/{{ g.id }}" class="zu-row">
+    <div class="zu-head">
+      <strong>{{ g.display_name or g.klassen_key }}</strong>
+      <code style="font-size:11px">{{ g.klassen_key }}</code>
+      {% if not g.jahrgang_id %}<span class="flash flash-err" style="margin:0;padding:2px 7px">kein Jahrgang</span>{% endif %}
+    </div>
+    <div class="sd-inline">
+      <select name="jahrgang_id">
+        <option value="">— kein Jahrgang —</option>
+        {% for j in jahrgaenge %}
+        <option value="{{ j.id }}" {% if g.jahrgang_id == j.id %}selected{% endif %}>{{ j.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="art">
+        {% for wert, label in [('klasse', 'Klasse'), ('kombi', 'zusammengelegt'), ('gruppe', 'Teilgruppe')] %}
+        <option value="{{ wert }}" {% if g.art == wert %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
+    </div>
+    <div class="lg-pick">
+      {% for k in klassen %}
+      <label class="sd-check">
+        <input type="checkbox" name="schulklasse_ids" value="{{ k.id }}"
+               {% if k.id in mitglieder[g.id] %}checked{% endif %}> {{ k.name }}
+      </label>
+      {% endfor %}
+    </div>
+  </form>
+  {% endfor %}
+  {% else %}
+  <p class="muted">Keine Lerngruppen vorhanden.</p>
+  {% endif %}
+</div>
+
+<style>
+  .zu-row { border-top: 1px solid var(--line, #eee); padding: .8rem 0; }
+  .zu-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .4rem; flex-wrap: wrap; }
+  .lg-pick { display: flex; flex-wrap: wrap; gap: .4rem .8rem; margin-top: .5rem; }
+  .lg-pick .sd-check { border: 1px solid var(--line, #ddd); border-radius: 6px; padding: 4px 8px; }
+</style>
+{% endblock %}

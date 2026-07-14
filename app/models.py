@@ -379,7 +379,12 @@ class IcalCalendar(Base):
 
 
 class Student(Base):
-    """Schüler pro Lehrer + Klasse. Quelle für Prüfungs-Bewertungen."""
+    """Schüler pro Lehrer. Quelle für Prüfungs-Bewertungen.
+
+    Die Klassen-Zugehörigkeit hängt an `schulklasse_id`; `klassen_key` bleibt
+    denormalisiert daneben stehen (Anzeige + Altbestand in exams/exam_md) und
+    wird beim Versetzen mitgeschrieben. `schulklasse_id = NULL` heißt: importiert,
+    aber noch keiner Klasse des Jahrgangs zugeordnet (Pool)."""
     __tablename__ = "students"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -387,6 +392,10 @@ class Student(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     klassen_key: Mapped[str] = mapped_column(String(255), default="", index=True)
+    schulklasse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tt_schulklassen.id", ondelete="SET NULL"), nullable=True)
+    jahrgang_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tt_jahrgaenge.id", ondelete="SET NULL"), nullable=True)
     nachname: Mapped[str] = mapped_column(String(120))
     vorname: Mapped[str] = mapped_column(String(120), default="")
     email: Mapped[str] = mapped_column(String(255), default="")
@@ -394,6 +403,26 @@ class Student(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class StudentClassMove(Base):
+    """Historie der Klassenwechsel. Die `student_id` bleibt beim Versetzen gleich —
+    deshalb überleben alle Bewertungen den Wechsel."""
+    __tablename__ = "student_class_moves"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True)
+    von_klasse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tt_schulklassen.id", ondelete="SET NULL"), nullable=True)
+    nach_klasse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tt_schulklassen.id", ondelete="SET NULL"), nullable=True)
+    # Namens-Snapshot, damit die Historie auch nach Umbenennung lesbar bleibt
+    von_name: Mapped[str] = mapped_column(String(120), default="")
+    nach_name: Mapped[str] = mapped_column(String(120), default="")
+    datum: Mapped[str] = mapped_column(String(10), default="")
+    grund: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Exam(Base):
@@ -412,6 +441,11 @@ class Exam(Base):
     )
     lesson_note_id: Mapped[int | None] = mapped_column(
         ForeignKey("lesson_notes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Lerngruppe, in der die Prüfung geschrieben wurde. `klassen_key` bleibt
+    # daneben als Anzeige-Liste bestehen (Altbestand).
+    lerngruppe_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tt_klassen.id", ondelete="SET NULL"), nullable=True, index=True
     )
     grading_scale_key: Mapped[str] = mapped_column(String(40), default="builtin:mss_noten")
     input_mode: Mapped[str] = mapped_column(String(16), default="numeric")  # "numeric" | "stages"
@@ -586,8 +620,97 @@ class TtSlot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class TtJahrgang(Base):
+    """Jahrgang (z. B. 'BSMT 23'). Trägt die Lernfelder; darunter hängen die Klassen."""
+    __tablename__ = "tt_jahrgaenge"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kuerzel: Mapped[str] = mapped_column(String(40), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    klassen: Mapped[list["TtSchulklasse"]] = relationship(
+        back_populates="jahrgang", cascade="all, delete-orphan",
+        order_by="TtSchulklasse.position")
+    faecher: Mapped[list["TtJahrgangFach"]] = relationship(
+        back_populates="jahrgang", cascade="all, delete-orphan",
+        order_by="TtJahrgangFach.position")
+
+
+class TtSchulklasse(Base):
+    """Klasse (z. B. 'BSMT 23 a') — der Behälter für die Schüler.
+
+    Umbenennbar: sie trägt bewusst KEINEN key4-Schlüssel. Was im Stundenplan
+    steht, ist die Lerngruppe (`TtKlasse`)."""
+    __tablename__ = "tt_schulklassen"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    jahrgang_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_jahrgaenge.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kuerzel: Mapped[str] = mapped_column(String(40), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    jahrgang: Mapped[TtJahrgang] = relationship(back_populates="klassen")
+
+
+class TtJahrgangFach(Base):
+    """Welches Lernfeld/Fach gilt in welchem Jahrgang — mit Stundenansatz."""
+    __tablename__ = "tt_jahrgang_faecher"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    jahrgang_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_jahrgaenge.id", ondelete="CASCADE"), index=True)
+    fach_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_faecher.id", ondelete="CASCADE"), index=True)
+    stundenansatz: Mapped[int] = mapped_column(Integer, default=0)
+    zeitraum_von: Mapped[str] = mapped_column(String(10), default="")
+    zeitraum_bis: Mapped[str] = mapped_column(String(10), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    jahrgang: Mapped[TtJahrgang] = relationship(back_populates="faecher")
+    fach: Mapped["TtFach"] = relationship()
+
+
+class TtLerngruppeKlasse(Base):
+    """Welche Schulklassen stecken in einer Lerngruppe (1 bei 'klasse', n bei 'kombi')."""
+    __tablename__ = "tt_lerngruppe_klassen"
+
+    lerngruppe_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_klassen.id", ondelete="CASCADE"), primary_key=True)
+    schulklasse_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_schulklassen.id", ondelete="CASCADE"), primary_key=True)
+
+
+class TtLerngruppeStudent(Base):
+    """Nur bei art='gruppe': die ausgewählte Teilmenge der Schüler."""
+    __tablename__ = "tt_lerngruppe_students"
+
+    lerngruppe_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_klassen.id", ondelete="CASCADE"), primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), primary_key=True)
+
+
 class TtKlasse(Base):
-    """Stammdaten Klasse. `klassen_key` = technischer Schlüssel (immutable)."""
+    """LERNGRUPPE — das, was im Stundenplan steht.
+
+    Heißt aus Bestandsgründen weiter `tt_klassen`: Diese Tabelle trägt den
+    `klassen_key`, und der ist Teil des key4, an dem alle Stundennotizen hängen.
+    Er ist nach dem Anlegen UNVERÄNDERLICH.
+
+    Eine Lerngruppe ist entweder genau eine Klasse (`art='klasse'`), mehrere
+    zusammengelegte Klassen (`art='kombi'`) oder eine Teilgruppe einer Klasse
+    (`art='gruppe'`). MT23a und das zusammengelegte MT23 sind damit zwei
+    Lerngruppen mit zwei Keys — ihre Notizen mischen sich nie."""
     __tablename__ = "tt_klassen"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -598,7 +721,13 @@ class TtKlasse(Base):
     kuerzel: Mapped[str] = mapped_column(String(40), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    jahrgang_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tt_jahrgaenge.id", ondelete="SET NULL"), nullable=True)
+    # klasse | kombi | gruppe
+    art: Mapped[str] = mapped_column(String(10), default="klasse")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    jahrgang: Mapped[TtJahrgang | None] = relationship()
 
 
 class TtFach(Base):

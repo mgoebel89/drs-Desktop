@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Jahrgänge{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Jahrgänge</h1>
+  <p class="muted">Ein Jahrgang (z.&nbsp;B. <em>BSMT 23</em>) trägt die <strong>Lernfelder</strong>.
+    Darunter hängen die <strong>Klassen</strong> mit ihren Schülern. Was im Stundenplan steht, ist die
+    <a href="/stammdaten/lerngruppen">Lerngruppe</a> — sie kann eine Klasse sein, mehrere zusammengelegte
+    Klassen oder eine Teilgruppe.</p>
+
+  {% if request.query_params.get('ok') %}
+    <div class="flash flash-ok">✓ {{ request.query_params.get('ok').replace('+', ' ') }}</div>
+  {% endif %}
+  {% if request.query_params.get('err') %}
+    <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
+  {% endif %}
+
+  <h2>Jahrgang anlegen</h2>
+  <form method="post" action="/stammdaten/jahrgaenge" class="sd-form">
+    <div>
+      <label>Name</label>
+      <input name="name" required placeholder="BSMT 23">
+    </div>
+    <div>
+      <label>Kürzel (optional)</label>
+      <input name="kuerzel" placeholder="MT23">
+    </div>
+    <div><button class="btn" type="submit">+ Anlegen</button></div>
+  </form>
+
+  <h2 style="margin-top:1.6rem">Angelegte Jahrgänge</h2>
+  {% if jahrgaenge %}
+  <table>
+    <thead>
+      <tr><th>Jahrgang</th><th>Klassen</th><th>Lernfelder</th><th>Schüler</th><th></th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for j in jahrgaenge %}
+    <tr{% if not j.active %} style="opacity:.55"{% endif %}>
+      <td>
+        <a href="/stammdaten/jahrgaenge/{{ j.id }}"><strong>{{ j.name }}</strong></a>
+        {% if j.kuerzel %}<span class="muted">{{ j.kuerzel }}</span>{% endif %}
+        {% if not j.active %}<span class="muted">— stillgelegt</span>{% endif %}
+      </td>
+      <td>{{ zahlen[j.id].klassen }}</td>
+      <td>{{ zahlen[j.id].faecher }}</td>
+      <td>
+        {{ zahlen[j.id].schueler }}
+        {% if zahlen[j.id].pool %}
+          <span class="muted" style="color:var(--pink)">
+            — {{ zahlen[j.id].pool }} noch ohne Klasse
+          </span>
+        {% endif %}
+      </td>
+      <td>
+        <form method="post" action="/stammdaten/jahrgaenge/{{ j.id }}" class="sd-inline">
+          <input name="name" value="{{ j.name }}" style="max-width:150px">
+          <input name="kuerzel" value="{{ j.kuerzel }}" style="max-width:90px" placeholder="Kürzel">
+          <label class="sd-check"><input type="checkbox" name="active" value="1"
+                 {% if j.active %}checked{% endif %}> aktiv</label>
+          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/stammdaten/jahrgaenge/{{ j.id }}/delete"
+              onsubmit="return confirm('Jahrgang „{{ j.name }}“ löschen? Hängen noch Klassen oder Lerngruppen dran, wird er nur stillgelegt.');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Noch kein Jahrgang angelegt.</p>
+  {% endif %}
+
+  <p style="margin-top:1rem">
+    {% if alle %}
+      <a class="btn-sec" href="/stammdaten/jahrgaenge">Nur aktive zeigen</a>
+    {% elif inaktiv_count %}
+      <a class="btn-sec" href="/stammdaten/jahrgaenge?alle=1">
+        Auch stillgelegte zeigen ({{ inaktiv_count }})</a>
+    {% endif %}
+    <a class="btn-sec" href="/stammdaten/zuordnung" style="margin-left:.4rem">Zuordnung prüfen</a>
+  </p>
+
+  <p class="muted" style="margin-top:1rem">
+    <strong>Stillgelegt</strong> heißt: Der Jahrgang verschwindet mit allen seinen Klassen und
+    Lerngruppen aus den Auswahllisten — im Stundenplan, bei den Ausnahmen und in den Prüfungen.
+    Alte Stunden und Notizen bleiben sichtbar und unverändert.
+  </p>
+</div>
+{% endblock %}
