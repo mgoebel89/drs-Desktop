@@ -29,6 +29,8 @@ from app.routers import grading_scales as grading_scales_router
 from app.routers import feedback_templates as feedback_templates_router
 from app.routers import files as files_router
 from app.routers import vikunja as vikunja_router
+from app.routers import stammdaten as stammdaten_router
+from app.routers import timetable_settings as timetable_settings_router
 from app.models import Exam, LessonNote, User
 from app.templating import templates
 from datetime import date
@@ -57,6 +59,8 @@ app.include_router(grading_scales_router.router)
 app.include_router(feedback_templates_router.router)
 app.include_router(files_router.router)
 app.include_router(vikunja_router.router)
+app.include_router(stammdaten_router.router)
+app.include_router(timetable_settings_router.router)
 
 
 @app.get("/")

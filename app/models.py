@@ -556,3 +556,182 @@ class Setting(Base):
     blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     mime: Mapped[str] = mapped_column(String(64), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ══ Manueller Stundenplan (tt_*) ═════════════════════════════════════════
+#
+# Der Stundenplan wird nicht mehr aus WebUntis gezogen, sondern hier gepflegt.
+# Alles im Stundenplan hängt am Schlüssel
+#     key4 = (lesson_date, klassen_key, subjects_key, block_start)
+# an dem auch LessonNote, Exam und LessonSeriesOverride hängen. Deshalb tragen
+# die Stammdaten einen technischen *_key neben dem Anzeigenamen: er ist nach dem
+# Anlegen UNVERÄNDERLICH und muss byte-genau dem entsprechen, was bisher aus
+# WebUntis kam — sonst sind die bestehenden Notizen lautlos abgehängt.
+
+
+class TtSlot(Base):
+    """Ein Block des Zeitrasters (an der DRS 90 Minuten = 2 Schulstunden).
+
+    `start_time` IST der `block_start` in key4 und darf nach dem Anlegen nicht
+    mehr geändert werden — sonst verwaisen alle Notizen dieses Blocks."""
+    __tablename__ = "tt_slots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    name: Mapped[str] = mapped_column(String(20), default="")      # "1./2."
+    start_time: Mapped[str] = mapped_column(String(5))             # "HH:MM"
+    end_time: Mapped[str] = mapped_column(String(5), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TtKlasse(Base):
+    """Stammdaten Klasse. `klassen_key` = technischer Schlüssel (immutable)."""
+    __tablename__ = "tt_klassen"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    klassen_key: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    kuerzel: Mapped[str] = mapped_column(String(40), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TtFach(Base):
+    """Stammdaten Fach/Lernfeld. `subjects_key` = technischer Schlüssel (immutable)."""
+    __tablename__ = "tt_faecher"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    subjects_key: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    kuerzel: Mapped[str] = mapped_column(String(40), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TtSchoolyear(Base):
+    """Schuljahr: erster/letzter Schultag, Halbjahresgrenze, A/B-Regel."""
+    __tablename__ = "tt_schoolyears"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(40), default="")        # "2026/27"
+    first_day: Mapped[str] = mapped_column(String(10), default="")   # ISO
+    last_day: Mapped[str] = mapped_column(String(10), default="")
+    # Erster Tag des 2. Halbjahres (nur Anzeige/Plausibilität)
+    halfyear_split: Mapped[str] = mapped_column(String(10), default="")
+    # "even" = A-Woche ist eine gerade Kalenderwoche, "odd" = ungerade
+    a_week_parity: Mapped[str] = mapped_column(String(4), default="even")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TtHoliday(Base):
+    """Unterrichtsfreier Zeitraum: Ferien oder beweglicher Ferientag.
+    Gesetzliche Feiertage stehen hier NICHT drin — die rechnet
+    app/services/schulkalender.py aus."""
+    __tablename__ = "tt_holidays"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    start_date: Mapped[str] = mapped_column(String(10), index=True)  # inklusiv
+    end_date: Mapped[str] = mapped_column(String(10))                # inklusiv
+    kind: Mapped[str] = mapped_column(String(16), default="ferien")  # ferien|beweglich
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TtVersion(Base):
+    """Version des Grundstundenplans, gültig ab `valid_from` bis zur nächsten.
+
+    Bewusst OHNE valid_to: Die gültige Version eines Tages ist die mit dem
+    größten `valid_from` <= Tag. So gibt es weder Lücken noch Überlappungen,
+    und vergangene Wochen rendern automatisch mit der Version, die damals galt.
+    Das 2. Halbjahr ist einfach eine neue Version."""
+    __tablename__ = "tt_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80), default="")
+    valid_from: Mapped[str] = mapped_column(String(10), index=True)  # ISO
+    note: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    rows: Mapped[list["TtRow"]] = relationship(
+        back_populates="version", cascade="all, delete-orphan")
+
+
+class TtRow(Base):
+    """Eine Zeile des Grundstundenplans: Wochentag + Block + Klasse + Fach.
+
+    `block_start` ist bewusst denormalisiert (kein FK auf tt_slots): Würde
+    später eine Slot-Startzeit geändert, verschöbe das sonst rückwirkend die
+    key4 der Vergangenheit."""
+    __tablename__ = "tt_rows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_versions.id", ondelete="CASCADE"), index=True)
+    weekday: Mapped[int] = mapped_column(Integer)          # 0=Mo .. 4=Fr
+    block_start: Mapped[str] = mapped_column(String(5))    # "HH:MM"
+    klasse_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_klassen.id", ondelete="CASCADE"))
+    fach_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_faecher.id", ondelete="CASCADE"))
+    raum: Mapped[str] = mapped_column(String(60), default="")
+    # "all" = jede Woche, "A"/"B" = nur in A- bzw. B-Wochen
+    rhythm: Mapped[str] = mapped_column(String(4), default="all")
+    note: Mapped[str] = mapped_column(String(200), default="")
+
+    version: Mapped[TtVersion] = relationship(back_populates="rows")
+
+
+class TtException(Base):
+    """Einmalige Änderung an einem konkreten Datum (Rechtsklick im Grid).
+
+    Die Keys und Anzeigenamen liegen als Snapshot mit, damit die Ausnahme auch
+    dann noch darstellbar ist, wenn die zugrundeliegende Zeile in einer neueren
+    Version verschwunden ist. Strukturiert gehalten, damit später eine Auswertung
+    (gehalten/ausgefallen/vertreten/zusätzlich) möglich ist."""
+    __tablename__ = "tt_exceptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # ausfall | verschiebung | vertretung | zusatz
+    kind: Mapped[str] = mapped_column(String(16))
+
+    # Quelle (bei 'zusatz': der Termin der Zusatzstunde selbst)
+    lesson_date: Mapped[str] = mapped_column(String(10), index=True)
+    block_start: Mapped[str] = mapped_column(String(5))
+    klassen_key: Mapped[str] = mapped_column(String(255), default="")
+    subjects_key: Mapped[str] = mapped_column(String(255), default="")
+
+    # Snapshot fürs Rendern, versionsunabhängig
+    snap_klassen_display: Mapped[str] = mapped_column(String(200), default="")
+    snap_fach_display: Mapped[str] = mapped_column(String(200), default="")
+    snap_raum: Mapped[str] = mapped_column(String(60), default="")
+
+    # nur 'verschiebung'
+    target_date: Mapped[str] = mapped_column(String(10), default="", index=True)
+    target_block_start: Mapped[str] = mapped_column(String(5), default="")
+    # nur 'vertretung'
+    vertretung_name: Mapped[str] = mapped_column(String(120), default="")
+    # nur 'zusatz' (fremde Klassen stehen nicht in den Stammdaten → Freitext)
+    fach_text: Mapped[str] = mapped_column(String(200), default="")
+    raum: Mapped[str] = mapped_column(String(60), default="")
+    fuer_kollege: Mapped[str] = mapped_column(String(120), default="")
+
+    grund: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)

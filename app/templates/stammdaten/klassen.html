@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Klassen{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Klassen</h1>
+  <p class="muted">Deine Klassen für den Stundenplan. Der <strong>Schlüssel</strong> ist der technische
+    Name, an dem deine Stundennotizen und Prüfungen hängen — er lässt sich nach dem Anlegen
+    nicht mehr ändern.</p>
+
+  {% if request.query_params.get('ok') %}
+    <div class="flash flash-ok">✓ {{ request.query_params.get('ok') }} Klassen aus dem Bestand übernommen.</div>
+  {% endif %}
+  {% if request.query_params.get('err') %}
+    <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
+  {% endif %}
+
+  {% if suggest %}
+  <div class="flash flash-warn" style="display:block">
+    <strong>Aus deinem Bestand gefunden:</strong> Diese Klassen kommen in deinen Notizen, Schülerlisten
+    oder Prüfungen vor, sind aber noch keine Stammdaten. Übernimm sie unverändert — dann bleiben deine
+    bisherigen Stundennotizen an den Stunden hängen.
+    <ul style="margin:.5rem 0 .6rem 1.1rem">
+      {% for s in suggest %}
+      <li><code>{{ s.key }}</code> <span class="muted">— {{ s.count }}× in {{ s.sources|join(', ') }}</span></li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/stammdaten/klassen/import" style="margin:0">
+      <button class="btn" type="submit">Alle {{ suggest|length }} übernehmen</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <h2>Klasse hinzufügen</h2>
+  <form method="post" action="/stammdaten/klassen" class="sd-form">
+    <div>
+      <label>Schlüssel <span class="muted">(wie in Untis, z. B. BSMT 23 a)</span></label>
+      <input name="klassen_key" required placeholder="BSMT 23 a">
+    </div>
+    <div>
+      <label>Anzeigename</label>
+      <input name="display_name" placeholder="Mechatroniker 23a">
+    </div>
+    <div>
+      <label>Kürzel (optional)</label>
+      <input name="kuerzel" placeholder="MT23a">
+    </div>
+    <div><button class="btn" type="submit">+ Hinzufügen</button></div>
+  </form>
+
+  <h2 style="margin-top:1.6rem">Angelegte Klassen</h2>
+  {% if klassen %}
+  <table>
+    <thead><tr><th>Schlüssel</th><th>Anzeigename</th><th>Kürzel</th><th>Aktiv</th><th></th></tr></thead>
+    <tbody>
+    {% for k in klassen %}
+    <tr>
+      <td><code style="font-size:11px">{{ k.klassen_key }}</code></td>
+      <td colspan="3">
+        <form method="post" action="/stammdaten/klassen/{{ k.id }}" class="sd-inline">
+          <input name="display_name" value="{{ k.display_name }}">
+          <input name="kuerzel" value="{{ k.kuerzel }}" style="max-width:110px" placeholder="Kürzel">
+          <label class="sd-check"><input type="checkbox" name="active" value="1" {% if k.active %}checked{% endif %}> aktiv</label>
+          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/stammdaten/klassen/{{ k.id }}/delete"
+              onsubmit="return confirm('Klasse „{{ k.display_name }}“ löschen? Wird sie im Stundenplan benutzt, wird sie nur stillgelegt.');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Noch keine Klassen angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

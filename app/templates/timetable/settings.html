@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Stundenplan-Einstellungen{% endblock %}
+{% block content %}
+<div class="row-spread">
+  <h1 style="margin-bottom:0">Stundenplan-Einstellungen</h1>
+  <a class="btn btn-sec" href="/timetable">← Zum Stundenplan</a>
+</div>
+
+{% if request.query_params.get('err') %}
+  <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
+{% endif %}
+{% if request.query_params.get('warn') %}
+  <div class="flash flash-warn">{{ request.query_params.get('warn').replace('+', ' ') }}</div>
+{% endif %}
+
+{% if orphans.klassen or orphans.faecher or orphans.bloecke %}
+<div class="card" style="border-color:var(--gelb)">
+  <h2 style="color:#e65100;margin-top:0">⚠ Bestandsnotizen ohne Gegenstück</h2>
+  <p class="muted">Zu diesen Schlüsseln gibt es Stundennotizen, aber keine Stammdaten bzw. keinen
+    Block im Zeitraster. Solange das so ist, hängen diese Notizen im Stundenplan an keiner Stunde
+    mehr. Lege die fehlenden Einträge <strong>mit exakt diesem Schlüssel</strong> an.</p>
+  <ul style="margin-left:1.1rem;font-size:13px">
+    {% if orphans.klassen %}<li>Klassen: {% for k in orphans.klassen %}<code>{{ k }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      — <a href="/stammdaten/klassen">anlegen</a></li>{% endif %}
+    {% if orphans.faecher %}<li>Fächer: {% for f in orphans.faecher %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      — <a href="/stammdaten/faecher">anlegen</a></li>{% endif %}
+    {% if orphans.bloecke %}<li>Blockzeiten: {% for b in orphans.bloecke %}<code>{{ b }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      — unten im Zeitraster ergänzen</li>{% endif %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2 id="zeitraster" style="margin-top:0">Zeitraster</h2>
+  <p class="muted">Die Blöcke deines Schultags. An der DRS sind das <strong>90-Minuten-Blöcke</strong>
+    (Doppelstunden) — trage sie so ein, nicht als Einzelstunden.
+    Die <strong>Startzeit</strong> ist der technische Schlüssel deiner Stundennotizen und lässt sich
+    nach dem Anlegen nicht mehr ändern.</p>
+
+  <form method="post" action="/timetable/settings/slots" class="sd-form">
+    <div>
+      <label>Bezeichnung</label>
+      <input name="name" placeholder="1./2.">
+    </div>
+    <div>
+      <label>Beginn</label>
+      <input name="start_time" type="time" required>
+    </div>
+    <div>
+      <label>Ende</label>
+      <input name="end_time" type="time" required>
+    </div>
+    <div><button class="btn" type="submit">+ Block</button></div>
+  </form>
+
+  {% if slots %}
+  <table style="margin-top:1rem">
+    <thead><tr><th>Block</th><th>Beginn</th><th>Ende</th><th>Reihenfolge</th><th></th></tr></thead>
+    <tbody>
+    {% for s in slots %}
+    <tr>
+      <td colspan="4">
+        <form method="post" action="/timetable/settings/slots/{{ s.id }}" class="sd-inline">
+          <input name="name" value="{{ s.name }}" style="max-width:110px">
+          <code style="font-size:12px;padding:0 .4rem">{{ s.start_time }}</code>
+          <span class="muted">bis</span>
+          <input name="end_time" type="time" value="{{ s.end_time }}" style="max-width:120px">
+          <input name="position" type="number" value="{{ s.position }}" style="max-width:70px" title="Reihenfolge">
+          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/timetable/settings/slots/{{ s.id }}/delete"
+              onsubmit="return confirm('Block {{ s.start_time }} löschen? Notizen, die an diesem Block hängen, sind danach im Stundenplan nicht mehr sichtbar.');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-top:.8rem">Noch keine Blöcke — ohne Zeitraster bleibt der Stundenplan leer.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 id="schuljahr" style="margin-top:0">Schuljahr &amp; A/B-Wochen</h2>
+  <p class="muted">Erster und letzter Schultag begrenzen das Schuljahr. Der Beginn des 2. Halbjahres
+    ist der Stichtag, ab dem du üblicherweise eine neue Stundenplan-Version anlegst.</p>
+
+  <form method="post" action="/timetable/settings/schoolyear" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+    <input type="hidden" name="sy_id" value="{{ schoolyear.id if schoolyear else 0 }}">
+    <div>
+      <label>Bezeichnung</label>
+      <input name="name" value="{{ schoolyear.name if schoolyear else '' }}" placeholder="2026/27">
+    </div>
+    <div>
+      <label>A-Woche ist …</label>
+      <select name="a_week_parity">
+        <option value="even" {% if not schoolyear or schoolyear.a_week_parity == 'even' %}selected{% endif %}>… eine gerade Kalenderwoche</option>
+        <option value="odd" {% if schoolyear and schoolyear.a_week_parity == 'odd' %}selected{% endif %}>… eine ungerade Kalenderwoche</option>
+      </select>
+    </div>
+    <div>
+      <label>Erster Schultag</label>
+      <input name="first_day" type="date" value="{{ schoolyear.first_day if schoolyear else '' }}" required>
+    </div>
+    <div>
+      <label>Letzter Schultag</label>
+      <input name="last_day" type="date" value="{{ schoolyear.last_day if schoolyear else '' }}" required>
+    </div>
+    <div>
+      <label>Beginn 2. Halbjahr (optional)</label>
+      <input name="halfyear_split" type="date" value="{{ schoolyear.halfyear_split if schoolyear else '' }}">
+    </div>
+    <div style="grid-column:1/3">
+      <button class="btn" type="submit">Speichern</button>
+    </div>
+  </form>
+
+  {% if ab_vorschau %}
+  <h3 style="font-size:14px;color:var(--blau);margin:1.4rem 0 .5rem">Vorschau der nächsten 12 Wochen</h3>
+  <p class="muted" style="margin-bottom:.6rem">Prüf hier, ob die Zuordnung zu deinem Schuljahr passt.
+    Am Jahreswechsel können zwei gleichnamige Wochen aufeinander folgen (KW 53 und KW 1 sind beide ungerade).</p>
+  <div class="ab-preview">
+    {% for w in ab_vorschau %}
+    <span class="ab-chip ab-{{ w.ab }}">KW {{ w.kw }} · {{ w.ab }}<small>{{ w.montag }}</small></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 id="ferien" style="margin-top:0">Ferien &amp; bewegliche Ferientage</h2>
+  <p class="muted">An diesen Tagen findet kein Unterricht statt — der Stundenplan bleibt dort leer.
+    Gesetzliche Feiertage musst du <strong>nicht</strong> eintragen, die rechnet die App selbst aus
+    (siehe unten).</p>
+
+  <form method="post" action="/timetable/settings/holidays" class="hol-form">
+    <div>
+      <label>Bezeichnung</label>
+      <input name="name" placeholder="Herbstferien" required>
+    </div>
+    <div>
+      <label>Von</label>
+      <input name="start_date" type="date" required>
+    </div>
+    <div>
+      <label>Bis <span class="muted">(leer = ein Tag)</span></label>
+      <input name="end_date" type="date">
+    </div>
+    <div>
+      <label>Art</label>
+      <select name="kind">
+        <option value="ferien">Ferien</option>
+        <option value="beweglich">Beweglicher Ferientag</option>
+      </select>
+    </div>
+    <div><button class="btn" type="submit">+ Hinzufügen</button></div>
+  </form>
+
+  {% if holidays %}
+  <table style="margin-top:1rem">
+    <thead><tr><th>Bezeichnung</th><th>Von</th><th>Bis</th><th>Art</th><th></th></tr></thead>
+    <tbody>
+    {% for h in holidays %}
+    <tr>
+      <td><strong>{{ h.name }}</strong></td>
+      <td>{{ h.start_date[8:10] }}.{{ h.start_date[5:7] }}.{{ h.start_date[0:4] }}</td>
+      <td>{{ h.end_date[8:10] }}.{{ h.end_date[5:7] }}.{{ h.end_date[0:4] }}</td>
+      <td><span class="badge {% if h.kind == 'beweglich' %}b-admin{% else %}b-teacher{% endif %}">
+        {{ 'beweglich' if h.kind == 'beweglich' else 'Ferien' }}</span></td>
+      <td>
+        <form method="post" action="/timetable/settings/holidays/{{ h.id }}/delete"
+              onsubmit="return confirm('„{{ h.name }}“ entfernen?');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-top:.8rem">Noch keine Ferien eingetragen.</p>
+  {% endif %}
+
+  <h3 style="font-size:14px;color:var(--blau);margin:1.6rem 0 .5rem">Gesetzliche Feiertage (automatisch, Rheinland-Pfalz)</h3>
+  {% if feiertage %}
+  <p class="muted" style="margin-bottom:.6rem">Nur die Feiertage, die im Schuljahr auf einen Schultag
+    (Mo–Fr) fallen. Berechnet, nicht gespeichert — nichts zu pflegen.</p>
+  <ul class="feiertage">
+    {% for tag, name in feiertage %}
+    <li><span class="muted">{{ tag }}</span> {{ name }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Trag oben erst das Schuljahr ein, dann erscheinen hier die Feiertage.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -197,6 +197,34 @@ tr:hover td { background: #fafafa; }
 .task-label { color: #fff; text-shadow: 0 0 2px rgba(0,0,0,.35); }
 .task-del { flex: 0 0 auto; background: transparent; cursor: pointer; border-radius: 6px; }
 
+/* ===== Stammdaten (Klassen / Fächer) ===== */
+.sd-form {
+  display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 140px auto;
+  gap: .5rem; align-items: end;
+}
+.sd-inline { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.sd-inline input { max-width: 240px; }
+.sd-check { display: flex; align-items: center; gap: .3rem; margin: 0; font-weight: normal; font-size: 12px; }
+.sd-check input { width: auto; }
+
+/* ===== Stundenplan-Einstellungen ===== */
+.hol-form {
+  display: grid; grid-template-columns: minmax(0,1fr) 160px 160px 180px auto;
+  gap: .5rem; align-items: end;
+}
+.ab-preview { display: flex; flex-wrap: wrap; gap: 6px; }
+.ab-chip {
+  display: inline-flex; flex-direction: column; align-items: center;
+  padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border); min-width: 74px;
+}
+.ab-chip small { font-weight: normal; font-size: 10px; color: var(--muted); }
+.ab-chip.ab-A { background: var(--blau-hell); color: var(--blau); border-color: var(--blau); }
+.ab-chip.ab-B { background: #f4f7e0; color: #6b7a00; border-color: var(--gruen); }
+.feiertage { list-style: none; margin: 0; padding: 0; columns: 2; font-size: 13px; }
+.feiertage li { padding: 3px 0; break-inside: avoid; }
+.feiertage .muted { display: inline-block; min-width: 130px; }
+
 /* Stundenplan-Grid: auf schmalen Geräten horizontal scrollen */
 .tt-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
@@ -244,6 +272,10 @@ tr:hover td { background: #fafafa; }
   /* Aufgaben-Formular untereinander statt vierspaltig quetschen */
   .task-form { grid-template-columns: 1fr; }
   .task-form .btn { width: 100%; justify-content: center; }
+
+  .sd-form, .hol-form { grid-template-columns: 1fr; }
+  .sd-form .btn, .hol-form .btn { width: 100%; justify-content: center; }
+  .feiertage { columns: 1; }
 
   /* Breite Tabellen scrollen statt quetschen */
   .card:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
