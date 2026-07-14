@@ -192,6 +192,10 @@ class SchuelerSave(BaseModel):
     vorname: str = ""
     email: str = ""
     active: bool = True
+    # Nur relevant, wenn active=False: warum und wann der Schüler die Klasse
+    # verlassen hat. "abschluss" | "abgang" | "".
+    austritt_grund: str = ""
+    austritt_datum: str = ""   # letzter Schultag, ISO (YYYY-MM-DD)
 
 
 class Versetzen(BaseModel):
@@ -254,6 +258,8 @@ def schueler_get(
     return {
         "id": s.id, "nachname": s.nachname, "vorname": s.vorname,
         "email": s.email, "active": s.active, "moodle_id": s.moodle_id,
+        "austritt_grund": s.austritt_grund or "",
+        "austritt_datum": s.austritt_datum or "",
         "klasse": k.name if k else "",
         "klasse_id": k.id if k else None,
         "lerngruppen": _lerngruppen_von(db, user, s),
@@ -280,6 +286,17 @@ def schueler_save(
     s.vorname = payload.vorname.strip()[:120]
     s.email = payload.email.strip()[:255]
     s.active = payload.active
+    if payload.active:
+        # Wieder aktiv geschaltet → Austrittsdaten verwerfen.
+        s.austritt_grund = ""
+        s.austritt_datum = ""
+    else:
+        grund = payload.austritt_grund.strip().lower()
+        if grund not in ("abschluss", "abgang"):
+            raise HTTPException(
+                400, "Beim Austritt fehlt der Grund (Abschluss oder Abgang).")
+        s.austritt_grund = grund
+        s.austritt_datum = payload.austritt_datum.strip()[:10]
     db.commit()
     return {"ok": True}
 

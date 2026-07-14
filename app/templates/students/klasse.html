@@ -42,7 +42,14 @@
         <button type="button" class="stu-name" data-schueler="{{ s.id }}">
           {{ s.nachname }}{% if s.vorname %}, {{ s.vorname }}{% endif %}
         </button>
-        {% if not s.active %}<span class="muted">inaktiv</span>{% endif %}
+        {% if not s.active %}
+          <span class="stu-austritt">
+            {%- if s.austritt_grund == 'abschluss' %}Abschluss
+            {%- elif s.austritt_grund == 'abgang' %}Abgang
+            {%- else %}inaktiv{% endif -%}
+            {% if s.austritt_datum %} · {{ s.austritt_datum[8:10] }}.{{ s.austritt_datum[5:7] }}.{{ s.austritt_datum[0:4] }}{% endif %}
+          </span>
+        {% endif %}
       </td>
       <td class="muted">{{ s.email or '—' }}</td>
       <td class="muted" style="text-align:right">bearbeiten ›</td>
@@ -70,6 +77,9 @@
   .stu-name { background: none; border: 0; font: inherit; color: var(--text);
               font-weight: 600; cursor: pointer; padding: 0; text-align: left; }
   .stu-name:hover { color: var(--blau); }
+  .stu-austritt { display: inline-block; margin-left: .5rem; font-size: 11px;
+                  color: var(--pink); background: #fdeef4; border: 1px solid #f6cfe0;
+                  border-radius: 10px; padding: 1px 8px; font-weight: 600; }
 </style>
 {% endblock %}
 

@@ -279,6 +279,47 @@ window.MathJax = {
   }
   .forward-banner button:hover { background: #e36e00; }
 
+  /* Monats-Sprung-Popover */
+  .month-jump { position: relative; display: inline-block; }
+  .month-pop {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.16); padding: 10px; width: 264px;
+  }
+  .month-pop .mp-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .month-pop .mp-title { font-weight: 700; color: var(--blau); font-size: 13px; }
+  .month-pop .mp-nav {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    width: 26px; height: 26px; cursor: pointer; color: var(--blau); font-size: 14px;
+    line-height: 1; padding: 0;
+  }
+  .month-pop .mp-nav:hover { background: var(--blau-hell); }
+  .month-pop table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .month-pop th {
+    font-size: 10px; color: var(--muted); font-weight: 600; padding: 2px 0;
+    text-transform: uppercase;
+  }
+  .month-pop td { padding: 1px; }
+  .month-pop .mp-kw {
+    font-size: 10px; color: var(--muted); text-align: right; padding-right: 4px;
+    width: 22px;
+  }
+  .month-pop .mp-day {
+    width: 100%; border: 0; background: none; font: inherit; font-size: 12px;
+    border-radius: 6px; padding: 4px 0; cursor: pointer; color: var(--text);
+  }
+  .month-pop .mp-day:hover { background: var(--blau-hell); }
+  .month-pop .mp-day.other { color: #bbb; }
+  .month-pop .mp-day.today { outline: 1px solid var(--gruen); font-weight: 700; }
+  .month-pop tr.mp-cur .mp-day { background: #eaf4fb; }
+  .month-pop tr.mp-cur .mp-kw { color: var(--blau); font-weight: 700; }
+  .month-pop .mp-foot {
+    margin-top: 6px; text-align: center; font-size: 11px; color: var(--muted);
+  }
+
   .prev-note-box {
     background: var(--blau-hell); border-radius: 6px; padding: .7rem .9rem;
     font-size: 12px; margin-bottom: 1rem;
@@ -297,6 +338,14 @@ window.MathJax = {
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ prev_week }}">← vorige Woche</a>
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ this_week }}">heute</a>
       <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ next_week }}">nächste Woche →</a>
+      <div class="month-jump">
+        <button type="button" class="btn-sec btn" id="btnMonat"
+                style="padding:5px 10px;font-size:12px"
+                data-ref="{{ grid.monday.isoformat() }}"
+                aria-haspopup="true" aria-expanded="false"
+                title="Monatsübersicht — zu einem Datum springen">📅 Monat</button>
+        <div class="month-pop" id="monthPop" hidden></div>
+      </div>
       <a class="btn btn-sec" style="padding:5px 10px;font-size:12px"
          href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
          target="_blank" rel="noopener"
@@ -1438,5 +1487,114 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     } catch (e) { console.error(e); }
   });
 });
+
+/* ── Monats-Sprung ──────────────────────────────────────────────────────
+ * Reiner Client-Kalender: kein Server-Roundtrip fürs Blättern, erst der
+ * Klick auf einen Tag navigiert zu /timetable?week=<Montag jener Woche>.
+ * So springt man mit zwei Klicks Wochen oder Monate weit. */
+(function () {
+  const btn = document.getElementById('btnMonat');
+  const pop = document.getElementById('monthPop');
+  if (!btn || !pop) return;
+
+  const MON = ['Januar','Februar','März','April','Mai','Juni','Juli','August',
+               'September','Oktober','November','Dezember'];
+  const WD = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+
+  const refIso = btn.dataset.ref || new Date().toISOString().slice(0, 10);
+  const refDate = new Date(refIso + 'T00:00:00');
+  // Angezeigter Monat (1. des Monats der aktuellen Woche)
+  let viewY = refDate.getFullYear();
+  let viewM = refDate.getMonth();
+  let open = false;
+
+  function iso(d) {
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+  function mondayOf(d) {
+    const x = new Date(d);
+    const wd = (x.getDay() + 6) % 7;   // Mo=0 … So=6
+    x.setDate(x.getDate() - wd);
+    return x;
+  }
+  function isoWeek(d) {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dn = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - dn + 3);
+    const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    const fdn = (first.getUTCDay() + 6) % 7;
+    first.setUTCDate(first.getUTCDate() - fdn + 3);
+    return 1 + Math.round((t - first) / (7 * 864e5));
+  }
+  const curMon = mondayOf(refDate);
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  function render() {
+    const first = new Date(viewY, viewM, 1);
+    const start = mondayOf(first);           // Montag vor/auf dem Monatsersten
+    let html = '<div class="mp-head">'
+      + '<button type="button" class="mp-nav" data-mp="prev" aria-label="Vorheriger Monat">‹</button>'
+      + '<span class="mp-title">' + MON[viewM] + ' ' + viewY + '</span>'
+      + '<button type="button" class="mp-nav" data-mp="next" aria-label="Nächster Monat">›</button>'
+      + '</div><table><thead><tr><th></th>';
+    WD.forEach(w => { html += '<th>' + w + '</th>'; });
+    html += '</tr></thead><tbody>';
+
+    const cur = new Date(start);
+    for (let wk = 0; wk < 6; wk++) {
+      const wkMonday = new Date(cur);
+      const inCurWeek = iso(mondayOf(cur)) === iso(curMon);
+      html += '<tr class="' + (inCurWeek ? 'mp-cur' : '') + '">';
+      html += '<td class="mp-kw" title="Kalenderwoche">' + isoWeek(wkMonday) + '</td>';
+      for (let dd = 0; dd < 7; dd++) {
+        const di = iso(cur);
+        const other = cur.getMonth() !== viewM;
+        const today = di === todayIso;
+        html += '<td><button type="button" class="mp-day'
+          + (other ? ' other' : '') + (today ? ' today' : '')
+          + '" data-week="' + iso(mondayOf(cur)) + '">'
+          + cur.getDate() + '</button></td>';
+        cur.setDate(cur.getDate() + 1);
+      }
+      html += '</tr>';
+      if (cur.getMonth() !== viewM && cur > first && wk >= 3) break;
+    }
+    html += '</tbody></table>'
+      + '<div class="mp-foot">Klick auf einen Tag → dessen Woche</div>';
+    pop.innerHTML = html;
+
+    pop.querySelectorAll('[data-mp]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (b.dataset.mp === 'prev') { viewM--; if (viewM < 0) { viewM = 11; viewY--; } }
+        else { viewM++; if (viewM > 11) { viewM = 0; viewY++; } }
+        render();
+      });
+    });
+    pop.querySelectorAll('.mp-day').forEach(b => {
+      b.addEventListener('click', () => {
+        window.location.href = '/timetable?week=' + b.dataset.week;
+      });
+    });
+  }
+
+  function show() {
+    viewY = refDate.getFullYear(); viewM = refDate.getMonth();
+    render();
+    pop.hidden = false; open = true;
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  function hide() {
+    pop.hidden = true; open = false;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); open ? hide() : show(); });
+  document.addEventListener('click', (e) => {
+    if (open && !pop.contains(e.target) && e.target !== btn) hide();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) hide(); });
+})();
 </script>
 {% endblock %}

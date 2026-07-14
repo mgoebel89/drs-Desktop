@@ -400,7 +400,13 @@ class Student(Base):
     vorname: Mapped[str] = mapped_column(String(120), default="")
     email: Mapped[str] = mapped_column(String(255), default="")
     moodle_id: Mapped[str] = mapped_column(String(64), default="")
+    # active=False heißt: ausgetreten (oder ein Moodle-Prüfungsimport). Der
+    # Schüler bleibt in seiner Klasse — nur so bleibt nachvollziehbar, unter
+    # welcher Klasse er in alten Prüfungen geführt wird.
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # "abschluss" | "abgang" | "" — gesetzt beim Austritt
+    austritt_grund: Mapped[str] = mapped_column(String(16), default="")
+    austritt_datum: Mapped[str] = mapped_column(String(10), default="")  # letzter Schultag
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

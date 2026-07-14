@@ -51,11 +51,33 @@
       const email = el('input', { value: s.email, type: 'email' });
       const aktiv = el('input', { type: 'checkbox', checked: s.active });
 
+      // Austritt: Grund + letzter Schultag, nur sichtbar wenn NICHT aktiv.
+      const grund = el('select', {}, [
+        el('option', { value: '' }, '— Grund wählen —'),
+        el('option', { value: 'abschluss' }, 'Abschluss'),
+        el('option', { value: 'abgang' }, 'Abgang'),
+      ]);
+      grund.value = s.austritt_grund || '';
+      const datum = el('input', { type: 'date', value: s.austritt_datum || '' });
+      const austrittBox = el('div', {
+        style: 'margin-top:.6rem;padding:.7rem .8rem;border:1px solid var(--border);'
+          + 'border-radius:8px;background:var(--blau-hell)',
+      }, [
+        feld('Austrittsgrund', grund),
+        feld('Letzter Schultag', datum),
+      ]);
+      function syncAustritt() {
+        austrittBox.style.display = aktiv.checked ? 'none' : 'block';
+      }
+      aktiv.addEventListener('change', syncAustritt);
+      syncAustritt();
+
       const body = el('div', {}, [
         feld('Nachname', nachname),
         feld('Vorname', vorname),
         feld('E-Mail', email),
-        el('label', { class: 'sd-check' }, [aktiv, ' aktiv']),
+        el('label', { class: 'sd-check' }, [aktiv, ' in der Klasse aktiv']),
+        austrittBox,
 
         el('p', { class: 'muted', style: 'margin-top:1rem' }, [
           el('strong', {}, 'Klasse: '), s.klasse || 'noch keiner zugeordnet',
@@ -106,10 +128,16 @@
             label: 'Speichern',
             kind: 'primary',
             onClick: async (close) => {
+              if (!aktiv.checked && !grund.value) {
+                toast('Bitte den Austrittsgrund wählen (Abschluss oder Abgang).');
+                return;
+              }
               try {
                 await postJSON(`/api/schueler/${sid}/save`, {
                   nachname: nachname.value, vorname: vorname.value,
                   email: email.value, active: aktiv.checked,
+                  austritt_grund: aktiv.checked ? '' : grund.value,
+                  austritt_datum: aktiv.checked ? '' : datum.value,
                 });
                 close();
                 location.reload();

@@ -18,6 +18,15 @@ runuser -u drs -- git -C "$APP_DIR" reset --hard "origin/$BRANCH"
 echo "==> Dependencies"
 runuser -u drs -- "$VENV_DIR/bin/pip" install -q --upgrade -r "$APP_DIR/requirements.txt"
 
+# Playwright bringt zu jeder Version einen eigenen Chromium-Build mit. Wird oben
+# playwright hochgezogen, sucht es einen NEUEREN Build als den, der beim Setup
+# installiert wurde — fehlt der, schlägt jeder PDF-Export mit 500 fehl (Arbeits-
+# plan, Bewertungs-PDFs). Deshalb den Browser nach jedem Upgrade abgleichen;
+# der Aufruf ist idempotent und lädt nur, wenn wirklich etwas fehlt.
+echo "==> Playwright-Chromium abgleichen"
+runuser -u drs -- env PLAYWRIGHT_BROWSERS_PATH=/opt/drs/playwright \
+  "$VENV_DIR/bin/playwright" install chromium
+
 echo "==> Datenbank-Migration"
 ( cd "$APP_DIR" && runuser -u drs -- env $(grep -v '^#' "$CFG" | xargs) \
     "$VENV_DIR/bin/alembic" -c alembic.ini upgrade head )

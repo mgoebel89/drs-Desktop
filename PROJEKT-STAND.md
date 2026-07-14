@@ -1,19 +1,61 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-06-09 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-07-15 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
 
 ---
 
+## 0. Kurzüberblick (was sich zuletzt geändert hat)
+
+Die App wurde ab Juni 2026 **verschlankt** und auf zwei Kernbereiche
+fokussiert: **Stundenplan/Kalender + Bewertung**, im **Design der
+Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
+
+- **Rückbau (Phase 1+2):** Lernsituationen, Arbeitsblätter, Wizard, Preview,
+  Obsidian und Lernfelder sind in `app/main.py` **auskommentiert** (Code + DB
+  bleiben liegen, nur nicht mehr eingehängt). Der Reskin läuft im GV-Stil mit
+  Live-Dashboard.
+- **Stundenplan ist jetzt manuell** (kein WebUntis mehr): eigene `tt_*`-Tabellen
+  (Zeitraster, Schuljahr, Ferien, Versionen, Zeilen, Ausnahmen). Der Grid-Dienst
+  `timetable_grid.py` baut formatgleich das Dict, das früher WebUntis lieferte —
+  Template und PDF-Pfad blieben dadurch unverändert. Migration **0025**.
+- **Stammdaten-Hierarchie** Jahrgang → Klasse → Schüler + Lerngruppen
+  (`tt_jahrgaenge`, `tt_schulklassen`, Lerngruppen). Schüler leben jetzt in den
+  Stammdaten; Stundenplan- und Prüfungs-Picker arbeiten mit **Lerngruppen**.
+  Migration **0026**. **Wichtig:** Klasse ≠ Lerngruppe — der `klassen_key`
+  bleibt die Stundenplan-/Prüfungs-Wahrheit (key4-Kompatibilität).
+- **Vikunja-Aufgabenmodul** mit EINEM festen Projekt. Migration **0024**.
+- **Schüler-Austritt** (zuletzt, 2026-07-15): Schüler werden beim Verlassen der
+  Klasse **inaktiv** geschaltet statt gelöscht — Grund (`abschluss`/`abgang`) +
+  letzter Schultag. Sie bleiben in ihrer Klasse, damit alte Prüfungen ihre
+  Zuordnung behalten. Migration **0027**.
+- **Monatsvorschau im Stundenplan** (2026-07-15): Button „📅 Monat" öffnet einen
+  clientseitigen Kalender-Popover zum schnellen Springen zu einem Datum.
+- **PDF-500-Fix** (2026-07-15): `drs-update` gleicht nach jedem pip-Upgrade den
+  Playwright-Chromium ab (`playwright install chromium`), sonst crashen alle
+  PDF-Exporte nach einem Playwright-Update mit Internal Server Error.
+
+**Migrations-Stand: 0027.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
+(Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
+Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
+
+---
+
 ## 1. Was die Software heute ist
 
-Ein vollständiges Lehrer-Werkzeug, das in einem **Proxmox-LXC (CT 500)** unter
-`http://192.168.2.139/` läuft. Multi-User mit Login, Konfigurationstool für
-Aufgabenblätter mit HTML-/PDF-Export für Moodle, WebUntis-Stundenplanansicht
-mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
-**`mgoebel89/drs-Desktop`** (public).
+Ein Lehrer-Werkzeug, das in einem **Proxmox-LXC (CT 500)** unter
+`http://192.168.2.139/` läuft. Multi-User mit Login. Aktiver Fokus:
+**manueller Stundenplan** mit Notizen/Aufgaben/Prüfungen pro Block, externe
+iCal-Kalender, **Bewertungs-Modul**, **Stammdaten** (Jahrgang/Klasse/Schüler/
+Lerngruppen) und **Vikunja-Aufgaben**. Arbeitsplan- und Bewertungs-PDFs via
+Playwright/Chromium. Quellcode auf GitHub: **`mgoebel89/drs-Desktop`** (public).
+
+Die ältere Material-Schiene (Konfigurationstool, Lernsituationen + Wizard,
+Obsidian-Vault, OnlyOffice, SMB-Share) ist im Code vorhanden, aber im Zuge der
+Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ### Vorhandene Module (alle live)
 
@@ -126,52 +168,62 @@ mit Notizen pro Block, externe iCal-Kalender. Quellcode auf GitHub:
 
 ## 3. Aktuell offene Punkte
 
-### Zuletzt fertiggestellt (Bewertung v3, Commit `403da88`)
+### Zuletzt fertiggestellt (2026-07-15)
 
-Das **Bewertungs-Modul** ist über drei Iterationen (v1 → v2 → v3) komplett
-umgebaut. Aktueller Stand:
-- **Wizard-Eingabe** (Overlay): getrennte Wizards für Einzel- und
-  Gruppenbewertung, ein Schüler/Gruppe pro Schritt, Weiter/Zurück +
-  Pfeiltasten, Auto-Save je Schritt, Live-Note in der Übersicht.
-- **Pro Feedbackpunkt `eval_type`**: `punkte` (Zahl), `note`
-  (Schulnote direkt aus dem Notenschlüssel), `stufen` (selbst definierte
-  Stufen mit Punktwert). Plus `scope` (individual/group).
-- **Gewicht** nur beim Typ `note` (Feld erscheint nur dort). Punkte/Stufen
-  poolen über ihre Max-Punkte (= Gesamtpunktzahl → Note). Endnote =
-  gewichteter Prozent-Schnitt über alle Items → Note via Schlüssel.
-  Gewichte werden automatisch normiert. Logik in `_item_weight` /
-  `_item_percent` / `_student_total` (`app/routers/exams.py`).
+- **Schüler-Austritt**: Bearbeiten-Modal eines Schülers hat einen Austritts-
+  Kasten (erscheint, wenn „in der Klasse aktiv" aus ist): Grund
+  (Abschluss/Abgang) + letzter Schultag. Backend `POST /api/schueler/{id}/save`
+  erzwingt bei `active=False` einen Grund (sonst 400) und leert die Felder beim
+  Reaktivieren. In der Klassenliste zeigt eine Pille „Abschluss · TT.MM.JJJJ".
+  Migration **0027**. Dateien: `app/routers/students.py`,
+  `app/static/schueler.js`, `app/templates/students/klasse.html`.
+- **Monatsvorschau Stundenplan**: Button „📅 Monat" in der Wochennavigation,
+  reiner Client-Kalender (Popover mit KW-Spalte, Monatsblättern), Klick auf
+  einen Tag → `/timetable?week=<Montag jener Woche>`. Datei:
+  `app/templates/timetable.html`.
+- **PDF-500 behoben**: `bin/drs-update` ruft nach `pip install --upgrade` jetzt
+  `playwright install chromium` (idempotent). Ursache war ein hochgezogenes
+  `playwright`, dessen passender Chromium-Build fehlte → alle PDF-Exporte 500.
 
-### Direkt zu testen (im Container `drs-update`, dann durchspielen)
+> **Im Container ausrollen:** `sudo drs-update` (zieht bis Migration 0027 und
+> gleicht den Chromium-Build ab). Falls das alte Update-Skript den neuen
+> Playwright-Schritt noch nicht hat, einmalig von Hand:
+> `PLAYWRIGHT_BROWSERS_PATH=/opt/drs/playwright /opt/drs/venv/bin/playwright install chromium`
 
-- **Migrationen 0008–0014** ausrollen. **Achtung**: in der Test-Session
-  wurde bisher nur lokal verifiziert (Migration up/down, App-Import,
-  Jinja-Parse, Scoring-Mathematik). End-to-End im Browser noch offen.
-- **Bewertung v3 Ende-zu-Ende**: Prüfung anlegen → Feedbackpunkte mit
-  gemischten Typen (Punkte/Schulnote/Stufen) + Gewichten → Einzel-Wizard
-  durchklicken → Übersicht zeigt gewichtete Endnote → Export-Tab:
-  Einzel-PDF + ZIP (inkl. `_Zusammenfassung.pdf`).
-- **Gruppen-Wizard**: Teilnehmer Gruppen A/B zuordnen, Gruppen-Feedbackpunkt
-  anlegen, Gruppenwert eintragen → fließt in Endnote der Mitglieder.
-- **Notenschlüssel-Verwaltung** (`/grading-scales`) + **Feedback-Vorlagen**
-  (`/feedback-templates`) prüfen.
-- **OnlyOffice-LXC (CT 501)** über Installer-Pfad anlegen, DOCX-Vorschau prüfen.
+### Bewertungs-Modul (Stand v3, weiterhin aktiv)
+
+Über drei Iterationen (v1 → v2 → v3) umgebaut. Wizard-Eingabe (Overlay),
+`eval_type` je Feedbackpunkt (`punkte`/`note`/`stufen`), `scope`
+(individual/group), gewichteter Prozent-Schnitt → Note via Schlüssel. Logik in
+`_item_weight` / `_item_percent` / `_student_total` (`app/routers/exams.py`).
+Schüler kommen jetzt aus den Stammdaten/Lerngruppen.
+
+### Direkt zu testen (im Container)
+
+- **Arbeitsplan-PDF** nach `drs-update` wieder öffnen (`/timetable` → „📄
+  Arbeitsplan (PDF)") — der 500 sollte weg sein.
+- **Schüler austragen** durchspielen: Modal → aktiv aus → Grund + Datum →
+  speichern; Liste zeigt die Pille; Reaktivieren leert die Felder.
+- **Monatssprung**: „📅 Monat" öffnen, Monat blättern, Tag klicken → richtige
+  Woche.
 
 ### Geplant, noch nicht umgesetzt
 
 1. **Moodle-Notenexport** (Phase B): Endpoint `/exams/{id}/export.csv?format=moodle`
    ist als Platzhalter vorgesehen, noch nicht gebaut. `moodle_id` wird beim
-   Schüler-Import bereits gespeichert. Gradebook-CSV-Format mit Test-Instanz
-   iterieren; Doku in `docs/moodle-integration.md`.
-2. **Worksheet-Anknüpfung im Stundenplan-Panel**: „verknüpfte Aufgabenblätter
-   zu Klasse+Fach" + „Neues Aufgabenblatt für diese Stunde". FK
-   `worksheets.learning_situation_id` ist da, die UI fehlt noch.
-3. **Wizard ↔ Stundenplan-Block**: Button „Wizard für diesen Block öffnen"
-   im Block-Panel, der `lesson_notes.learning_situation_id` setzt.
-4. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`
+   Schüler-Import bereits gespeichert. Doku in `docs/moodle-integration.md`.
+2. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`
    ist im Template vorbereitet, aber noch leer — User-Setting fehlt).
-5. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80).
-6. **Visual-Editor für Worksheet-Vorlagen** (GrapesJS) — niedrige Priorität.
+3. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80).
+4. **Ideen-Backlog** siehe Auto-Memory `ideen-drs-lxc` (Vikunja-Ausbau,
+   Klassen/Lernfelder mit Stundenansatz, Stundenplanänderungs-Formular,
+   Untis-Abgleich, Schüler-Notizen, NocoDB-Backup, lokale Diktierfunktion).
+
+### Ausgeblendet (Verschlankung Phase 1)
+
+Lernsituationen, Arbeitsblätter/Worksheets, Wizard, Preview, Obsidian und
+Lernfelder sind in `app/main.py` auskommentiert. Code + DB-Tabellen bleiben
+liegen; ob sie später endgültig entfernt oder reaktiviert werden, ist offen.
 
 ### Bekannte Limits
 
@@ -251,30 +303,30 @@ Login: **`mgoebel`** (Admin)
 ## 6. Letzte Commits
 
 Alle Stände sind auf GitHub `mgoebel89/drs-Desktop` @ `main` gepusht.
-Aktuellster Commit: **`403da88`**. Migrations-Stand: **0014**.
+Migrations-Stand: **0027**.
 
 | Commit | Was |
 |---|---|
-| `403da88` | fix Bewertung v3: Gewicht nur bei Schulnote, Layout-Überlappung behoben |
-| `450751b` | **Bewertung v3**: Wizard-Eingabe + Item-Typen (Punkte/Note/Stufen) + Gewichtung. Migration 0014 |
-| `15d5671` | Bewertung v2: Multi-Class, Teilnehmer-Auswahl, Gruppen, PDF im DRS-Layout |
-| `22e3dff` | Bewertung v2: Löschen-Fix, Notenskalen-Verwaltung, Feedback-Vorlagen. Migration 0013 |
-| `2cc69f1` | Bewertungs-Modul Phasen 1–5: Schüler, Prüfungen, Stufen-Modus. Migration 0012 |
-| `f72c980` | Arbeitsblatt direkt aus LS-MD ohne Wizard |
-| `da434de` | Burger-Menü mit Drawer + gruppierter Struktur |
-| `fb99498` | Nav-Leiste-Fix (Context-Processor injiziert user) |
-| `7c30b6a` | SyntaxError-Fix in obsidian_writer (502 behoben) |
-| `7614bb0` | LS-Delete + MD-Schema v2 + Aufgaben-Stundenplan. Migration 0011 |
-| `a98c5dd` | Wizard v2: Inhalts-MD im Vault, 9 Material-Typen, Dual-Prompt. Migration 0010 |
-| `747c9f9` | LS + Wizard + SMB + OnlyOffice + Obsidian (Phasen 1–8). Migration 0008/0009 |
+| _(dieser)_ | **Schüler-Austritt** (Grund + letzter Schultag, Migration 0027), **Monatsvorschau** im Stundenplan, **PDF-500-Fix** (drs-update gleicht Chromium ab), Projektstand aktualisiert |
+| `de2058e` | Schüler wandern in die Stammdaten; Stundenplan-/Prüfungs-Picker auf Lerngruppen |
+| `7d1ee48` | Stammdaten: Lerngruppen und Fächer endgültig löschbar, Fächer-Seite auf Karten |
+| `bdad5f1` | Stammdaten mit Kacheln, Assistenten und Detail-Modals |
+| `28cd537` | **Stammdaten** Jahrgang → Klasse → Schüler + Lerngruppen. Migration 0026 |
+| `d430954` | **Manueller Stundenplan** Etappe 1+2 — Stammdaten, Zeitraster, Schuljahr, Ferien. Migration 0025 |
+| `7df82d7` | **Vikunja-Aufgabenmodul** mit EINEM festen Projekt. Migration 0024 |
+| `9e60767` | Reskin Phase 2 — Gemeindeverwaltungs-Stil + Live-Dashboard |
+| `d284bad` | Verschlankung Phase 1 — Lernsituationen/Arbeitsblätter/Wizard ausblenden |
+| `403da88` | (alt) Bewertung v3: Gewicht nur bei Schulnote, Layout-Fix |
+| `450751b` | (alt) Bewertung v3: Wizard-Eingabe + Item-Typen + Gewichtung. Migration 0014 |
 
 **Offline-App** (`Feedbackdatei`, eigenes Repo, Branch `master`, kein Remote):
 letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
-Migration 0014). Bewertung v3 wurde bisher nur lokal verifiziert (Migration
-up/down, App-Import 104 Routen, Jinja-Parse, Scoring-Mathematik) — der
-**Browser-End-to-End-Test steht noch aus** (siehe Abschnitt 3).
+Migration 0027 und gleicht den Playwright-Chromium ab). Die Änderungen vom
+2026-07-15 wurden lokal verifiziert (Migration up/down, App-Import, Jinja-Parse,
+Austritt-Logik live, Monats-Popover + `schueler.js` im Browser) — der
+**Browser-End-to-End-Test im Container steht noch aus** (siehe Abschnitt 3).
 
 ---
 
