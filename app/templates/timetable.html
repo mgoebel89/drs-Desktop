@@ -104,12 +104,13 @@ window.MathJax = {
   .tt-lesson.status-verlegt-hier { background: #eaf3fb; border-left-color: var(--blau);
     border: 1px dashed var(--blau); border-left-width: 4px; }
   .tt-lesson.status-zusatz { background: #f0ecff; border-left-color: #5e3fc0; }
-  /* Vertretung: abgesetzt, aber NICHT durchgestrichen — die Stunde bleibt
-     dokumentierbar, der Stoff wurde ja behandelt. */
-  .tt-lesson.status-vertretung { background: #f2f2f2; border-left-color: #999; opacity: .85; }
+  /* Vertretung: GELB abgesetzt (nicht durchgestrichen — die Stunde bleibt
+     dokumentierbar). Ausfall dagegen ist grau/durchgestrichen (.cancelled),
+     damit man beide auf einen Blick unterscheidet. */
+  .tt-lesson.status-vertretung { background: #fff3cd; border-left-color: var(--gelb); }
   .tt-move-from { font-size: 10px; color: var(--blau); font-weight: 600; }
   .tt-zusatz { font-size: 10px; color: #5e3fc0; font-weight: 600; }
-  .tt-vertretung { font-size: 10px; color: #555; font-weight: 600;
+  .tt-vertretung { font-size: 10px; color: #8a6d00; font-weight: 700;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Freie Tage (Ferien, Feiertag) */

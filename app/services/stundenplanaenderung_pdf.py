@@ -28,10 +28,10 @@ from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import TtException, TtSlot, User
+from app.models import User
+from app.services import timetable_grid
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "forms" / "stundenplanaenderung.pdf"
 
@@ -165,53 +165,48 @@ def _signature_rect() -> tuple[float, float, float, float]:
 
 # ── Datensammlung: Änderungen der Woche ──────────────────────────────────────
 
-def _slot_ordinals(db: Session, user: User) -> dict[str, int]:
-    """{block_start 'HH:MM' → Ordinalzahl 0-basiert} in Rasterreihenfolge."""
-    slots = db.scalars(
-        select(TtSlot).where(TtSlot.user_id == user.id)
-        .order_by(TtSlot.position, TtSlot.start_time)).all()
-    return {s.start_time: i for i, s in enumerate(slots)}
-
-
 def collect_week_changes(db: Session, user: User, monday: date) -> dict:
     """Ausfall/Vertretung der eigenen Stunden dieser Woche.
 
-    Rückgabe: {has_changes, von, bis, eintraege:[{day_idx, block_ord, klasse,
-    vertretung}]}. Verlegung/Zusatz werden bewusst ignoriert.
+    Quelle ist bewusst das **Wochengrid** — also genau das, was auch im
+    Stundenplan angezeigt wird. Dadurch tauchen nur Änderungen an real
+    existierenden Stunden auf: veraltete Ausnahmen (z. B. aus einer früheren
+    Grundstundenplan-Version) oder Vertretungen ohne Basisstunde, die das Grid
+    ohnehin verwirft, kommen nicht ins Formular. Verlegte (verlegt_weg /
+    verlegt_hier) und Zusatzstunden werden ignoriert.
+
+    Rückgabe: {has_changes, von, bis, eintraege:[{day_idx, block_ord, datum,
+    klasse, vertretung}]}.
     """
-    saturday = monday + timedelta(days=5)
-    ordinals = _slot_ordinals(db, user)
-    excs = db.scalars(
-        select(TtException).where(
-            TtException.user_id == user.id,
-            TtException.kind.in_(("ausfall", "vertretung")),
-            TtException.lesson_date >= monday.isoformat(),
-            TtException.lesson_date <= saturday.isoformat(),
-        ).order_by(TtException.lesson_date, TtException.block_start)).all()
+    grid = timetable_grid.get_week_grid(db, user, monday)
+    slots = grid.get("slots") or []
+    ordinals = {s["start"]: i for i, s in enumerate(slots)}
 
     eintraege: list[dict] = []
-    tage_mit_aenderung: set[str] = set()
-    for e in excs:
-        try:
-            d = date.fromisoformat(e.lesson_date)
-        except ValueError:
-            continue
-        day_idx = d.weekday()            # Mo=0 … So=6
+    tage_mit_aenderung: set[date] = set()
+    for (slot_start, day_idx), lessons in (grid.get("cells") or {}).items():
         if day_idx > 5:                  # Sonntag hat keine Spalte
             continue
-        block_ord = ordinals.get(e.block_start)
+        block_ord = ordinals.get(slot_start)
         if block_ord is None or block_ord >= len(BLOCK_ROWS):
             continue                     # Block außerhalb des Formular-Rasters
-        klasse = (e.snap_klassen_display or e.klassen_key or "").strip()
-        if e.kind == "ausfall":
-            vertretung = "entfällt, Klasse informiert"
-        else:
-            vertretung = (e.vertretung_name or "").strip()
-        eintraege.append({"day_idx": day_idx, "block_ord": block_ord,
-                          "datum": d, "klasse": klasse, "vertretung": vertretung})
-        tage_mit_aenderung.add(e.lesson_date)
+        d = monday + timedelta(days=day_idx)
+        for l in lessons:
+            status = l.get("status")
+            if status == "ausfall":
+                vertretung = "entfällt, Klasse informiert"
+            elif status == "vertretung":
+                vertretung = (l.get("vertretung_name") or "").strip()
+            else:
+                continue                 # regulär, verlegt, zusatz → nicht ins Formular
+            klasse = (l.get("klassen_display") or l.get("klassen_key") or "").strip()
+            eintraege.append({"day_idx": day_idx, "block_ord": block_ord,
+                              "datum": d, "klasse": klasse,
+                              "vertretung": vertretung})
+            tage_mit_aenderung.add(d)
 
-    tage = sorted(date.fromisoformat(t) for t in tage_mit_aenderung)
+    eintraege.sort(key=lambda e: (e["day_idx"], e["block_ord"]))
+    tage = sorted(tage_mit_aenderung)
     return {
         "has_changes": bool(eintraege),
         "von": tage[0] if tage else None,
@@ -372,13 +367,15 @@ def _signature_overlay(sig_bytes: bytes):
     pw, ph = float(mb.width), float(mb.height)
     x0, y0, x1, y1 = _signature_rect()
 
-    # Bild in die Zellbreite einpassen, Höhe max. ~26 pt, auf der Linie sitzend.
-    max_w = (x1 - x0) - 6
-    max_h = 26.0
+    # Deutlich sichtbar über der Unterschriftslinie platzieren: bis zur halben
+    # Zeilenbreite breit und bis ~44 pt hoch (Seitenverhältnis bleibt erhalten),
+    # linksbündig, sodass die Unterschrift auf der Linie sitzt.
+    max_w = min((x1 - x0) - 6, 200.0)
+    max_h = 44.0
     scale = min(max_w / iw, max_h / ih)
     w, h = iw * scale, ih * scale
-    x = x0 + 3
-    y = y0 + 1            # knapp über der Linie
+    x = x0 + 4
+    y = y0 - 2            # Grundlinie leicht überlappen, damit sie „aufsitzt"
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(pw, ph))

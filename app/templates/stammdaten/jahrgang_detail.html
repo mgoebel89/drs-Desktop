@@ -10,12 +10,28 @@
 </div>
 
 {% if pool %}
-<div class="flash flash-warn" style="display:block">
-  <strong>{{ pool|length }} Schüler warten auf eine Klasse.</strong>
-  Sie wurden importiert, aber noch keiner Klasse dieses Jahrgangs zugeordnet.
-  <p style="margin:.6rem 0 0">
-    <a class="btn" href="/stammdaten/jahrgaenge/{{ j.id }}/zuordnen">Jetzt zuordnen</a>
+{% set aktiv_pool = pool|selectattr('active')|list %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.5rem;flex-wrap:wrap">
+    <h2 style="margin:0">Schüler im Pool <span class="muted">({{ pool|length }})</span></h2>
+    {% if aktiv_pool %}
+    <a class="btn" href="/stammdaten/jahrgaenge/{{ j.id }}/zuordnen"
+       style="margin-left:auto">Auf Klassen zuordnen</a>
+    {% endif %}
+  </div>
+  <p class="muted" style="margin-bottom:.8rem">
+    Importiert, aber noch keiner Klasse zugeordnet. <strong>Klick auf einen Namen</strong>
+    zum Bearbeiten — dort auch inaktiv setzen (Austritt: Abschluss/Abgang + Datum).
   </p>
+  <div class="pool-chips">
+    {% for s in pool %}
+    <button type="button" class="pool-chip{% if not s.active %} inaktiv{% endif %}"
+            data-schueler="{{ s.id }}">
+      {{ s.nachname }}{% if s.vorname %}, {{ s.vorname }}{% endif %}
+      {% if not s.active %}<span class="muted">· inaktiv</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
 </div>
 {% endif %}
 
@@ -116,6 +132,15 @@
   <p class="muted">Noch keine Lerngruppe.</p>
   {% endif %}
 </div>
+
+<style>
+  .pool-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .pool-chip { font: inherit; font-size: 13px; cursor: pointer;
+    background: var(--blau-hell); color: var(--text); border: 1px solid var(--border);
+    border-radius: 20px; padding: 5px 12px; font-weight: 600; }
+  .pool-chip:hover { background: #d8ebf8; border-color: var(--blau); }
+  .pool-chip.inaktiv { background: #f5f5f5; color: var(--muted); font-weight: 500; }
+</style>
 {% endblock %}
 
 {% block scripts %}
@@ -124,6 +149,10 @@
 <script>
   DRS.mountIcons();
   var JID = {{ j.id }};
+
+  document.querySelectorAll('[data-schueler]').forEach(function (b) {
+    b.addEventListener('click', function () { DRSSchueler.detail(b.dataset.schueler); });
+  });
 
   document.getElementById('btnJahrgangEdit')
     .addEventListener('click', function () { DRSStammdaten.jahrgangModal(JID); });
