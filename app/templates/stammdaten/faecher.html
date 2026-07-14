@@ -1,84 +1,82 @@
 {% extends "base.html" %}
 {% block title %}Fächer{% endblock %}
 {% block content %}
-<div class="card">
-  <h1>Fächer &amp; Lernfelder</h1>
-  <p class="muted">Deine Fächer für den Stundenplan. Der <strong>Schlüssel</strong> ist der technische
-    Name (in Untis oft ein Platzhalter wie <code>BBU_Mt2</code>), an dem deine Stundennotizen hängen —
-    er lässt sich nach dem Anlegen nicht mehr ändern. Der <strong>Anzeigename</strong> ist das, was im
-    Stundenplan steht, also z. B. das echte Lernfeld.</p>
 
-  {% if request.query_params.get('ok') %}
-    <div class="flash flash-ok">✓ {{ request.query_params.get('ok') }} Fächer aus dem Bestand übernommen.</div>
-  {% endif %}
-  {% if request.query_params.get('err') %}
-    <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
-  {% endif %}
+<p class="muted" style="margin-bottom:.3rem"><a href="/stammdaten">← Stammdaten</a></p>
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.4rem;flex-wrap:wrap">
+  <h1 style="margin:0">Fächer &amp; Lernfelder</h1>
+  <button class="btn" type="button" id="btnFachNeu" style="margin-left:auto">+ Neues Fach</button>
+</div>
+<p class="muted" style="margin-bottom:1.2rem">
+  Der Katalog aller Fächer und Lernfelder. Welche davon in einem Jahrgang gelten, legst du im
+  <a href="/stammdaten">Jahrgang</a> fest. Der <strong>Schlüssel</strong> ist der technische Name
+  (in Untis oft ein Platzhalter wie <code>BBU_Mt2</code>) — er lässt sich nach dem Anlegen nicht mehr
+  ändern, weil die Stundennotizen daran hängen.
+</p>
 
-  {% if suggest %}
-  <div class="flash flash-warn" style="display:block">
-    <strong>Aus deinem Bestand gefunden:</strong> Diese Fach-Schlüssel kommen in deinen Notizen vor,
-    sind aber noch keine Stammdaten. Übernimm sie unverändert — dann bleiben deine bisherigen
-    Stundennotizen an den Stunden hängen. Vorhandene Reihen-Bezeichnungen werden als Anzeigename
-    übernommen.
-    <ul style="margin:.5rem 0 .6rem 1.1rem">
-      {% for s in suggest %}
-      <li><code>{{ s.key }}</code>
-        {% if s.vorschlag_name != s.key %}→ <strong>{{ s.vorschlag_name }}</strong>{% endif %}
-        <span class="muted">— {{ s.count }}× in Notizen</span></li>
-      {% endfor %}
-    </ul>
-    <form method="post" action="/stammdaten/faecher/import" style="margin:0">
-      <button class="btn" type="submit">Alle {{ suggest|length }} übernehmen</button>
-    </form>
-  </div>
-  {% endif %}
+{% if request.query_params.get('ok') %}
+  <div class="flash flash-ok">✓ {{ request.query_params.get('ok').replace('+', ' ') }} Fächer aus dem Bestand übernommen.</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+  <div class="flash flash-err">{{ request.query_params.get('err').replace('+', ' ') }}</div>
+{% endif %}
 
-  <h2>Fach hinzufügen</h2>
-  <form method="post" action="/stammdaten/faecher" class="sd-form">
-    <div>
-      <label>Schlüssel <span class="muted">(wie in Untis)</span></label>
-      <input name="subjects_key" required placeholder="BBU_Mt2">
-    </div>
-    <div>
-      <label>Anzeigename</label>
-      <input name="display_name" placeholder="LF3 Stromkreise analysieren">
-    </div>
-    <div>
-      <label>Kürzel (optional)</label>
-      <input name="kuerzel" placeholder="LF3">
-    </div>
-    <div><button class="btn" type="submit">+ Hinzufügen</button></div>
-  </form>
-
-  <h2 style="margin-top:1.6rem">Angelegte Fächer</h2>
-  {% if faecher %}
-  <table>
-    <thead><tr><th>Schlüssel</th><th>Anzeigename</th><th>Kürzel</th><th>Aktiv</th><th></th></tr></thead>
-    <tbody>
-    {% for f in faecher %}
-    <tr>
-      <td><code style="font-size:11px">{{ f.subjects_key }}</code></td>
-      <td colspan="3">
-        <form method="post" action="/stammdaten/faecher/{{ f.id }}" class="sd-inline">
-          <input name="display_name" value="{{ f.display_name }}">
-          <input name="kuerzel" value="{{ f.kuerzel }}" style="max-width:110px" placeholder="Kürzel">
-          <label class="sd-check"><input type="checkbox" name="active" value="1" {% if f.active %}checked{% endif %}> aktiv</label>
-          <button class="btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Speichern</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="/stammdaten/faecher/{{ f.id }}/delete"
-              onsubmit="return confirm('Fach „{{ f.display_name }}“ löschen? Wird es im Stundenplan benutzt, wird es nur stillgelegt.');">
-          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
-        </form>
-      </td>
-    </tr>
+{% if suggest %}
+<div class="flash flash-warn" style="display:block">
+  <strong>Aus deinem Bestand gefunden:</strong> Diese Fach-Schlüssel kommen in deinen Notizen vor,
+  sind aber noch keine Stammdaten. Übernimm sie unverändert — dann bleiben deine bisherigen
+  Stundennotizen an den Stunden hängen. Vorhandene Reihen-Bezeichnungen werden als Anzeigename
+  übernommen.
+  <ul style="margin:.5rem 0 .6rem 1.1rem">
+    {% for s in suggest %}
+    <li><code>{{ s.key }}</code>
+      {% if s.vorschlag_name != s.key %}→ <strong>{{ s.vorschlag_name }}</strong>{% endif %}
+      <span class="muted">— {{ s.count }}× in Notizen</span></li>
     {% endfor %}
-    </tbody>
-  </table>
+  </ul>
+  <form method="post" action="/stammdaten/faecher/import" style="margin:0">
+    <button class="btn" type="submit">Alle {{ suggest|length }} übernehmen</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  {% if faecher %}
+  <div class="card-grid">
+    {% for f in faecher %}
+    <button type="button" class="obj-card{% if not f.active %} inaktiv{% endif %}"
+            data-katalogfach="{{ f.id }}">
+      <div class="obj-card-head">
+        <span data-icon="fach"></span>
+        <span class="obj-card-title">{{ f.display_name or f.subjects_key }}</span>
+      </div>
+      <div class="obj-card-meta">
+        {% set n = verwendet.get(f.id, 0) %}
+        {% if n %}in {{ n }} {{ 'Jahrgang' if n == 1 else 'Jahrgängen' }}
+        {% else %}keinem Jahrgang zugeordnet{% endif %}
+        {% if not f.active %} · stillgelegt{% endif %}
+      </div>
+      <div class="key">{{ f.subjects_key }}</div>
+    </button>
+    {% endfor %}
+  </div>
+  <p class="muted" style="margin-top:.9rem">Klick auf ein Fach öffnet es zum Bearbeiten oder Löschen.</p>
   {% else %}
-  <p class="muted">Noch keine Fächer angelegt.</p>
+  <p class="muted">Noch kein Fach angelegt.</p>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/stammdaten.js?v={{ static_version() }}"></script>
+<script>
+  DRS.mountIcons();
+  document.getElementById('btnFachNeu')
+    .addEventListener('click', DRSStammdaten.katalogFachAnlegen);
+  document.querySelectorAll('[data-katalogfach]').forEach(function (c) {
+    c.addEventListener('click', function () {
+      DRSStammdaten.katalogFachModal(c.dataset.katalogfach);
+    });
+  });
+</script>
 {% endblock %}

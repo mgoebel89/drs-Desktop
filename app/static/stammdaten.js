@@ -380,6 +380,94 @@
     });
   }
 
+  // ---------- Fächer-Katalog ----------
+
+  function katalogFachAnlegen() {
+    const name = el('input', { placeholder: 'LF7 Steuerungen realisieren', autofocus: true });
+    const key = el('input', { placeholder: 'LF7' });
+    const kuerzel = el('input', { placeholder: 'LF7' });
+    modal({
+      title: 'Neues Fach',
+      body: el('div', {}, [
+        feld('Name', name, 'So steht es im Stundenplan.'),
+        feld('Kürzel (optional)', kuerzel),
+        erweitert(feld('Schlüssel', key,
+          'Der technische Name aus Untis (oft ein Platzhalter wie BBU_Mt2). Leer lassen = der '
+          + 'Name wird verwendet. Später nicht mehr änderbar — an ihm hängen die Stundennotizen.')),
+      ]),
+      actions: [
+        { label: 'Abbrechen', kind: 'sec', onClick: (c) => c() },
+        {
+          label: 'Anlegen',
+          kind: 'primary',
+          onClick: async (close) => {
+            try {
+              await postJSON('/api/stammdaten/fach', {
+                display_name: name.value, subjects_key: key.value, kuerzel: kuerzel.value,
+              });
+              close();
+              location.reload();
+            } catch (e) { toast(e.message); }
+          },
+        },
+      ],
+    });
+  }
+
+  function katalogFachModal(fid) {
+    getJSON(`/api/stammdaten/fach/${fid}`).then((f) => {
+      const name = el('input', { value: f.display_name });
+      const kuerzel = el('input', { value: f.kuerzel });
+      const aktiv = el('input', { type: 'checkbox', checked: f.active });
+      modal({
+        title: f.display_name || f.subjects_key,
+        body: el('div', {}, [
+          feld('Name', name),
+          feld('Kürzel', kuerzel),
+          el('label', { class: 'sd-check' }, [aktiv, ' aktiv']),
+          el('p', { class: 'muted', style: 'margin-top:.8rem' }, [
+            'Schlüssel: ', el('code', {}, f.subjects_key),
+            ' — unveränderlich, denn daran hängen die Stundennotizen.',
+          ]),
+        ]),
+        actions: [
+          {
+            label: 'Löschen',
+            kind: 'danger',
+            onClick: (close) => {
+              close();
+              loeschenBestaetigen({
+                titel: `Fach „${f.display_name || f.subjects_key}“ löschen?`,
+                fakten: f.impact,
+                url: `/api/stammdaten/fach/${fid}/delete`,
+                warnung: 'Endgültig löschen entfernt das Fach aus allen Jahrgängen und alle '
+                  + 'Stunden im Grundstundenplan, die es benutzen. Deine Stundennotizen bleiben '
+                  + `erhalten — sie hängen am Schlüssel „${f.subjects_key}“, nicht am `
+                  + 'Katalogeintrag.',
+                stilllegen: () => postJSON(`/api/stammdaten/fach/${fid}/save`, {
+                  display_name: f.display_name, kuerzel: f.kuerzel, active: false,
+                }),
+              });
+            },
+          },
+          {
+            label: 'Speichern',
+            kind: 'primary',
+            onClick: async (close) => {
+              try {
+                await postJSON(`/api/stammdaten/fach/${fid}/save`, {
+                  display_name: name.value, kuerzel: kuerzel.value, active: aktiv.checked,
+                });
+                close();
+                location.reload();
+              } catch (e) { toast(e.message); }
+            },
+          },
+        ],
+      });
+    }).catch((e) => toast(e.message));
+  }
+
   // ---------- Assistent: Lerngruppe bilden ----------
 
   // Der Katalog wird hier VOR dem Öffnen geladen — anders als beim Jahrgangs-
@@ -737,6 +825,10 @@
                 titel: `Lerngruppe „${g.display_name || g.klassen_key}“ löschen?`,
                 fakten: g.impact,
                 url: `/api/stammdaten/lerngruppe/${lgid}/delete`,
+                warnung: 'Endgültig löschen entfernt die Lerngruppe samt ihrer Stunden im '
+                  + 'Grundstundenplan. Deine Stundennotizen bleiben erhalten — sie hängen am '
+                  + `Schlüssel „${g.klassen_key}“, nicht an der Gruppe. Legst du später wieder `
+                  + 'eine Gruppe mit genau diesem Schlüssel an, sind sie sofort wieder da.',
                 stilllegen: () => postJSON(`/api/stammdaten/lerngruppe/${lgid}/save`, {
                   display_name: g.display_name, kuerzel: g.kuerzel, active: false,
                 }),
@@ -761,10 +853,10 @@
     }).catch((e) => toast(e.message));
   }
 
-  /* Löschen ist hier fast immer die falsche Antwort: Am Schlüssel einer Lerngruppe
-   * hängen die Stundennotizen, an einer Klasse die Schüler. Deshalb zeigt der
-   * Dialog erst, was dranhängt, und bietet das Stilllegen gleichwertig an. */
-  function loeschenBestaetigen({ titel, fakten, url, stilllegen }) {
+  /* Zeigt vor dem Löschen, was am Objekt hängt, und bietet Stilllegen als
+   * gleichwertigen Ausweg an. `warnung` sagt konkret, was das endgültige Löschen
+   * mitreißt — beim Lerngruppen- und Fach-Katalog ist das nicht offensichtlich. */
+  function loeschenBestaetigen({ titel, fakten, url, stilllegen, warnung }) {
     const haengt = (fakten || []).some((f) => f.wert);
     confirmDanger({
       title: titel,
@@ -772,9 +864,9 @@
         ? 'Daran hängt noch etwas:'
         : 'Daran hängt nichts mehr — Löschen ist gefahrlos.',
       facts: (fakten || []).filter((f) => f.wert),
+      warnung: haengt ? warnung : null,
       hinweis: haengt
-        ? 'Stilllegen blendet den Eintrag überall aus, lässt aber alles Bestehende in Ruhe. '
-          + 'Das ist in fast allen Fällen der richtige Weg.'
+        ? 'Stilllegen blendet den Eintrag überall aus, lässt aber alles Bestehende in Ruhe.'
         : null,
       safe: 'Stilllegen',
       onSafe: async (close) => {
@@ -795,5 +887,6 @@
     jahrgangWizard, lerngruppeWizard,
     jahrgangModal, klasseModal, lerngruppeModal, fachModal,
     klasseAnlegen, fachZuordnen, klassenVorschlag,
+    katalogFachModal, katalogFachAnlegen,
   };
 })();

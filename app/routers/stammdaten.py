@@ -33,7 +33,7 @@ from app.auth import audit, require_user
 from app.db import get_db
 from app.models import (Exam, LessonNote, LessonSeriesOverride, Student,
                         TtFach, TtJahrgang, TtJahrgangFach, TtKlasse,
-                        TtLerngruppeKlasse, TtRow, TtSchulklasse, User)
+                        TtLerngruppeKlasse, TtSchulklasse, User)
 from app.services.lerngruppen import klassen_der_lerngruppe
 from app.templating import templates
 
@@ -413,34 +413,6 @@ def faecher_list(
     })
 
 
-@router.post("/stammdaten/faecher")
-def faecher_add(
-    request: Request,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-    subjects_key: str = Form(...),
-    display_name: str = Form(""),
-    kuerzel: str = Form(""),
-):
-    key = subjects_key.strip()[:255]
-    if not key:
-        raise HTTPException(400, "Schlüssel fehlt.")
-    exists = db.scalar(select(TtFach.id).where(
-        TtFach.user_id == user.id, TtFach.subjects_key == key))
-    if exists:
-        return _redir("/stammdaten/faecher", err="Dieses Fach gibt es schon")
-    pos = db.scalar(select(func.count()).select_from(TtFach)
-                    .where(TtFach.user_id == user.id)) or 0
-    db.add(TtFach(
-        user_id=user.id, subjects_key=key,
-        display_name=(display_name.strip() or key)[:200],
-        kuerzel=kuerzel.strip()[:40], position=pos,
-    ))
-    audit(db, "tt_fach_added", actor=user, target=key, request=request)
-    db.commit()
-    return _redir("/stammdaten/faecher")
-
-
 @router.post("/stammdaten/faecher/import")
 def faecher_import(
     request: Request,
@@ -459,46 +431,3 @@ def faecher_import(
     return _redir("/stammdaten/faecher", ok=str(len(offen)))
 
 
-@router.post("/stammdaten/faecher/{fid}")
-def faecher_edit(
-    fid: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-    display_name: str = Form(""),
-    kuerzel: str = Form(""),
-    active: str = Form(""),
-):
-    f = db.get(TtFach, fid)
-    if not f or f.user_id != user.id:
-        raise HTTPException(404)
-    f.display_name = (display_name.strip() or f.subjects_key)[:200]
-    f.kuerzel = kuerzel.strip()[:40]
-    f.active = active == "1"
-    db.commit()
-    return _redir("/stammdaten/faecher")
-
-
-@router.post("/stammdaten/faecher/{fid}/delete")
-def faecher_delete(
-    request: Request,
-    fid: int,
-    user: Annotated[User, Depends(require_user)],
-    db: Annotated[Session, Depends(get_db)],
-):
-    f = db.get(TtFach, fid)
-    if not f or f.user_id != user.id:
-        raise HTTPException(404)
-    benutzt = db.scalar(select(func.count()).select_from(TtRow)
-                        .where(TtRow.fach_id == f.id))
-    if benutzt:
-        f.active = False
-        db.commit()
-        return _redir("/stammdaten/faecher",
-                      err="Fach wird im Stundenplan benutzt und wurde nur stillgelegt")
-    db.execute(TtJahrgangFach.__table__.delete()
-               .where(TtJahrgangFach.fach_id == f.id))
-    key = f.subjects_key
-    db.delete(f)
-    audit(db, "tt_fach_deleted", actor=user, target=key, request=request)
-    db.commit()
-    return _redir("/stammdaten/faecher")

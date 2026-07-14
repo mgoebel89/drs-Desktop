@@ -603,23 +603,136 @@ def lerngruppe_delete(
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    """Löscht die Lerngruppe endgültig — nach der Warnung im Dialog.
+
+    Mit weg müssen die Zeilen im Grundstundenplan (sie zeigen per FK auf die
+    Gruppe und wären sonst Leichen) und die Zuordnungen; Prüfungen verlieren nur
+    ihren Verweis.
+
+    Die STUNDENNOTIZEN bleiben absichtlich stehen: Sie hängen nicht an der Gruppe,
+    sondern am `klassen_key` (key4). Legst du später eine Gruppe mit demselben
+    Schlüssel neu an, sind sie wieder da. Sie hier mitzulöschen wäre der einzige
+    unwiederbringliche Schritt in dieser App — das macht kein Löschdialog wett.
+    SQLite erzwingt keine FKs (siehe app/db.py), also räumen wir selbst auf.
+    """
     lg = _lerngruppe(db, user, lgid)
-    notizen = db.scalar(select(func.count()).select_from(LessonNote).where(
-        LessonNote.user_id == user.id,
-        LessonNote.klassen_key == lg.klassen_key)) or 0
-    stunden = db.scalar(select(func.count()).select_from(TtRow)
-                        .where(TtRow.klasse_id == lg.id)) or 0
-    if notizen or stunden:
-        raise HTTPException(
-            400, "An dieser Lerngruppe hängen Stundennotizen oder Stunden im "
-                 "Grundplan. Leg sie still statt sie zu löschen — sonst verlierst "
-                 "du den Schlüssel, an dem die Notizen hängen.")
     key = lg.klassen_key
+
+    db.execute(TtRow.__table__.delete().where(TtRow.klasse_id == lg.id))
     db.execute(TtLerngruppeKlasse.__table__.delete()
                .where(TtLerngruppeKlasse.lerngruppe_id == lg.id))
     db.execute(TtLerngruppeStudent.__table__.delete()
                .where(TtLerngruppeStudent.lerngruppe_id == lg.id))
+    db.execute(Exam.__table__.update()
+               .where(Exam.lerngruppe_id == lg.id).values(lerngruppe_id=None))
     db.delete(lg)
     audit(db, "tt_lerngruppe_deleted", actor=user, target=key, request=request)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Fächer-Katalog (Karten + Modal) ──────────────────────────────────────
+
+class FachSave(BaseModel):
+    display_name: str
+    kuerzel: str = ""
+    active: bool = True
+
+
+class FachNeu(BaseModel):
+    subjects_key: str = ""
+    display_name: str
+    kuerzel: str = ""
+
+
+def _fach(db: Session, user: User, fid: int) -> TtFach:
+    f = db.get(TtFach, fid)
+    if not f or f.user_id != user.id:
+        raise HTTPException(404, "Fach nicht gefunden.")
+    return f
+
+
+@router.get("/fach/{fid}")
+def fach_get(
+    fid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    f = _fach(db, user, fid)
+    jahrgaenge = db.scalar(select(func.count()).select_from(TtJahrgangFach)
+                           .where(TtJahrgangFach.fach_id == f.id)) or 0
+    stunden = db.scalar(select(func.count()).select_from(TtRow)
+                        .where(TtRow.fach_id == f.id)) or 0
+    notizen = db.scalar(select(func.count()).select_from(LessonNote).where(
+        LessonNote.user_id == user.id,
+        LessonNote.subjects_key == f.subjects_key)) or 0
+    return {
+        "id": f.id, "subjects_key": f.subjects_key,
+        "display_name": f.display_name, "kuerzel": f.kuerzel, "active": f.active,
+        "impact": [_fakt(jahrgaenge, "Jahrgang", "Jahrgänge"),
+                   _fakt(stunden, "Stunde im Grundplan", "Stunden im Grundplan"),
+                   _fakt(notizen, "Stundennotiz", "Stundennotizen")],
+    }
+
+
+@router.post("/fach")
+def fach_create(
+    request: Request,
+    payload: FachNeu,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    name = payload.display_name.strip()[:200]
+    key = (payload.subjects_key.strip() or name)[:255]
+    if not name:
+        raise HTTPException(400, "Das Fach braucht einen Namen.")
+    if db.scalar(select(TtFach.id).where(TtFach.user_id == user.id,
+                                         TtFach.subjects_key == key)):
+        raise HTTPException(400, f"Den Schlüssel „{key}“ gibt es schon.")
+    pos = db.scalar(select(func.count()).select_from(TtFach)
+                    .where(TtFach.user_id == user.id)) or 0
+    f = TtFach(user_id=user.id, subjects_key=key, display_name=name,
+               kuerzel=payload.kuerzel.strip()[:40], position=pos)
+    db.add(f)
+    audit(db, "tt_fach_added", actor=user, target=key, request=request)
+    db.commit()
+    return {"id": f.id}
+
+
+@router.post("/fach/{fid}/save")
+def fach_save(
+    fid: int,
+    payload: FachSave,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    f = _fach(db, user, fid)
+    # subjects_key bleibt unangetastet — er ist Teil des key4.
+    f.display_name = (payload.display_name.strip() or f.subjects_key)[:200]
+    f.kuerzel = payload.kuerzel.strip()[:40]
+    f.active = payload.active
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/fach/{fid}/delete")
+def fach_delete(
+    request: Request,
+    fid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Löscht das Fach endgültig — nach der Warnung im Dialog.
+
+    Mit weg: die Zuordnungen zu Jahrgängen und die Zeilen im Grundstundenplan,
+    die dieses Fach benutzen. Die Stundennotizen bleiben stehen (sie hängen am
+    `subjects_key`, nicht am Katalogeintrag) — siehe lerngruppe_delete."""
+    f = _fach(db, user, fid)
+    key = f.subjects_key
+    db.execute(TtJahrgangFach.__table__.delete()
+               .where(TtJahrgangFach.fach_id == f.id))
+    db.execute(TtRow.__table__.delete().where(TtRow.fach_id == f.id))
+    db.delete(f)
+    audit(db, "tt_fach_deleted", actor=user, target=key, request=request)
     db.commit()
     return {"ok": True}

@@ -153,6 +153,11 @@
         ? el('ul', { class: 'drs-facts' }, opts.facts.map(f =>
             el('li', {}, [el('strong', {}, String(f.wert)), ' ' + f.label])))
         : null,
+      // Was das endgültige Löschen mitreißt — steht bewusst als Warnbox da,
+      // nicht als grauer Kleintext.
+      opts.warnung
+        ? el('p', { class: 'flash flash-warn', style: 'display:block' }, opts.warnung)
+        : null,
       opts.hinweis ? el('p', { class: 'muted' }, opts.hinweis) : null,
     ]);
     const actions = [];
