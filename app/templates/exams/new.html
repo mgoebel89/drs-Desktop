@@ -17,25 +17,29 @@
       <input name="datum" type="date" value="{{ today }}">
     </div>
     <div style="grid-column:1/3">
-      <label>Klasse(n) — Mehrfachauswahl</label>
-      {% if klassen %}
-      <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.3rem">
-        {% for k in klassen %}
-        <label style="font-weight:normal;display:flex;align-items:center;gap:.35rem;
-                      padding:.3rem .6rem;border:1px solid #ddd;border-radius:6px;cursor:pointer">
-          <input type="checkbox" name="klassen" value="{{ k }}"
-                 {% if prefill_ls and k == prefill_ls.klassen_key %}checked{% endif %}>
-          {{ k }}
+      <label>Lerngruppe(n) — Mehrfachauswahl</label>
+      {% if gruppen %}
+      <div class="chip-row" style="margin-top:.3rem">
+        {% for g in gruppen %}
+        <label class="sd-check" style="border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+          <input type="checkbox" name="lerngruppe_ids" value="{{ g.id }}">
+          {{ g.name }}
+          <span class="muted">
+            {% if g.art == 'kombi' %}zusammengelegt · {% elif g.art == 'gruppe' %}Teilgruppe · {% endif %}
+            {{ g.anzahl }} Schüler
+          </span>
         </label>
         {% endfor %}
       </div>
       <p class="muted" style="font-size:11px;margin-top:.3rem">
-        Alle Schüler der gewählten Klassen werden als Teilnehmer vorausgewählt
-        (im nächsten Schritt einzeln abwählbar).
+        Alle Schüler der gewählten Lerngruppen werden als Teilnehmer vorausgewählt
+        (im nächsten Schritt einzeln abwählbar). Bei einer Zusammenlegung sind das die
+        Schüler aller beteiligten Klassen, bei einer Teilgruppe nur deren Mitglieder.
       </p>
       {% else %}
       <p class="muted" style="margin-top:.3rem">
-        Noch keine Klassen mit Schülern. Erst <a href="/students">Schüler anlegen</a>.
+        Noch keine Lerngruppen. Erst in den <a href="/stammdaten">Stammdaten</a> einen Jahrgang
+        mit Klassen anlegen.
       </p>
       {% endif %}
     </div>

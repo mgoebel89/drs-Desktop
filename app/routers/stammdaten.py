@@ -194,6 +194,13 @@ def stammdaten_start(
     offen = db.scalar(select(func.count()).select_from(TtKlasse).where(
         TtKlasse.user_id == user.id, TtKlasse.jahrgang_id.is_(None))) or 0
 
+    schueler_gesamt = db.scalar(select(func.count()).select_from(Student).where(
+        Student.owner_user_id == user.id, Student.active.is_(True))) or 0
+    # Importiert, aber noch keiner Klasse zugeordnet — wartet auf die Wisch-Zuordnung.
+    pool_gesamt = db.scalar(select(func.count()).select_from(Student).where(
+        Student.owner_user_id == user.id, Student.active.is_(True),
+        Student.schulklasse_id.is_(None))) or 0
+
     return templates.TemplateResponse(request, "stammdaten/index.html", {
         "jahrgaenge": jahrgaenge, "zahlen": zahlen,
         "alle": alle == "1", "inaktiv_count": inaktiv,
@@ -203,6 +210,7 @@ def stammdaten_start(
             "schueler": sum(z["schueler"] for z in zahlen.values()),
             "gruppen": gruppen_gesamt, "kombis": kombis,
             "faecher": faecher_gesamt, "offen": offen,
+            "schueler_gesamt": schueler_gesamt, "pool": pool_gesamt,
         },
     })
 

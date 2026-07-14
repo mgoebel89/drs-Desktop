@@ -21,6 +21,16 @@
   </div>
 
   <div class="tile">
+    <div class="tile-head"><span data-icon="schueler"></span><span class="tile-title">Schüler</span></div>
+    <div class="tile-zahl">{{ summe.schueler_gesamt }}</div>
+    <div class="tile-sub">
+      {% if summe.pool %}<span style="color:var(--pink)">{{ summe.pool }} noch ohne Klasse</span>
+      {% else %}alle einer Klasse zugeordnet{% endif %}
+    </div>
+    <a class="btn-sec" href="/stammdaten/schueler">Suchen</a>
+  </div>
+
+  <div class="tile">
     <div class="tile-head"><span data-icon="lerngruppe"></span><span class="tile-title">Lerngruppen</span></div>
     <div class="tile-zahl">{{ summe.gruppen }}</div>
     <div class="tile-sub">

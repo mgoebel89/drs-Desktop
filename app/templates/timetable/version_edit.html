@@ -64,14 +64,14 @@
             <form method="post" action="/timetable/settings/versions/{{ version.id }}/rows">
               <input type="hidden" name="weekday" value="{{ d_idx }}">
               <input type="hidden" name="block_start" value="{{ sl.start }}">
-              <select name="klasse_id" required>
-                <option value="">Klasse …</option>
-                {% for k in klassen %}<option value="{{ k.id }}">{{ k.display_name }}</option>{% endfor %}
+              <select name="klasse_id" class="ve-klasse" required>
+                <option value="">Lerngruppe …</option>
+                {% for k in klassen %}<option value="{{ k.id }}">{{ k.display_name or k.klassen_key }}</option>{% endfor %}
               </select>
-              <select name="fach_id" required>
-                <option value="">Fach …</option>
-                {% for f in faecher %}<option value="{{ f.id }}">{{ f.display_name }}</option>{% endfor %}
+              <select name="fach_id" class="ve-fach" required>
+                <option value="">erst Lerngruppe wählen …</option>
               </select>
+              <span class="ve-hinweis muted"></span>
               <input name="raum" placeholder="Raum">
               <select name="rhythm">
                 <option value="all">jede Woche</option>
@@ -90,4 +90,52 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Das Fach-Dropdown folgt der gewählten Lerngruppe: angeboten werden nur die
+   Lernfelder ihres Jahrgangs. Hängt die Gruppe an keinem Jahrgang oder hat der
+   Jahrgang noch keine Lernfelder, gilt der volle Katalog — sonst könnte man
+   nichts eintragen. Der Hinweis daneben sagt, welcher Fall gerade gilt. */
+(function () {
+  var FAECHER = [
+    {% for f in faecher %}{ id: {{ f.id }}, name: {{ (f.display_name or f.subjects_key)|tojson }} }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+  var JG_FAECHER = {{ jg_faecher|tojson }};
+  var KLASSE_JG = {{ klasse_jahrgang|tojson }};
+
+  function fuelle(form) {
+    var kSel = form.querySelector('.ve-klasse');
+    var fSel = form.querySelector('.ve-fach');
+    var hint = form.querySelector('.ve-hinweis');
+    var kid = kSel.value;
+    if (!kid) {
+      fSel.innerHTML = '<option value="">erst Lerngruppe wählen …</option>';
+      hint.textContent = '';
+      return;
+    }
+    var jg = KLASSE_JG[kid];
+    var erlaubt = jg ? (JG_FAECHER[jg] || []) : [];
+    var liste = erlaubt.length
+      ? FAECHER.filter(function (f) { return erlaubt.indexOf(f.id) !== -1; })
+      : FAECHER;
+
+    fSel.innerHTML = '<option value="">Fach …</option>' + liste.map(function (f) {
+      return '<option value="' + f.id + '">' + f.name + '</option>';
+    }).join('');
+    hint.textContent = erlaubt.length
+      ? ''
+      : 'ganzer Katalog — dieser Lerngruppe fehlen die Lernfelder ihres Jahrgangs';
+  }
+
+  document.querySelectorAll('.ve-add form').forEach(function (form) {
+    var kSel = form.querySelector('.ve-klasse');
+    if (!kSel) return;
+    kSel.addEventListener('change', function () { fuelle(form); });
+    fuelle(form);
+  });
+})();
+</script>
 {% endblock %}

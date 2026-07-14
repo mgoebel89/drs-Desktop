@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Schüler zuordnen{% endblock %}
+{% block content %}
+
+<p class="muted" style="margin-bottom:.3rem">
+  <a href="/stammdaten">Stammdaten</a> ›
+  <a href="/stammdaten/jahrgaenge/{{ j.id }}">{{ j.name }}</a>
+</p>
+<h1 style="margin-bottom:.2rem">Schüler zuordnen</h1>
+<p class="muted" style="margin-bottom:1.2rem">
+  Wisch die Karte nach links oder rechts — oder tippe auf eine Klasse. Jede Zuordnung wird
+  <strong>sofort gespeichert</strong>, du kannst also jederzeit aufhören und später weitermachen.
+</p>
+
+{% if not klassen %}
+  <div class="flash flash-err">Dieser Jahrgang hat noch keine Klassen.
+    <a href="/stammdaten/jahrgaenge/{{ j.id }}">Erst eine Klasse anlegen.</a></div>
+{% elif not pool %}
+  <div class="card">
+    <p><strong>Alle Schüler sind zugeordnet.</strong></p>
+    <p class="muted">Es wartet niemand mehr im Pool dieses Jahrgangs.</p>
+    <p style="margin-top:.8rem">
+      <a class="btn" href="/stammdaten/jahrgaenge/{{ j.id }}">Zurück zum Jahrgang</a>
+    </p>
+  </div>
+{% else %}
+
+<div class="zu-wrap">
+  <div class="zu-stapel" id="stapel"></div>
+
+  <div class="zu-ziele" id="ziele">
+    {% for k in klassen %}
+    <button type="button" class="btn-sec zu-ziel" data-klasse="{{ k.id }}">{{ k.name }}</button>
+    {% endfor %}
+  </div>
+
+  <div class="zu-foot">
+    <button class="btn-sec" type="button" id="btnUndo" disabled>↩ Rückgängig</button>
+    <span class="muted" id="zuStatus"></span>
+    <a class="btn-sec" href="/stammdaten/jahrgaenge/{{ j.id }}">Fertig</a>
+  </div>
+</div>
+
+<style>
+  .zu-wrap { max-width: 460px; margin: 0 auto; }
+  .zu-stapel { position: relative; height: 230px; margin-bottom: 1.2rem; }
+  .zu-karte {
+    position: absolute; inset: 0; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow); padding: 24px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; text-align: center; cursor: grab; touch-action: none; user-select: none;
+  }
+  .zu-karte.weg { transition: transform .25s ease, opacity .25s ease; opacity: 0; }
+  .zu-name { font-size: 22px; font-weight: 600; }
+  .zu-rest { color: var(--muted); font-size: 13px; }
+  .zu-marke {
+    position: absolute; top: 16px; font-size: 13px; font-weight: 600;
+    padding: 5px 11px; border-radius: 8px; opacity: 0; pointer-events: none;
+    background: var(--blau-hell); color: var(--blau-dunkel);
+  }
+  .zu-marke.links { left: 16px; }
+  .zu-marke.rechts { right: 16px; }
+  .zu-ziele { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+  .zu-foot { display: flex; align-items: center; gap: .7rem; margin-top: 1.4rem; }
+  .zu-foot .muted { margin-left: auto; margin-right: auto; }
+</style>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/schueler.js?v={{ static_version() }}"></script>
+<script>
+  {% if klassen and pool %}
+  DRSSchueler.zuordnung({
+    jahrgangUrl: '/stammdaten/jahrgaenge/{{ j.id }}',
+    pool: [
+      {% for s in pool %}
+      { id: {{ s.id }}, name: {{ (s.nachname ~ (', ' ~ s.vorname if s.vorname else ''))|tojson }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ],
+    klassen: [
+      {% for k in klassen %}
+      { id: {{ k.id }}, name: {{ k.name|tojson }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ]
+  });
+  {% endif %}
+</script>
+{% endblock %}

@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import (LessonNote, TtFach, TtHoliday, TtKlasse, TtRow,
-                        TtSchoolyear, TtSlot, TtVersion, User)
+from app.models import (LessonNote, TtFach, TtHoliday, TtJahrgangFach, TtKlasse,
+                        TtRow, TtSchoolyear, TtSlot, TtVersion, User)
 from app.services import schulkalender, timetable_grid
+from app.services.lerngruppen import lerngruppen
 from app.templating import templates
 
 router = APIRouter()
@@ -388,15 +389,23 @@ def version_edit(
         raise HTTPException(404)
 
     slots = timetable_grid.load_slots(db, user)
-    klassen = db.scalars(
-        select(TtKlasse).where(TtKlasse.user_id == user.id, TtKlasse.active == True)  # noqa: E712
-        .order_by(TtKlasse.position, TtKlasse.klassen_key)
-    ).all()
+    # Lerngruppen über den Service: der blendet auch die Gruppen stillgelegter
+    # Jahrgänge aus, ohne dass man jede einzeln abhaken muss.
+    klassen = lerngruppen(db, user)
     faecher = db.scalars(
         select(TtFach).where(TtFach.user_id == user.id, TtFach.active == True)  # noqa: E712
         .order_by(TtFach.position, TtFach.subjects_key)
     ).all()
     rows = db.scalars(select(TtRow).where(TtRow.version_id == v.id)).all()
+
+    # Fach-Auswahl je Lerngruppe: nur die Lernfelder ihres Jahrgangs. Hängt die
+    # Gruppe an keinem Jahrgang oder hat der Jahrgang keine Lernfelder, gilt der
+    # volle Katalog — sonst sperrte man sich aus (das Template sagt es dazu).
+    jg_faecher: dict[int, list[int]] = {}
+    for jf in db.scalars(select(TtJahrgangFach)
+                         .order_by(TtJahrgangFach.position)).all():
+        jg_faecher.setdefault(jf.jahrgang_id, []).append(jf.fach_id)
+    klasse_jahrgang = {k.id: k.jahrgang_id for k in klassen}
 
     k_by_id = {k.id: k for k in klassen}
     f_by_id = {f.id: f for f in faecher}
@@ -414,6 +423,7 @@ def version_edit(
         "version": v, "slots": slots, "klassen": klassen, "faecher": faecher,
         "raster": raster, "weekdays": timetable_grid.WEEKDAY_NAMES,
         "ab_enabled": bool(sy),
+        "jg_faecher": jg_faecher, "klasse_jahrgang": klasse_jahrgang,
     })
 
 

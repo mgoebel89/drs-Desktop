@@ -25,8 +25,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import (LessonNote, TtException, TtFach, TtKlasse, TtSlot, User)
+from app.models import LessonNote, TtException, TtFach, TtSlot, User
 from app.services import schulkalender, timetable_grid
+from app.services.lerngruppen import lerngruppen
 
 router = APIRouter()
 
@@ -70,11 +71,13 @@ def api_stammdaten(
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    """Klassen + Fächer für den Zusatzstunden-Dialog."""
-    klassen = db.scalars(
-        select(TtKlasse).where(TtKlasse.user_id == user.id,
-                               TtKlasse.active == True)  # noqa: E712
-        .order_by(TtKlasse.position)).all()
+    """Lerngruppen + Fächer für den Zusatzstunden-Dialog.
+
+    Die Lerngruppen kommen über den Service, damit auch die Gruppen stillgelegter
+    Jahrgänge verschwinden. Das Fach bleibt hier bewusst frei eintippbar: Eine
+    Zusatzstunde ist oft eine Vertretung in einer fremden Klasse, die gar nicht in
+    den eigenen Stammdaten steht."""
+    klassen = lerngruppen(db, user)
     faecher = db.scalars(
         select(TtFach).where(TtFach.user_id == user.id,
                              TtFach.active == True)  # noqa: E712

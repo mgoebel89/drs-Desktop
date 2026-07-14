@@ -17,8 +17,9 @@ from app.auth import audit, require_user
 from app.db import get_db
 from app.models import (Exam, ExamFeedbackPoint, ExamGroupResult, ExamResult,
                         ExamStudent, FeedbackTemplate, LearningSituation,
-                        Student, User)
+                        Student, TtKlasse, User)
 from app.services import exam_md, grading, moodle_quiz, obsidian_writer
+from app.services.lerngruppen import lerngruppen, schueler_der_lerngruppe
 from app.services.playwright_pdf import render_pdf
 from app import branding
 from fastapi.responses import PlainTextResponse, Response
@@ -295,13 +296,13 @@ def exams_new_form(
         select(LearningSituation).where(LearningSituation.user_id == user.id)
         .order_by(LearningSituation.updated_at.desc())
     ).all()
-    klassen = [
-        row[0] for row in db.execute(
-            select(Student.klassen_key)
-            .where(Student.owner_user_id == user.id,
-                   Student.klassen_key != "")
-            .distinct()
-        ).all()
+    # Teilnehmer kommen jetzt über die LERNGRUPPE, nicht über rohe klassen_key-
+    # Strings: eine Prüfung wird in dem Verband geschrieben, der auch im
+    # Stundenplan steht — inkl. Zusammenlegungen und Teilgruppen.
+    gruppen = [
+        {"id": g.id, "name": g.display_name or g.klassen_key, "art": g.art,
+         "anzahl": len(schueler_der_lerngruppe(db, user, g))}
+        for g in lerngruppen(db, user)
     ]
     prefill_ls: LearningSituation | None = None
     if ls_id:
@@ -310,7 +311,7 @@ def exams_new_form(
             prefill_ls = None
     return templates.TemplateResponse(request, "exams/new.html", {
         "ls_options": ls_options,
-        "klassen": klassen,
+        "gruppen": gruppen,
         "today": date.today().isoformat(),
         "scales": grading.list_scales_for(db, user),
         "default_scale": grading.DEFAULT_SCALE,
@@ -318,22 +319,18 @@ def exams_new_form(
     })
 
 
-def _add_class_members(db: Session, user: User, ex: Exam, klassen: list[str]) -> None:
-    """Fügt alle aktiven Schüler der genannten Klassen als Teilnehmer hinzu
-    (preselected), sofern noch nicht Mitglied."""
+def _add_gruppe_members(db: Session, user: User, ex: Exam,
+                        gruppen: list[TtKlasse]) -> None:
+    """Alle Schüler der gewählten Lerngruppen als Teilnehmer vorauswählen.
+
+    Bei einer Teilgruppe sind das nur ihre Mitglieder, bei einer Zusammenlegung
+    die Schüler aller beteiligten Klassen — die Regel steckt im Service, nicht
+    hier. Im nächsten Schritt lassen sich einzelne wieder abwählen."""
     existing = {row[0] for row in db.execute(
         select(ExamStudent.student_id).where(ExamStudent.exam_id == ex.id)
     ).all()}
-    for kk in klassen:
-        if not kk:
-            continue
-        for s in db.scalars(
-            select(Student).where(
-                Student.owner_user_id == user.id,
-                Student.klassen_key == kk,
-                Student.active.is_(True),
-            )
-        ).all():
+    for g in gruppen:
+        for s in schueler_der_lerngruppe(db, user, g):
             if s.id not in existing:
                 db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
                 existing.add(s.id)
@@ -346,7 +343,7 @@ async def exams_create(
     db: Annotated[Session, Depends(get_db)],
     title: str = Form(...),
     datum: str = Form(""),
-    klassen: list[str] = Form(default=[]),
+    lerngruppe_ids: list[int] = Form(default=[]),
     learning_situation_id: str = Form(""),
     grading_scale_key: str = Form("builtin:mss_noten"),
     input_mode: str = Form("numeric"),
@@ -361,7 +358,15 @@ async def exams_create(
     if not _valid_scale_ref(db, user, grading_scale_key):
         grading_scale_key = grading.DEFAULT_SCALE
 
-    klassen_clean = [k.strip() for k in klassen if k.strip()]
+    # Gewählte Lerngruppen einsammeln. `klassen_key` bleibt als Anzeige-Liste
+    # erhalten (Altbestand + PDF-Kopfzeilen); die Wahrheit über die Teilnehmer
+    # steht in exam_students.
+    gewaehlt: list[TtKlasse] = []
+    for gid in lerngruppe_ids:
+        g = db.get(TtKlasse, gid)
+        if g and g.user_id == user.id:
+            gewaehlt.append(g)
+    klassen_clean = [g.display_name or g.klassen_key for g in gewaehlt]
 
     ls_id: int | None = None
     if learning_situation_id.strip():
@@ -370,8 +375,6 @@ async def exams_create(
             ls = db.get(LearningSituation, cand)
             if ls and ls.user_id == user.id:
                 ls_id = cand
-                if not klassen_clean and ls.klassen_key:
-                    klassen_clean = [ls.klassen_key]
         except ValueError:
             pass
 
@@ -400,6 +403,9 @@ async def exams_create(
         title=title,
         datum=datum.strip()[:10],
         klassen_key=", ".join(klassen_clean)[:255],
+        # Nur bei genau EINER Gruppe eindeutig zuordenbar; bei mehreren bleibt
+        # die Anzeige-Liste die einzige Aussage.
+        lerngruppe_id=gewaehlt[0].id if len(gewaehlt) == 1 else None,
         learning_situation_id=ls_id,
         grading_scale_key=grading_scale_key,
         input_mode=input_mode,
@@ -444,8 +450,7 @@ async def exams_create(
                 )
                 db.add(r)
     else:
-        # Klassische Vorauswahl per Klassen-Checkboxen
-        _add_class_members(db, user, ex, klassen_clean)
+        _add_gruppe_members(db, user, ex, gewaehlt)
 
     audit(db, "exam_created", actor=user, target=str(ex.id),
           detail=f"{title} / {ex.klassen_key}"

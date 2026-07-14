@@ -13,22 +13,26 @@
 <div class="flash flash-warn" style="display:block">
   <strong>{{ pool|length }} Schüler warten auf eine Klasse.</strong>
   Sie wurden importiert, aber noch keiner Klasse dieses Jahrgangs zugeordnet.
-  Die Zuordnung per Wischen kommt im nächsten Schritt; bis dahin geht es über die
-  <a href="/students">Schülerliste</a>.
+  <p style="margin:.6rem 0 0">
+    <a class="btn" href="/stammdaten/jahrgaenge/{{ j.id }}/zuordnen">Jetzt zuordnen</a>
+  </p>
 </div>
 {% endif %}
 
 <div class="card">
-  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.9rem">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.9rem;flex-wrap:wrap">
     <h2 style="margin:0">Klassen</h2>
-    <button class="btn" type="button" id="btnKlasse" style="margin-left:auto">+ Klasse</button>
+    <span style="margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap">
+      <button class="btn-sec" type="button" id="btnImport">Schüler importieren</button>
+      <button class="btn" type="button" id="btnKlasse">+ Klasse</button>
+    </span>
   </div>
 
   {% if klassen %}
   <div class="card-grid">
     {% for k in klassen %}
-    <button type="button" class="obj-card{% if not k.active %} inaktiv{% endif %}"
-            data-klasse="{{ k.id }}">
+    <a class="obj-card{% if not k.active %} inaktiv{% endif %}"
+       href="/stammdaten/klassen/{{ k.id }}" style="text-decoration:none">
       <div class="obj-card-head">
         <span data-icon="klasse"></span>
         <span class="obj-card-title">{{ k.name }}</span>
@@ -36,7 +40,7 @@
       <div class="obj-card-meta">
         {{ schuelerzahl[k.id] }} Schüler{% if not k.active %} · stillgelegt{% endif %}
       </div>
-    </button>
+    </a>
     {% endfor %}
   </div>
   {% else %}
@@ -116,6 +120,7 @@
 
 {% block scripts %}
 <script src="/static/stammdaten.js?v={{ static_version() }}"></script>
+<script src="/static/schueler.js?v={{ static_version() }}"></script>
 <script>
   DRS.mountIcons();
   var JID = {{ j.id }};
@@ -126,10 +131,9 @@
     .addEventListener('click', function () { DRSStammdaten.klasseAnlegen(JID); });
   document.getElementById('btnFach')
     .addEventListener('click', function () { DRSStammdaten.fachZuordnen(JID); });
+  document.getElementById('btnImport')
+    .addEventListener('click', function () { DRSSchueler.importWizard(JID); });
 
-  document.querySelectorAll('[data-klasse]').forEach(function (c) {
-    c.addEventListener('click', function () { DRSStammdaten.klasseModal(c.dataset.klasse); });
-  });
   document.querySelectorAll('[data-lerngruppe]').forEach(function (c) {
     c.addEventListener('click', function () { DRSStammdaten.lerngruppeModal(c.dataset.lerngruppe); });
   });
