@@ -225,6 +225,31 @@ tr:hover td { background: #fafafa; }
 .feiertage li { padding: 3px 0; break-inside: avoid; }
 .feiertage .muted { display: inline-block; min-width: 130px; }
 
+/* ===== Versions-Editor (Grundstundenplan) ===== */
+.ve-grid { table-layout: fixed; min-width: 900px; }
+.ve-grid th, .ve-grid td { border: 1px solid var(--border); vertical-align: top; padding: 6px; }
+.ve-grid thead th { background: var(--blau-hell); color: var(--blau); text-align: center; }
+.ve-slot { background: #fafafa; text-align: left; text-transform: none; font-size: 12px; }
+.ve-row {
+  display: flex; align-items: flex-start; gap: 4px;
+  background: var(--blau-hell); border-radius: 6px; padding: 5px 6px; margin-bottom: 4px;
+}
+.ve-row.ve-ab { background: #f4f7e0; }
+.ve-row-main { flex: 1; min-width: 0; font-size: 12px; display: flex; flex-direction: column; }
+.ve-row-main strong { font-size: 12px; }
+.ve-del {
+  border: none; background: none; color: var(--pink); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 2px;
+}
+.ve-add summary {
+  cursor: pointer; color: var(--blau); font-size: 12px; font-weight: 600;
+  list-style: none; padding: 2px 0;
+}
+.ve-add summary::-webkit-details-marker { display: none; }
+.ve-add[open] summary { margin-bottom: 4px; }
+.ve-add form { display: flex; flex-direction: column; gap: 4px; }
+.ve-add select, .ve-add input { font-size: 12px; padding: 5px 6px; }
+
 /* Stundenplan-Grid: auf schmalen Geräten horizontal scrollen */
 .tt-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 

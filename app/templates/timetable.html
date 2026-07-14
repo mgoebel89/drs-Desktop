@@ -100,6 +100,26 @@ window.MathJax = {
   .note-icon { color: var(--blau); }
   .exam-icon { color: #c62828; font-weight: 700; }
 
+  /* Zustände des manuellen Plans */
+  .tt-lesson.status-verlegt-hier { background: #eaf3fb; border-left-color: var(--blau);
+    border: 1px dashed var(--blau); border-left-width: 4px; }
+  .tt-lesson.status-zusatz { background: #f0ecff; border-left-color: #5e3fc0; }
+  /* Vertretung: abgesetzt, aber NICHT durchgestrichen — die Stunde bleibt
+     dokumentierbar, der Stoff wurde ja behandelt. */
+  .tt-lesson.status-vertretung { background: #f2f2f2; border-left-color: #999; opacity: .85; }
+  .tt-move-from { font-size: 10px; color: var(--blau); font-weight: 600; }
+  .tt-zusatz { font-size: 10px; color: #5e3fc0; font-weight: 600; }
+  .tt-vertretung { font-size: 10px; color: #555; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Freie Tage (Ferien, Feiertag) */
+  th.free-day { background: #f0f0f0 !important; color: var(--muted) !important; }
+  .free-label { font-weight: 600; font-size: 10px; color: #e65100;
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.free-cell {
+    background: repeating-linear-gradient(45deg, #fafafa, #fafafa 6px, #f0f0f0 6px, #f0f0f0 12px);
+  }
+
   /* Single-Lesson nimmt volle Zellhoehe */
   .lessons-lane { height: 100%; }
   .lessons-lane > .tt-lesson:only-child { flex: 1 1 auto; min-height: 100%; }
@@ -273,19 +293,33 @@ window.MathJax = {
          href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
          target="_blank" rel="noopener"
          title="Wochen-Arbeitsplan dieser Woche als PDF im Browser öffnen">📄 Arbeitsplan (PDF)</a>
+      <a class="btn btn-sec" style="padding:5px 10px;font-size:12px"
+         href="/timetable/settings" title="Zeitraster, Schuljahr, Ferien, Grundstundenplan">⚙ Einstellungen</a>
     </div>
     {% endif %}
   </div>
 
   {% if error %}
     <div class="flash flash-err">{{ error }}</div>
-    <p><a class="btn btn-sec" href="/timetable/diagnose">→ Diagnose ausführen</a></p>
   {% endif %}
 
   {% if grid %}
+    {% if grid.setup_needed %}
+      <div class="flash flash-warn">
+        Dein Stundenplan ist noch nicht eingerichtet. Leg zuerst das <strong>Zeitraster</strong> an —
+        <a href="/timetable/settings#zeitraster">zu den Einstellungen</a>.
+      </div>
+    {% elif grid.no_version %}
+      <div class="flash flash-warn">
+        Es gibt noch keinen Grundstundenplan für diese Woche.
+        <a href="/timetable/settings#versionen">Version anlegen</a>, dann erscheinen deine Stunden hier.
+      </div>
+    {% endif %}
+
     <p class="muted" style="margin-bottom:1rem">
       Woche vom <strong>{{ grid.monday.strftime('%d.%m.%Y') }}</strong>
       bis <strong>{{ grid.friday.strftime('%d.%m.%Y') }}</strong>
+      &nbsp;·&nbsp; <strong>KW {{ grid.kw }}</strong>{% if grid.ab_enabled %} · <span class="badge {% if grid.ab == 'A' %}b-teacher{% else %}b-admin{% endif %}">{{ grid.ab }}-Woche</span>{% endif %}
       &nbsp;·&nbsp; <span class="muted" style="font-size:12px">Klick auf eine Stunde → Notizen rechts</span>
     </p>
     {% if grid.slots %}
@@ -302,7 +336,11 @@ window.MathJax = {
         <tr>
           <th class="slot">Stunde</th>
           {% for d in grid.days %}
-            <th colspan="2">{{ d.weekday_name }}<br><span style="font-weight:normal;font-size:11px">{{ d.date.strftime('%d.%m.') }}</span></th>
+            <th colspan="2" class="{% if d.free %}free-day{% endif %}" {% if d.free %}title="{{ d.free_label }}"{% endif %}>
+              {{ d.weekday_name }}<br>
+              <span style="font-weight:normal;font-size:11px">{{ d.date.strftime('%d.%m.') }}</span>
+              {% if d.free %}<br><span class="free-label">{{ d.free_label }}</span>{% endif %}
+            </th>
           {% endfor %}
         </tr>
       </thead>
@@ -344,33 +382,37 @@ window.MathJax = {
             {% set events_here = grid.events.get((sl.start, d_idx), []) %}
             {% set events_skipped = (sl.start, d_idx) in grid.skip_cells %}
             {# Linke Sub-Spalte: Lessons (immer rendern) #}
-            <td class="lessons-td">
+            <td class="lessons-td{% if grid.days[d_idx].free %} free-cell{% endif %}"
+                data-date="{{ grid.days[d_idx].date.isoformat() }}"
+                data-block-start="{{ sl.start }}">
               {% if lessons %}
                 <div class="lessons-lane">
                   {% for l in lessons %}
-                    {% set cls = (l.klassen|join(' / ')) or '—' %}
+                    {% set cls = (l.klassen_display or l.klassen|join(' / ')) or '—' %}
                     {% set raum = l.rooms|join(', ') %}
                     {% set state = '' %}
                     {% if l.code == 'cancelled' %}{% set state = 'cancelled' %}{% endif %}
                     {% if l.code == 'irregular' %}{% set state = 'irregular' %}{% endif %}
-                    {% set kk = (l.klassen|sort|join('|')) %}
-                    {% set sk = (l.subjects|sort|join('|')) %}
+                    {% set kk = l.klassen_key %}
+                    {% set sk = l.subjects_key %}
                     {% set d_iso = grid.days[d_idx].date.isoformat() %}
                     {% set has_note = (d_iso, kk, sk, sl.start) in grid.notes_present %}
                     {% set is_exam = (d_iso, kk, sk, sl.start) in (grid.exams or []) %}
                     {% set sess_ov = grid.session_override.get((d_iso, kk, sk, sl.start)) if grid.session_override else None %}
                     {% set series_ov = grid.series_override.get((kk, sk)) if grid.series_override else None %}
-                    {% set fach_display = sess_ov or series_ov %}
+                    {% set fach_display = sess_ov or series_ov or l.fach_display %}
                     {% set aufgaben_mark = grid.aufgaben_markers.get((d_iso, kk, sk, sl.start)) if grid.aufgaben_markers else None %}
                     {% set has_pin = (d_iso, kk, sk, sl.start) in (grid.pending_forward_reminders or []) %}
-                    <div class="tt-lesson {{ state }}{% if is_exam %} exam{% endif %}"
+                    <div class="tt-lesson {{ state }} status-{{ l.status }}{% if is_exam %} exam{% endif %}"
                          data-lesson='{{ l|tojson|forceescape }}'
                          data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
                          data-date="{{ d_iso }}"
                          data-slot="{{ sl.name }} · {{ sl.start }}–{{ sl.end }}"
                          data-klassen-key="{{ kk }}"
                          data-subjects-key="{{ sk }}"
-                         data-block-start="{{ sl.start }}">
+                         data-block-start="{{ sl.start }}"
+                         data-status="{{ l.status }}"
+                         {% if l.exception_id %}data-exception-id="{{ l.exception_id }}"{% endif %}>
                       <div class="tt-klasse">
                         {% if state != 'cancelled' %}
                           {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
@@ -379,9 +421,22 @@ window.MathJax = {
                         {% endif %}
                         <span>{{ cls }}</span>
                       </div>
-                      {% if state == 'cancelled' %}
+                      {% if l.status == 'ausfall' %}
+                        <div class="tt-fach" style="font-style:italic">entfällt{% if l.grund %} · {{ l.grund }}{% endif %}</div>
+                      {% elif l.status == 'verlegt_weg' %}
+                        <div class="tt-fach" style="font-style:italic">
+                          → verlegt auf {{ l.moved_to.date[8:10] }}.{{ l.moved_to.date[5:7] }}., {{ l.moved_to.block_start }}
+                        </div>
+                      {% elif state == 'cancelled' %}
                         <div class="tt-fach" style="font-style:italic">entfällt</div>
                       {% else %}
+                        {% if l.status == 'verlegt_hier' %}
+                          <div class="tt-move-from">← von {{ l.moved_from.date[8:10] }}.{{ l.moved_from.date[5:7] }}.</div>
+                        {% elif l.status == 'zusatz' %}
+                          <div class="tt-zusatz">Zusatz{% if l.fuer_kollege %} für {{ l.fuer_kollege }}{% endif %}</div>
+                        {% elif l.status == 'vertretung' %}
+                          <div class="tt-vertretung">Vertretung{% if l.vertretung_name %}: {{ l.vertretung_name }}{% endif %}</div>
+                        {% endif %}
                         {% if fach_display %}<div class="tt-fach">{{ fach_display }}</div>{% endif %}
                         {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
                         {% if aufgaben_mark %}

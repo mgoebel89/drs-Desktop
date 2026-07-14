@@ -185,7 +185,7 @@
   <p class="muted" style="margin-top:.8rem">Noch keine Ferien eingetragen.</p>
   {% endif %}
 
-  <h3 style="font-size:14px;color:var(--blau);margin:1.6rem 0 .5rem">Gesetzliche Feiertage (automatisch, Rheinland-Pfalz)</h3>
+  <h3 id="feiertage" style="font-size:14px;color:var(--blau);margin:1.6rem 0 .5rem">Gesetzliche Feiertage (automatisch, Rheinland-Pfalz)</h3>
   {% if feiertage %}
   <p class="muted" style="margin-bottom:.6rem">Nur die Feiertage, die im Schuljahr auf einen Schultag
     (Mo–Fr) fallen. Berechnet, nicht gespeichert — nichts zu pflegen.</p>
@@ -196,6 +196,68 @@
   </ul>
   {% else %}
   <p class="muted">Trag oben erst das Schuljahr ein, dann erscheinen hier die Feiertage.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 id="versionen" style="margin-top:0">Grundstundenplan</h2>
+  <p class="muted">Eine Version gilt <strong>ab ihrem Datum bis zur nächsten</strong>. Verschiebt sich
+    dein Stundenplan dauerhaft, legst du einfach eine neue Version ab dem Stichtag an — der alte Plan
+    bleibt für die Vergangenheit erhalten und alte Wochen werden weiter korrekt angezeigt.
+    Das <strong>2. Halbjahr</strong> ist nichts anderes: eine neue Version ab dem ersten Tag des Halbjahres.</p>
+
+  <form method="post" action="/timetable/settings/versions" class="sd-form">
+    <div>
+      <label>Bezeichnung</label>
+      <input name="name" placeholder="Schuljahr 2026/27, 1. Halbjahr">
+    </div>
+    <div>
+      <label>Gültig ab</label>
+      <input name="valid_from" type="date" required>
+    </div>
+    <div>
+      <label>Übernehmen von</label>
+      <select name="copy_from_version_id">
+        <option value="0">— leer starten —</option>
+        {% for vv in versions %}
+        <option value="{{ vv.v.id }}">{{ vv.v.name }} ({{ vv.zeilen }} Stunden)</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div><button class="btn" type="submit">+ Version</button></div>
+  </form>
+
+  {% if versions %}
+  <table style="margin-top:1rem">
+    <thead><tr><th>Version</th><th>Gültig ab</th><th>Stunden</th><th></th><th></th></tr></thead>
+    <tbody>
+    {% for vv in versions %}
+    <tr>
+      <td><strong>{{ vv.v.name }}</strong>
+        {% if vv.aktiv %}<span class="badge b-teacher">aktiv</span>{% endif %}
+        {% if vv.zukunft %}<span class="badge b-admin">geplant</span>{% endif %}
+      </td>
+      <td>{{ vv.v.valid_from[8:10] }}.{{ vv.v.valid_from[5:7] }}.{{ vv.v.valid_from[0:4] }}</td>
+      <td>{{ vv.zeilen }}</td>
+      <td><a class="btn-sec btn" style="padding:4px 12px;font-size:12px"
+             href="/timetable/settings/versions/{{ vv.v.id }}">Bearbeiten</a></td>
+      <td>
+        {% if vv.zukunft %}
+        <form method="post" action="/timetable/settings/versions/{{ vv.v.id }}/delete"
+              onsubmit="return confirm('Version „{{ vv.v.name }}“ mit allen Stunden löschen?');">
+          <button class="btn-sec" style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+        </form>
+        {% else %}
+        <span class="muted" title="Vergangene Versionen bleiben erhalten, damit alte Wochen korrekt angezeigt werden">🔒</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-top:.8rem">Noch keine Version — ohne Grundstundenplan bleibt der
+    Stundenplan leer. Leg eine Version ab dem ersten Schultag an.</p>
   {% endif %}
 </div>
 {% endblock %}

@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
-from app.models import LessonNote, TtHoliday, TtSchoolyear, TtSlot, User
-from app.services import schulkalender
+from app.models import (LessonNote, TtFach, TtHoliday, TtKlasse, TtRow,
+                        TtSchoolyear, TtSlot, TtVersion, User)
+from app.services import schulkalender, timetable_grid
 from app.templating import templates
 
 router = APIRouter()
@@ -112,12 +113,27 @@ def _view_ctx(db: Session, user: User) -> dict:
                 "ab": schulkalender.ab_for_week(mo, sy.a_week_parity),
             })
 
+    versions = db.scalars(
+        select(TtVersion).where(TtVersion.user_id == user.id)
+        .order_by(TtVersion.valid_from.desc())
+    ).all()
+    heute = date.today().isoformat()
+    aktiv = next((v for v in versions if v.valid_from <= heute), None)
+    version_views = [{
+        "v": v,
+        "aktiv": aktiv is not None and v.id == aktiv.id,
+        "zukunft": v.valid_from > heute,
+        "zeilen": db.scalar(select(func.count()).select_from(TtRow)
+                            .where(TtRow.version_id == v.id)) or 0,
+    } for v in versions]
+
     return {
         "slots": slots,
         "schoolyear": sy,
         "holidays": holidays,
         "feiertage": feiertage,
         "ab_vorschau": vorschau,
+        "versions": version_views,
         "orphans": _orphan_report(db, user),
     }
 
@@ -294,3 +310,168 @@ def holiday_delete(
     audit(db, "tt_holiday_deleted", actor=user, target=label, request=request)
     db.commit()
     return RedirectResponse("/timetable/settings#ferien", status_code=303)
+
+
+# ── Grundstundenplan: Versionen + Zeilen ─────────────────────────────────
+
+@router.post("/timetable/settings/versions")
+def version_add(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    name: str = Form(""),
+    valid_from: str = Form(...),
+    copy_from_version_id: int = Form(0),
+):
+    ab = _check_date(valid_from, "Gültig ab")
+    doppelt = db.scalar(select(TtVersion.id).where(
+        TtVersion.user_id == user.id, TtVersion.valid_from == ab))
+    if doppelt:
+        return RedirectResponse(
+            "/timetable/settings?err=Zu+diesem+Datum+gibt+es+schon+eine+Version"
+            "#versionen", status_code=303)
+    v = TtVersion(user_id=user.id, valid_from=ab,
+                  name=name.strip()[:80] or f"Ab {ab}")
+    db.add(v)
+    db.flush()
+
+    if copy_from_version_id:
+        quelle = db.get(TtVersion, copy_from_version_id)
+        if quelle and quelle.user_id == user.id:
+            for r in db.scalars(select(TtRow).where(
+                    TtRow.version_id == quelle.id)).all():
+                db.add(TtRow(
+                    version_id=v.id, weekday=r.weekday,
+                    block_start=r.block_start, klasse_id=r.klasse_id,
+                    fach_id=r.fach_id, raum=r.raum, rhythm=r.rhythm,
+                    note=r.note,
+                ))
+    audit(db, "tt_version_added", actor=user, target=ab,
+          detail=("kopiert" if copy_from_version_id else "leer"), request=request)
+    db.commit()
+    return RedirectResponse(
+        f"/timetable/settings/versions/{v.id}", status_code=303)
+
+
+@router.post("/timetable/settings/versions/{vid}/delete")
+def version_delete(
+    request: Request,
+    vid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    v = db.get(TtVersion, vid)
+    if not v or v.user_id != user.id:
+        raise HTTPException(404)
+    # Vergangene Versionen nie löschen: an ihnen hängt, wie die Wochen der
+    # Vergangenheit gerendert werden (die Zeilen gingen per CASCADE mit).
+    if v.valid_from <= date.today().isoformat():
+        return RedirectResponse(
+            "/timetable/settings?err=Nur+Versionen+mit+Startdatum+in+der+Zukunft"
+            "+lassen+sich+löschen#versionen", status_code=303)
+    ab = v.valid_from
+    db.delete(v)
+    audit(db, "tt_version_deleted", actor=user, target=ab, request=request)
+    db.commit()
+    return RedirectResponse("/timetable/settings#versionen", status_code=303)
+
+
+@router.get("/timetable/settings/versions/{vid}", response_class=HTMLResponse)
+def version_edit(
+    request: Request,
+    vid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    v = db.get(TtVersion, vid)
+    if not v or v.user_id != user.id:
+        raise HTTPException(404)
+
+    slots = timetable_grid.load_slots(db, user)
+    klassen = db.scalars(
+        select(TtKlasse).where(TtKlasse.user_id == user.id, TtKlasse.active == True)  # noqa: E712
+        .order_by(TtKlasse.position, TtKlasse.klassen_key)
+    ).all()
+    faecher = db.scalars(
+        select(TtFach).where(TtFach.user_id == user.id, TtFach.active == True)  # noqa: E712
+        .order_by(TtFach.position, TtFach.subjects_key)
+    ).all()
+    rows = db.scalars(select(TtRow).where(TtRow.version_id == v.id)).all()
+
+    k_by_id = {k.id: k for k in klassen}
+    f_by_id = {f.id: f for f in faecher}
+    # Raster: (block_start, weekday) -> Zeilen
+    raster: dict[tuple[str, int], list[dict]] = {}
+    for r in rows:
+        raster.setdefault((r.block_start, r.weekday), []).append({
+            "r": r,
+            "klasse": k_by_id.get(r.klasse_id),
+            "fach": f_by_id.get(r.fach_id),
+        })
+
+    sy = schulkalender.schoolyear_for(db, user, date.today())
+    return templates.TemplateResponse(request, "timetable/version_edit.html", {
+        "version": v, "slots": slots, "klassen": klassen, "faecher": faecher,
+        "raster": raster, "weekdays": timetable_grid.WEEKDAY_NAMES,
+        "ab_enabled": bool(sy),
+    })
+
+
+@router.post("/timetable/settings/versions/{vid}/rows")
+def row_add(
+    request: Request,
+    vid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    weekday: int = Form(...),
+    block_start: str = Form(...),
+    klasse_id: int = Form(...),
+    fach_id: int = Form(...),
+    raum: str = Form(""),
+    rhythm: str = Form("all"),
+):
+    v = db.get(TtVersion, vid)
+    if not v or v.user_id != user.id:
+        raise HTTPException(404)
+    if not 0 <= weekday <= 4:
+        raise HTTPException(400, "Ungültiger Wochentag.")
+    k = db.get(TtKlasse, klasse_id)
+    f = db.get(TtFach, fach_id)
+    if not k or k.user_id != user.id or not f or f.user_id != user.id:
+        raise HTTPException(400, "Klasse oder Fach unbekannt.")
+    slot = db.scalar(select(TtSlot.id).where(
+        TtSlot.user_id == user.id, TtSlot.start_time == block_start))
+    if not slot:
+        raise HTTPException(400, "Dieser Block steht nicht im Zeitraster.")
+    if rhythm not in ("all", "A", "B"):
+        rhythm = "all"
+
+    doppelt = db.scalar(select(TtRow.id).where(
+        TtRow.version_id == v.id, TtRow.weekday == weekday,
+        TtRow.block_start == block_start, TtRow.klasse_id == klasse_id,
+        TtRow.fach_id == fach_id, TtRow.rhythm == rhythm))
+    if not doppelt:
+        db.add(TtRow(version_id=v.id, weekday=weekday, block_start=block_start,
+                     klasse_id=klasse_id, fach_id=fach_id,
+                     raum=raum.strip()[:60], rhythm=rhythm))
+        db.commit()
+    return RedirectResponse(
+        f"/timetable/settings/versions/{vid}#d{weekday}", status_code=303)
+
+
+@router.post("/timetable/settings/versions/{vid}/rows/{rid}/delete")
+def row_delete(
+    vid: int,
+    rid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    v = db.get(TtVersion, vid)
+    r = db.get(TtRow, rid)
+    if not v or v.user_id != user.id or not r or r.version_id != v.id:
+        raise HTTPException(404)
+    tag = r.weekday
+    db.delete(r)
+    db.commit()
+    return RedirectResponse(
+        f"/timetable/settings/versions/{vid}#d{tag}", status_code=303)

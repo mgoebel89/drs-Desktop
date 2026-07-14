@@ -14,7 +14,8 @@ from app.models import (
     Exam, IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
     LessonSeriesOverride, LsArbeitsblatt, LsAufgabe, User,
 )
-from app.services import aufgabe_sync, ical_client, webuntis_client
+from app.services import (aufgabe_sync, ical_client, timetable_grid,
+                          webuntis_client)
 from app.templating import templates
 
 router = APIRouter()
@@ -36,12 +37,6 @@ def timetable_view(
     db: Annotated[Session, Depends(get_db)],
     week: str | None = None,
 ):
-    if not user.untis_creds_enc:
-        return templates.TemplateResponse(request, "timetable.html", {
-            "user": user, "error": "Bitte hinterlege zuerst WebUntis-Zugangsdaten im Profil.",
-            "grid": None, "prev_week": None, "next_week": None,
-        })
-
     ref = _parse_iso_date(week)
     # iCal-Events aller aktiven Kalender vorab einsammeln
     ical_events: list[dict] = []
@@ -60,7 +55,7 @@ def timetable_view(
     db.commit()
 
     try:
-        grid = webuntis_client.get_week_grid(user, ref, ical_events=ical_events)
+        grid = timetable_grid.get_week_grid(db, user, ref, ical_events=ical_events)
         err = None
     except Exception as e:
         import logging
@@ -83,7 +78,7 @@ def timetable_view(
         keys_series = set()
         for (slot_start, day_idx), lessons in grid["cells"].items():
             for l in lessons:
-                kk, sk = webuntis_client.lesson_key_parts(l)
+                kk, sk = timetable_grid.lesson_key_parts(l)
                 if kk or sk:
                     keys_series.add((kk, sk))
         if keys_series:
@@ -167,7 +162,7 @@ def timetable_view(
             cand: tuple[str, str, str, str] | None = None
             for (slot_start, day_idx), lessons in grid["cells"].items():
                 for l in lessons:
-                    kk, sk = webuntis_client.lesson_key_parts(l)
+                    kk, sk = timetable_grid.lesson_key_parts(l)
                     if kk != kk_src or sk != sk_src:
                         continue
                     block_date = (monday + timedelta(days=day_idx)).isoformat()
@@ -266,7 +261,7 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
         if not err_msg:
             ical_events.extend(evs)
 
-    grid = webuntis_client.get_week_grid(user, ref, ical_events=ical_events)
+    grid = timetable_grid.get_week_grid(db, user, ref, ical_events=ical_events)
 
     # Blocknotizen der Woche (Volltext) als Map
     note_map: dict[tuple[str, str, str, str], dict] = {}
@@ -358,7 +353,7 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
         for sl in grid["slots"]:
             lessons = grid["cells"].get((sl["start"], day_idx)) or []
             for i, l in enumerate(lessons):
-                kk, sk = webuntis_client.lesson_key_parts(l)
+                kk, sk = timetable_grid.lesson_key_parts(l)
                 key = (d_iso, kk, sk, sl["start"])
                 note = note_map.get(key, {})
                 is_cancelled = (l.get("code") == "cancelled")
@@ -366,18 +361,34 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
                         or series_override.get((kk, sk))
                         or " / ".join(l.get("subjects_long")
                                       or l.get("subjects") or []))
+                klasse = (l.get("klassen_display")
+                          or ", ".join(l.get("klassen") or []))
+                status = l.get("status") or ""
                 if is_cancelled:
+                    if status == "verlegt_weg" and l.get("moved_to"):
+                        ziel = l["moved_to"]
+                        zusatz = (f" (verlegt auf {ziel['date'][8:10]}.{ziel['date'][5:7]}., "
+                                  f"{ziel['block_start']})")
+                    else:
+                        zusatz = " (entfällt)"
                     rows.append({
                         "block": sl["name"] if i == 0 else "",
                         "zeit": f"{sl['start']}–{sl['end']}" if i == 0 else "",
-                        "klasse": ", ".join(l.get("klassen") or []),
-                        "fach": (fach + " (entfällt)").strip(),
+                        "klasse": klasse,
+                        "fach": (fach + zusatz).strip(),
                         "thema": "", "notizen_html": "",
                         "material": "", "bemerkungen": "",
                         "ls_name": "", "aufgaben": "",
                         "pruefung": "", "cancelled": True,
                     })
                     continue
+                if status == "vertretung":
+                    fach = f"{fach} (Vertretung: {l.get('vertretung_name') or '—'})"
+                elif status == "zusatz":
+                    fach = f"{fach} (Zusatzstunde{(' für ' + l['fuer_kollege']) if l.get('fuer_kollege') else ''})"
+                elif status == "verlegt_hier" and l.get("moved_from"):
+                    q = l["moved_from"]
+                    fach = f"{fach} (verlegt von {q['date'][8:10]}.{q['date'][5:7]}.)"
                 ls_id = note_ls.get(key)
                 pruefung = ""
                 note_id = note_ids.get(key)
@@ -394,7 +405,7 @@ def _collect_week_plan(db: Session, user: User, ref: date) -> dict:
                 rows.append({
                     "block": sl["name"] if i == 0 else "",
                     "zeit": f"{sl['start']}–{sl['end']}" if i == 0 else "",
-                    "klasse": ", ".join(l.get("klassen") or []),
+                    "klasse": klasse,
                     "fach": fach,
                     "thema": note.get("theme", ""),
                     "notizen_html": _md_to_html(note.get("notes", "")),
@@ -908,7 +919,7 @@ def api_week_preview(
     ref = _parse_iso_date(week)
     monday = ref - timedelta(days=ref.weekday())
     try:
-        grid = webuntis_client.get_week_grid(user, ref, ical_events=[])
+        grid = timetable_grid.get_week_grid(db, user, ref, ical_events=[])
     except Exception:
         grid = None
     if not grid:
@@ -944,7 +955,7 @@ def api_week_preview(
             d = (monday + timedelta(days=day_idx)).isoformat()
             lessons = grid["cells"].get((sl["start"], day_idx)) or []
             for l in lessons:
-                kk, sk = webuntis_client.lesson_key_parts(l)
+                kk, sk = timetable_grid.lesson_key_parts(l)
                 existing_id = ls_by_key.get((d, kk, sk, sl["start"]))
                 blocks_out.append({
                     "date": d, "day_idx": day_idx,

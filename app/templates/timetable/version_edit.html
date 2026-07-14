@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ version.name }}{% endblock %}
+{% block content %}
+<div class="row-spread">
+  <div>
+    <h1 style="margin-bottom:.2rem">{{ version.name }}</h1>
+    <span class="muted">Gültig ab {{ version.valid_from[8:10] }}.{{ version.valid_from[5:7] }}.{{ version.valid_from[0:4] }}
+      — bis zur nächsten Version</span>
+  </div>
+  <a class="btn btn-sec" href="/timetable/settings#versionen">← Einstellungen</a>
+</div>
+
+{% if not slots %}
+  <div class="card"><div class="flash flash-warn" style="margin:0">
+    Es gibt noch kein Zeitraster. Leg zuerst deine Blöcke unter
+    <a href="/timetable/settings#zeitraster">Zeitraster</a> an.
+  </div></div>
+{% elif not klassen or not faecher %}
+  <div class="card"><div class="flash flash-warn" style="margin:0">
+    Du brauchst zuerst <a href="/stammdaten/klassen">Klassen</a> und
+    <a href="/stammdaten/faecher">Fächer</a> als Stammdaten.
+  </div></div>
+{% else %}
+
+<div class="card">
+  <p class="muted" style="margin-top:0">Trag hier deinen Grundstundenplan ein. Pro Block und Tag können
+    mehrere Stunden stehen — etwa wenn sich A- und B-Woche unterscheiden.
+    {% if not ab_enabled %}<br><strong>Hinweis:</strong> Solange kein Schuljahr eingetragen ist, gibt es
+    keine A/B-Wochen; Stunden mit Rhythmus A oder B werden dann nicht angezeigt.{% endif %}</p>
+
+  <div class="tt-scroll">
+  <table class="ve-grid">
+    <thead>
+      <tr>
+        <th style="width:110px">Block</th>
+        {% for wd in weekdays %}<th id="d{{ loop.index0 }}">{{ wd }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for sl in slots %}
+      <tr>
+        <th class="ve-slot">
+          <strong>{{ sl.name }}</strong><br>
+          <span class="muted">{{ sl.start }}–{{ sl.end }}</span>
+        </th>
+        {% for d_idx in range(5) %}
+        <td>
+          {% for e in raster.get((sl.start, d_idx), []) %}
+          <div class="ve-row {% if e.r.rhythm != 'all' %}ve-ab{% endif %}">
+            <div class="ve-row-main">
+              <strong>{{ e.klasse.display_name if e.klasse else '?' }}</strong>
+              <span class="muted">{{ e.fach.display_name if e.fach else '?' }}</span>
+              <span class="muted">{% if e.r.raum %}Raum {{ e.r.raum }}{% endif %}
+                {% if e.r.rhythm != 'all' %}<span class="badge b-teacher">{{ e.r.rhythm }}-Woche</span>{% endif %}</span>
+            </div>
+            <form method="post" action="/timetable/settings/versions/{{ version.id }}/rows/{{ e.r.id }}/delete">
+              <button class="ve-del" title="Stunde entfernen">✕</button>
+            </form>
+          </div>
+          {% endfor %}
+
+          <details class="ve-add">
+            <summary>+ Stunde</summary>
+            <form method="post" action="/timetable/settings/versions/{{ version.id }}/rows">
+              <input type="hidden" name="weekday" value="{{ d_idx }}">
+              <input type="hidden" name="block_start" value="{{ sl.start }}">
+              <select name="klasse_id" required>
+                <option value="">Klasse …</option>
+                {% for k in klassen %}<option value="{{ k.id }}">{{ k.display_name }}</option>{% endfor %}
+              </select>
+              <select name="fach_id" required>
+                <option value="">Fach …</option>
+                {% for f in faecher %}<option value="{{ f.id }}">{{ f.display_name }}</option>{% endfor %}
+              </select>
+              <input name="raum" placeholder="Raum">
+              <select name="rhythm">
+                <option value="all">jede Woche</option>
+                <option value="A">nur A-Woche</option>
+                <option value="B">nur B-Woche</option>
+              </select>
+              <button class="btn" type="submit" style="padding:6px 14px;font-size:12px">Eintragen</button>
+            </form>
+          </details>
+        </td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
