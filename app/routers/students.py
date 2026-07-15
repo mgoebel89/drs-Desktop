@@ -141,11 +141,17 @@ def klasse_detail(
         select(Student).where(Student.owner_user_id == user.id,
                               Student.schulklasse_id == k.id)
         .order_by(Student.nachname, Student.vorname)).all())
-    # Ziel-Klassen fürs Versetzen: alle anderen aktiven Klassen
+    # Ziel-Klassen fürs Versetzen: alle anderen aktiven Klassen aus aktiven
+    # Jahrgängen. Der Jahrgang-Join ist ein Sicherheitsnetz für Altbestände, in
+    # denen eine Klasse noch active=True steht, obwohl ihr Jahrgang abgeschlossen
+    # ist (die Abschluss-Kaskade hält beides normalerweise synchron).
     ziele = list(db.scalars(
-        select(TtSchulklasse).where(TtSchulklasse.user_id == user.id,
-                                    TtSchulklasse.id != k.id,
-                                    TtSchulklasse.active.is_(True))
+        select(TtSchulklasse)
+        .outerjoin(TtJahrgang, TtJahrgang.id == TtSchulklasse.jahrgang_id)
+        .where(TtSchulklasse.user_id == user.id,
+               TtSchulklasse.id != k.id,
+               TtSchulklasse.active.is_(True),
+               (TtJahrgang.id.is_(None)) | (TtJahrgang.active.is_(True)))
         .order_by(TtSchulklasse.name)).all())
     return templates.TemplateResponse(request, "students/klasse.html", {
         "k": k, "jahrgang": k.jahrgang, "schueler": schueler, "ziele": ziele,

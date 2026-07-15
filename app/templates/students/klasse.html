@@ -35,13 +35,13 @@
     </thead>
     <tbody>
     {% for s in schueler %}
-    <tr{% if not s.active %} style="opacity:.55"{% endif %}>
+    <tr class="stu-row" data-schueler="{{ s.id }}"{% if not s.active %} style="opacity:.55"{% endif %}>
       <td><input type="checkbox" class="stu-pick" value="{{ s.id }}"
                  aria-label="{{ s.nachname }} wählen"></td>
       <td>
-        <button type="button" class="stu-name" data-schueler="{{ s.id }}">
+        <span class="stu-name">
           {{ s.nachname }}{% if s.vorname %}, {{ s.vorname }}{% endif %}
-        </button>
+        </span>
         {% if not s.active %}
           <span class="stu-austritt">
             {%- if s.austritt_grund == 'abschluss' %}Abschluss
@@ -52,7 +52,7 @@
         {% endif %}
       </td>
       <td class="muted">{{ s.email or '—' }}</td>
-      <td class="muted" style="text-align:right">bearbeiten ›</td>
+      <td class="stu-edit">bearbeiten ›</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -73,10 +73,13 @@
   .stu-tab th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600;
                 border-bottom: 1px solid var(--border); padding: 6px 8px; }
   .stu-tab td { padding: 8px; border-bottom: 1px solid var(--border); }
-  .stu-tab tr:hover td { background: var(--blau-hell); }
-  .stu-name { background: none; border: 0; font: inherit; color: var(--text);
-              font-weight: 600; cursor: pointer; padding: 0; text-align: left; }
-  .stu-name:hover { color: var(--blau); }
+  .stu-row { cursor: pointer; }
+  .stu-tab tr.stu-row:hover td { background: var(--blau-hell); }
+  .stu-tab tr.stu-row:hover .stu-edit { color: var(--blau-dunkel); }
+  .stu-name { font: inherit; color: var(--text); font-weight: 600; }
+  .stu-row:hover .stu-name { color: var(--blau); }
+  .stu-edit { text-align: right; white-space: nowrap; color: var(--blau);
+              font-weight: 600; font-size: 13px; }
   .stu-austritt { display: inline-block; margin-left: .5rem; font-size: 11px;
                   color: var(--pink); background: #fdeef4; border: 1px solid #f6cfe0;
                   border-radius: 10px; padding: 1px 8px; font-weight: 600; }

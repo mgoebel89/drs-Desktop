@@ -111,7 +111,7 @@ h1:first-child, h2:first-child { margin-top: 0; }
 
 label { display: block; font-size: 13px; font-weight: 600; margin: 1rem 0 .3rem; color: var(--text); }
 input[type=text], input[type=password], input[type=email], input[type=date], input[type=time],
-input[type=number], select, textarea {
+input[type=number], input:not([type]), select, textarea {
   width: 100%; padding: 9px 11px; font-size: 14px;
   border: 1px solid var(--border); border-radius: 6px;
   font-family: inherit; background: #fafafa;
@@ -318,7 +318,7 @@ tr:hover td { background: #fafafa; }
 
 @media (max-width: 460px) {
   input[type=text], input[type=password], input[type=email], input[type=date],
-  input[type=time], input[type=number], select, textarea, button, .btn {
+  input[type=time], input[type=number], input:not([type]), select, textarea, button, .btn {
     font-size: 16px; /* verhindert Auto-Zoom in iOS */
   }
   .btn { padding: 11px 18px; }

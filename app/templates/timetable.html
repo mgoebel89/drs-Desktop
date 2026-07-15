@@ -142,12 +142,26 @@ window.MathJax = {
 
   /* Side-Panel */
   .tt-panel {
-    position: fixed; top: 0; right: -480px; width: 460px; height: 100vh;
+    position: fixed; top: 0; right: 0; width: 520px; max-width: 100vw; height: 100vh;
     background: #fff; border-left: 1px solid var(--border);
     box-shadow: -4px 0 16px rgba(0,0,0,.08);
-    transition: right .25s ease; overflow-y: auto; z-index: 1000;
+    transform: translateX(100%);
+    transition: transform .25s ease; overflow-y: auto; z-index: 1000;
   }
-  .tt-panel.open { right: 0; }
+  .tt-panel.open { transform: translateX(0); }
+  /* Optionale Notiz-Felder: Chips zum Einblenden */
+  .opt-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 .2rem; }
+  .opt-chip {
+    background: var(--blau-hell); color: var(--blau); border: 1px dashed var(--blau);
+    border-radius: 16px; padding: 5px 13px; font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+  }
+  .opt-chip:hover { background: #d8ebf8; }
+  .tt-more { margin-top: 1.2rem; border-top: 1px solid #eee; padding-top: .6rem; }
+  .tt-more > summary {
+    cursor: pointer; font-size: 12px; color: var(--blau); font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px; padding: .3rem 0; list-style: revert;
+  }
   .tt-panel-head {
     display: flex; justify-content: space-between; align-items: center;
     padding: 1rem 1.25rem; border-bottom: 1px solid #eee;
@@ -294,6 +308,33 @@ window.MathJax = {
   }
   .forward-banner button:hover { background: #e36e00; }
 
+  /* Toolbar über dem Grid */
+  .tt-toolbar { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+  .tt-navbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; font-size: 18px; line-height: 1;
+    border: 1px solid var(--blau); color: var(--blau); background: transparent;
+    border-radius: 8px; cursor: pointer; text-decoration: none; font-family: inherit;
+  }
+  .tt-navbtn:hover { background: var(--blau-hell); }
+  .tt-today { padding: 6px 14px; font-size: 13px; }
+  .tt-toolbtn { padding: 6px 12px; font-size: 13px; }
+  .tt-overflow { position: relative; display: inline-block; }
+  .tt-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.16); padding: .35rem; min-width: 230px;
+    display: flex; flex-direction: column;
+  }
+  .tt-menu[hidden] { display: none; }
+  .tt-menu a, .tt-menu button {
+    display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
+    padding: .55rem .7rem; border: 0; background: transparent; font: inherit;
+    font-size: 13px; color: var(--text); border-radius: 6px; cursor: pointer;
+    text-decoration: none;
+  }
+  .tt-menu a:hover, .tt-menu button:hover { background: var(--blau-hell); color: var(--blau); }
+
   /* Monats-Sprung-Popover */
   .month-jump { position: relative; display: inline-block; }
   .month-pop {
@@ -343,34 +384,73 @@ window.MathJax = {
   .prev-note-box .prev-note-content { margin-top: .3rem; line-height: 1.5; }
   .prev-note-box .prev-note-content :first-child { margin-top: 0; }
   .prev-note-box .prev-note-content :last-child { margin-bottom: 0; }
+
+  /* Mobiler Tag-Umschalter — auf dem Desktop ausgeblendet */
+  .tt-daybar { display: none; }
+  @media (max-width: 760px) {
+    .tt-daybar { display: flex; align-items: stretch; gap: .3rem; margin: 0 0 .8rem; }
+    .tt-day-picks { display: flex; gap: .3rem; flex: 1; overflow-x: auto; }
+    .tt-day-nav {
+      flex: 0 0 auto; width: 32px; border: 1px solid var(--border); background: #fff;
+      border-radius: 8px; color: var(--blau); font-size: 18px; cursor: pointer; line-height: 1;
+    }
+    .tt-day-pick {
+      flex: 1 0 auto; min-width: 46px; display: flex; flex-direction: column;
+      align-items: center; gap: 1px; padding: 5px 6px; border: 1px solid var(--border);
+      background: #fff; border-radius: 8px; cursor: pointer; font-family: inherit;
+      line-height: 1.1; color: var(--text);
+    }
+    .tt-day-pick .tt-day-wd { font-weight: 700; font-size: 13px; }
+    .tt-day-pick .tt-day-dt { font-size: 10px; color: var(--muted); }
+    .tt-day-pick.free { opacity: .6; }
+    .tt-day-pick.active { background: var(--blau); border-color: var(--blau); color: #fff; }
+    .tt-day-pick.active .tt-day-dt { color: #dbeefb; }
+
+    /* Nur der aktive Tag bleibt sichtbar; die Tabelle darf frei umbrechen */
+    #ttGrid { table-layout: auto; font-size: 14px; }
+    #ttGrid th.slot { width: 62px; }
+    #ttGrid .tt-klasse, #ttGrid .tt-fach, #ttGrid .tt-room,
+    #ttGrid .tt-vertretung { white-space: normal; }
+    #ttGrid[data-mday="0"] [data-col-day]:not([data-col-day="0"]),
+    #ttGrid[data-mday="1"] [data-col-day]:not([data-col-day="1"]),
+    #ttGrid[data-mday="2"] [data-col-day]:not([data-col-day="2"]),
+    #ttGrid[data-mday="3"] [data-col-day]:not([data-col-day="3"]),
+    #ttGrid[data-mday="4"] [data-col-day]:not([data-col-day="4"]),
+    #ttGrid[data-mday="5"] [data-col-day]:not([data-col-day="5"]) { display: none; }
+  }
 </style>
 
 <div class="card">
   <div class="row-spread">
     <h1>Mein Stundenplan</h1>
     {% if grid %}
-    <div style="display:flex;gap:.4rem;align-items:center">
-      <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ prev_week }}">← vorige Woche</a>
-      <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ this_week }}">heute</a>
-      <a class="btn-sec btn" style="padding:5px 10px;font-size:12px" href="/timetable?week={{ next_week }}">nächste Woche →</a>
+    <div class="tt-toolbar">
+      <a class="tt-navbtn" href="/timetable?week={{ prev_week }}"
+         title="vorige Woche" aria-label="vorige Woche">‹</a>
+      <a class="btn-sec btn tt-today" href="/timetable?week={{ this_week }}">heute</a>
+      <a class="tt-navbtn" href="/timetable?week={{ next_week }}"
+         title="nächste Woche" aria-label="nächste Woche">›</a>
       <div class="month-jump">
-        <button type="button" class="btn-sec btn" id="btnMonat"
-                style="padding:5px 10px;font-size:12px"
+        <button type="button" class="btn-sec btn tt-toolbtn" id="btnMonat"
                 data-ref="{{ grid.monday.isoformat() }}"
                 aria-haspopup="true" aria-expanded="false"
-                title="Monatsübersicht — zu einem Datum springen">📅 Monat</button>
+                title="Monatsübersicht — zu einem Datum springen">📅 <span class="tt-lbl">Monat</span></button>
         <div class="month-pop" id="monthPop" hidden></div>
       </div>
-      <a class="btn btn-sec" style="padding:5px 10px;font-size:12px"
-         href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
-         target="_blank" rel="noopener"
-         title="Wochen-Arbeitsplan dieser Woche als PDF im Browser öffnen">📄 Arbeitsplan (PDF)</a>
-      <button type="button" class="btn btn-sec" id="btnAenderung"
-              style="padding:5px 10px;font-size:12px"
-              data-week="{{ grid.monday.isoformat() }}"
-              title="Stundenplanänderungs-/Beurlaubungsformular für diese Woche">📝 Stundenplanänderung</button>
-      <a class="btn btn-sec" style="padding:5px 10px;font-size:12px"
-         href="/timetable/settings" title="Zeitraster, Schuljahr, Ferien, Grundstundenplan">⚙ Einstellungen</a>
+      <div class="tt-overflow">
+        <button type="button" class="tt-navbtn" id="btnOverflow"
+                aria-haspopup="true" aria-expanded="false"
+                title="Weitere Aktionen">⋯</button>
+        <div class="tt-menu" id="ttMenu" hidden>
+          <a href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
+             target="_blank" rel="noopener"
+             title="Wochen-Arbeitsplan dieser Woche als PDF im Browser öffnen">📄 Arbeitsplan (PDF)</a>
+          <button type="button" id="btnAenderung" data-week="{{ grid.monday.isoformat() }}"
+                  title="Stundenplanänderungs-/Beurlaubungsformular für diese Woche">📝 Stundenplanänderung</button>
+          <a href="/timetable/settings"
+             title="Zeitraster, Schuljahr, Ferien, Grundstundenplan">⚙ Einstellungen</a>
+        </div>
+      </div>
     </div>
     {% endif %}
   </div>
@@ -399,8 +479,21 @@ window.MathJax = {
       &nbsp;·&nbsp; <span class="muted" style="font-size:12px">Klick auf eine Stunde → Notizen rechts</span>
     </p>
     {% if grid.slots %}
+    <div class="tt-daybar" id="ttDaybar">
+      <button type="button" class="tt-day-nav" data-mday-prev aria-label="vorheriger Tag">‹</button>
+      <div class="tt-day-picks">
+        {% for d in grid.days %}
+          <button type="button" class="tt-day-pick{% if d.free %} free{% endif %}"
+                  data-mday="{{ loop.index0 }}" data-date="{{ d.date.isoformat() }}">
+            <span class="tt-day-wd">{{ d.weekday_name[:2] }}</span>
+            <span class="tt-day-dt">{{ d.date.strftime('%d.%m.') }}</span>
+          </button>
+        {% endfor %}
+      </div>
+      <button type="button" class="tt-day-nav" data-mday-next aria-label="nächster Tag">›</button>
+    </div>
     <div class="tt-scroll">
-    <table class="tt-grid">
+    <table class="tt-grid" id="ttGrid">
       <colgroup>
         <col class="col-slot">
         {% for d in grid.days %}
@@ -412,7 +505,7 @@ window.MathJax = {
         <tr>
           <th class="slot">Stunde</th>
           {% for d in grid.days %}
-            <th colspan="2" class="{% if d.free %}free-day{% endif %}" {% if d.free %}title="{{ d.free_label }}"{% endif %}>
+            <th colspan="2" data-col-day="{{ loop.index0 }}" class="{% if d.free %}free-day{% endif %}" {% if d.free %}title="{{ d.free_label }}"{% endif %}>
               {{ d.weekday_name }}<br>
               <span style="font-weight:normal;font-size:11px">{{ d.date.strftime('%d.%m.') }}</span>
               {% if d.free %}<br><span class="free-label">{{ d.free_label }}</span>{% endif %}
@@ -432,7 +525,7 @@ window.MathJax = {
               {% set adevs = grid.all_day_row.get(d_idx, []) %}
               {% set cs_days = adevs|map(attribute='colspan')|list|max if adevs else 1 %}
               {# Jeder Tag belegt 2 Sub-Spalten → colspan verdoppeln #}
-              <td class="allday-cell" colspan="{{ (cs_days or 1) * 2 }}">
+              <td class="allday-cell" data-col-day="{{ d_idx }}" colspan="{{ (cs_days or 1) * 2 }}">
                 {% for ev in adevs %}
                   <div class="allday-event" data-event='{{ ev|tojson|forceescape }}'
                        data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
@@ -459,6 +552,7 @@ window.MathJax = {
             {% set events_skipped = (sl.start, d_idx) in grid.skip_cells %}
             {# Linke Sub-Spalte: Lessons (immer rendern) #}
             <td class="lessons-td{% if grid.days[d_idx].free %} free-cell{% endif %}"
+                data-col-day="{{ d_idx }}"
                 data-date="{{ grid.days[d_idx].date.isoformat() }}"
                 data-block-start="{{ sl.start }}">
               {% if lessons %}
@@ -534,6 +628,7 @@ window.MathJax = {
             {% if not events_skipped %}
               {% set rs = events_here|map(attribute='rowspan')|list|max if events_here else 1 %}
               <td class="events-td {% if not events_here %}empty{% endif %}"
+                  data-col-day="{{ d_idx }}"
                   {% if rs and rs > 1 %}rowspan="{{ rs }}"{% endif %}>
                 {% if events_here %}
                   <div class="events-lane">
@@ -892,33 +987,71 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     + '</div>'
     + '<label for="note-theme">Geplantes Thema</label>'
     + '<input id="note-theme" name="theme" type="text" maxlength="500">'
-    + '<label for="note-notes">Notizen (Markdown + LaTeX)</label>'
-    + '<textarea id="note-notes" name="notes" rows="4"></textarea>'
-    + '<label for="note-material">Material</label>'
-    + '<textarea id="note-material" name="material" rows="3"></textarea>'
-    + '<label for="note-remarks">Bemerkungen</label>'
-    + '<textarea id="note-remarks" name="remarks" rows="3"></textarea>'
-    + '<label for="note-forward" style="margin-top:.6rem;color:#b85b00">📌 Bemerkung für die nächste Stunde</label>'
-    + '<div class="muted" style="font-size:11px;margin-bottom:.3rem">Erscheint beim Öffnen der nächsten Stunde derselben Klasse + Fach als oranger Banner — bis du dort „Erledigt" klickst.</div>'
-    + '<textarea id="note-forward" name="forward_remarks" rows="2" placeholder="z. B. Hausaufgabe abfragen, Bauteil mitbringen …"></textarea>'
+    // Optionale Felder — anfangs versteckt, per Chip (oder bei Inhalt) eingeblendet
+    + '<div id="opt-notes" class="opt-field" hidden>'
+    +   '<label for="note-notes">Notizen (Markdown + LaTeX)</label>'
+    +   '<textarea id="note-notes" name="notes" rows="4"></textarea>'
+    + '</div>'
+    + '<div id="opt-material" class="opt-field" hidden>'
+    +   '<label for="note-material">Material</label>'
+    +   '<textarea id="note-material" name="material" rows="3"></textarea>'
+    + '</div>'
+    + '<div id="opt-remarks" class="opt-field" hidden>'
+    +   '<label for="note-remarks">Bemerkungen</label>'
+    +   '<textarea id="note-remarks" name="remarks" rows="3"></textarea>'
+    + '</div>'
+    + '<div id="opt-forward" class="opt-field" hidden>'
+    +   '<label for="note-forward" style="color:#b85b00">📌 Bemerkung für die nächste Stunde</label>'
+    +   '<div class="muted" style="font-size:11px;margin-bottom:.3rem">Erscheint beim Öffnen der nächsten Stunde derselben Klasse + Fach als oranger Banner — bis du dort „Erledigt" klickst.</div>'
+    +   '<textarea id="note-forward" name="forward_remarks" rows="2" placeholder="z. B. Hausaufgabe abfragen, Bauteil mitbringen …"></textarea>'
+    + '</div>'
+    + '<div class="opt-chips" id="opt-chips">'
+    +   '<button type="button" class="opt-chip" data-opt="notes">+ Notizen</button>'
+    +   '<button type="button" class="opt-chip" data-opt="material">+ Material</button>'
+    +   '<button type="button" class="opt-chip" data-opt="remarks">+ Bemerkungen</button>'
+    +   '<button type="button" class="opt-chip" data-opt="forward">+ Bemerkung nächste Stunde</button>'
+    + '</div>'
     + '<div class="note-status" id="note-status">—</div>'
-    + '<h4 style="margin-top:1.4rem">Fach-Anzeige</h4>'
-    + '<div class="muted" style="font-size:11px;margin-bottom:.4rem">'
-    + 'Untis-Kürzel: <code style="background:#fafafa;padding:1px 5px;border-radius:3px">' + esc(fach || '—') + '</code></div>'
-    + '<label for="series-display" style="margin-top:.4rem">Für alle Stunden dieser Reihe</label>'
-    + '<input id="series-display" type="text" maxlength="200" placeholder="z.B. Elektrotechnik LF3">'
-    + '<div class="note-status" id="series-status">—</div>'
-    + '<label for="note-subject-override" style="margin-top:.6rem">Nur für diese Stunde (überschreibt Reihe)</label>'
-    + '<input id="note-subject-override" type="text" maxlength="200" placeholder="leer = Reihen-Standard verwenden">'
-    + '<h4 style="margin-top:1.4rem">Bewertungen</h4>'
-    + '<div id="exams-list" style="margin:.3rem 0;font-size:13px"></div>'
-    + '<a class="btn-sec" href="#" id="exam-new-btn" style="display:inline-block;padding:5px 12px;font-size:12px;text-decoration:none">+ Neue Prüfung für diese Stunde</a>'
+    // Fach-Anzeige + Bewertungen eingeklappt, damit das Panel schlank bleibt
+    + '<details class="tt-more">'
+    +   '<summary>Fach-Anzeige &amp; Bewertungen</summary>'
+    +   '<h4 style="margin-top:.8rem">Fach-Anzeige</h4>'
+    +   '<div class="muted" style="font-size:11px;margin-bottom:.4rem">'
+    +   'Untis-Kürzel: <code style="background:#fafafa;padding:1px 5px;border-radius:3px">' + esc(fach || '—') + '</code></div>'
+    +   '<label for="series-display" style="margin-top:.4rem">Für alle Stunden dieser Reihe</label>'
+    +   '<input id="series-display" type="text" maxlength="200" placeholder="z.B. Elektrotechnik LF3">'
+    +   '<div class="note-status" id="series-status">—</div>'
+    +   '<label for="note-subject-override" style="margin-top:.6rem">Nur für diese Stunde (überschreibt Reihe)</label>'
+    +   '<input id="note-subject-override" type="text" maxlength="200" placeholder="leer = Reihen-Standard verwenden">'
+    +   '<h4 style="margin-top:1.4rem">Bewertungen</h4>'
+    +   '<div id="exams-list" style="margin:.3rem 0;font-size:13px"></div>'
+    +   '<a class="btn-sec" href="#" id="exam-new-btn" style="display:inline-block;padding:5px 12px;font-size:12px;text-decoration:none">+ Neue Prüfung für diese Stunde</a>'
+    + '</details>'
     + '</form>';
 
   _body.innerHTML = html;
   _panel.classList.add('open');
   _backdrop.classList.add('open');
   _panel.setAttribute('aria-hidden', 'false');
+
+  // Optionale Felder per Chip einblenden (gefüllte werden nach dem Laden
+  // automatisch aufgeklappt).
+  function revealOpt(name) {
+    const box = document.getElementById('opt-' + name);
+    const chip = document.querySelector('.opt-chip[data-opt="' + name + '"]');
+    if (box) box.hidden = false;
+    if (chip) chip.remove();
+    const chips = document.getElementById('opt-chips');
+    if (chips && !chips.querySelector('.opt-chip')) chips.hidden = true;
+  }
+  document.querySelectorAll('.opt-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const name = chip.dataset.opt;
+      revealOpt(name);
+      const fld = document.getElementById('note-' + name);
+      if (fld) fld.focus();
+    });
+  });
 
   // Aktuelle Notiz + Reihen-Override laden
   try {
@@ -936,6 +1069,16 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     document.getElementById('note-is-exam').checked = !!n.is_exam;
     document.getElementById('note-forward').value = n.forward_remarks || '';
     document.getElementById('series-display').value = d.series_default || '';
+    // Gefüllte optionale Felder automatisch aufklappen
+    ['notes', 'material', 'remarks', 'forward'].forEach(name => {
+      const fld = document.getElementById('note-' + name);
+      if (fld && fld.value.trim()) revealOpt(name);
+    });
+    // Fach-Override gesetzt → „Weitere Optionen" aufklappen, sonst bliebe es versteckt
+    if ((n.subject_override || '').trim()) {
+      const more = document.querySelector('.tt-more');
+      if (more) more.open = true;
+    }
     document.getElementById('note-status').textContent =
       (n.theme || n.notes || n.material || n.remarks || n.subject_override || n.is_exam || n.forward_remarks) ? 'geladen' : '—';
     document.getElementById('series-status').textContent = d.series_default ? 'geladen' : '—';
@@ -1793,6 +1936,51 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     if (open && !pop.contains(e.target) && e.target !== btn) hide();
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) hide(); });
+})();
+
+// ── Overflow-Menü (⋯): Arbeitsplan / Änderung / Einstellungen ─────────────
+(function () {
+  const btn = document.getElementById('btnOverflow');
+  const menu = document.getElementById('ttMenu');
+  if (!btn || !menu) return;
+  let open = false;
+  function show() { menu.hidden = false; open = true; btn.setAttribute('aria-expanded', 'true'); }
+  function hide() { menu.hidden = true; open = false; btn.setAttribute('aria-expanded', 'false'); }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); open ? hide() : show(); });
+  // Klick auf einen Menüpunkt schließt das Menü (btnAenderung öffnet danach
+  // sein eigenes Modal — dessen Handler hängt weiter an der ID).
+  menu.addEventListener('click', () => hide());
+  document.addEventListener('click', (e) => {
+    if (open && !menu.contains(e.target) && e.target !== btn) hide();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) hide(); });
+})();
+
+// ── Mobiler Tag-Umschalter ────────────────────────────────────────────────
+// Blendet im Grid (per CSS <=760px) alle Tage außer dem gewählten aus. Die
+// Zellen samt Klick-Handlern bleiben erhalten — nur ihre Sichtbarkeit ändert
+// sich. Startet auf „heute", falls es in der Woche liegt, sonst Montag.
+(function () {
+  const grid = document.getElementById('ttGrid');
+  const bar = document.getElementById('ttDaybar');
+  if (!grid || !bar) return;
+  const picks = [...bar.querySelectorAll('.tt-day-pick')];
+  if (!picks.length) return;
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  function setDay(idx) {
+    idx = Math.max(0, Math.min(picks.length - 1, idx));
+    grid.dataset.mday = String(idx);
+    picks.forEach((b, i) => b.classList.toggle('active', i === idx));
+  }
+  picks.forEach((b, i) => b.addEventListener('click', () => setDay(i)));
+  bar.querySelector('[data-mday-prev]')?.addEventListener('click',
+    () => setDay(Number(grid.dataset.mday || 0) - 1));
+  bar.querySelector('[data-mday-next]')?.addEventListener('click',
+    () => setDay(Number(grid.dataset.mday || 0) + 1));
+
+  const todayIdx = picks.findIndex(b => b.dataset.date === todayIso);
+  setDay(todayIdx >= 0 ? todayIdx : 0);
 })();
 </script>
 {% endblock %}

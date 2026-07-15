@@ -168,6 +168,45 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
+### UI-Feinschliff aus dem Testlauf (2026-07-15, später)
+
+Sieben beim Testen gefundene Punkte, alle umgesetzt und gegen die echte App
+verifiziert (lesender Auth-Override, keine Passwörter berührt):
+
+1. **Schülerliste:** Ganze Zeile klickbar (`stu-row`), „bearbeiten ›" ist jetzt
+   echter Affordance-Text — das Bearbeiten-Modal (aktiv/inaktiv + Austrittsgrund
+   + Datum) existierte schon, nur der Klick-Ziel-Bereich fehlte auf dem Desktop.
+   Dateien: `students/klasse.html`, `static/schueler.js`.
+2. **Unterschrift im Änderungsformular:** Höhe auf ≤20 pt gedeckelt und ab der
+   Linie (y≈126.9) aufgebaut, Oberkante bleibt ≤145.9 → sitzt auf der Linie
+   statt in die A1–A4-Zeilen zu ragen (Tabelle beginnt bei y≈148.7). Zahlen aus
+   der echten Vorlage-Geometrie. **Sitz am fertigen PDF im Container final prüfen.**
+   Datei: `services/stundenplanaenderung_pdf.py`.
+3. **Block-Notiz-Panel:** Default nur „Geplantes Thema" + Prüfungsschalter; die
+   Felder Notizen/Material/Bemerkungen/nächste Stunde per „+"-Chip zuschaltbar
+   (gefüllte klappen automatisch auf), Fach-Anzeige + Bewertungen unter „Weitere
+   Optionen". Panel 520 px breit, auf dem Handy Vollbild (Transform statt festem
+   `right`). Datei: `timetable.html`.
+4. **Stundenplan-Toolbar:** ‹ › als Icon-Buttons, „heute"/„📅 Monat" bleiben
+   sichtbar, Arbeitsplan/Änderung/Einstellungen im ⋯-Overflow-Menü rechts.
+   Datei: `timetable.html`.
+5. **Stundenplan mobil:** Tag-Umschalter (‹ Mo–Fr ›), unter 760 px zeigt das Grid
+   nur den aktiven Tag (CSS-Spaltenfilter über `data-col-day`, Zellen samt
+   Klick-Handlern bleiben erhalten); Default-Tag = heute, sonst Montag. Desktop
+   unverändert. Datei: `timetable.html`.
+6. **Textfelder-Styling:** Der globale CSS-Selektor traf nur `input[type=text]`;
+   die per `el('input', {value:…})` erzeugten Modal-Felder haben kein
+   `type`-Attribut und fielen auf Browser-Default zurück. Selektor um
+   `input:not([type])` erweitert → greifen jetzt überall. Datei: `static/drs.css`.
+7. **Inaktive Klassen in Auswahllisten:** „Jahrgang bearbeiten → aktiv aus"
+   **kaskadiert** jetzt auf die Schulklassen UND Lerngruppen des Jahrgangs
+   (`jahrgang_save`), sodass sie zusammen aus allen Pickern verschwinden. Die
+   Picker filtern bereits `active` (Prüfung/Zusatzstunde sogar über den
+   `lerngruppen()`-Service inkl. Jahrgang-aktiv); die Versetzen-Ziele zusätzlich
+   per Jahrgang-Join als Sicherheitsnetz für Altbestände. **Wirkt erst, wenn die
+   alten Jahrgänge tatsächlich abgeschlossen werden** — Bestand ist noch aktiv.
+   Dateien: `routers/stammdaten_api.py`, `routers/students.py`.
+
 ### Zuletzt fertiggestellt (2026-07-15)
 
 - **Stundenplanänderungs-/Beurlaubungsformular**: Button „📝 Stundenplanänderung"

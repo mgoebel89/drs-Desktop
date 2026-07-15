@@ -33,8 +33,13 @@
         sync();
       });
     }
-    document.querySelectorAll('[data-schueler]').forEach((b) => {
-      b.addEventListener('click', () => detail(b.dataset.schueler));
+    // Ganze Zeile öffnet das Bearbeiten-Modal — nur der Klick auf die
+    // Auswahl-Checkbox bleibt Auswahl (kein Öffnen).
+    document.querySelectorAll('tr[data-schueler]').forEach((tr) => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('.stu-pick')) return;
+        detail(tr.dataset.schueler);
+      });
     });
     if (btnVersetzen) {
       btnVersetzen.addEventListener('click', () => {

@@ -390,15 +390,20 @@ def _signature_overlay(sig_bytes: bytes):
     pw, ph = float(mb.width), float(mb.height)
     x0, y0, x1, y1 = _signature_rect()
 
-    # Deutlich sichtbar über der Unterschriftslinie platzieren: bis zur halben
-    # Zeilenbreite breit und bis ~44 pt hoch (Seitenverhältnis bleibt erhalten),
-    # linksbündig, sodass die Unterschrift auf der Linie sitzt.
-    max_w = min((x1 - x0) - 6, 200.0)
-    max_h = 44.0
+    # Die Unterschrift soll AUF der Linie sitzen (Feldunterkante ~y0) und darf
+    # NICHT in die darüberliegende Tabelle ragen. Die untersten Tabellenfelder
+    # der Vorlage beginnen bei y≈148.7; wir deckeln die Oberkante der
+    # Unterschrift knapp darunter. So bleibt sie sauber zwischen Linie und
+    # Tabelle statt wie zuvor (44 pt hoch) in die A1–A4-Zeilen zu ragen.
+    TABLE_BOTTOM = 146.0
+    base_y = y0 - 1.0                     # Bildunterkante knapp unter die Linie → „aufsitzen"
+    avail_h = max(10.0, TABLE_BOTTOM - base_y)
+    max_w = min((x1 - x0) - 6, 220.0)
+    max_h = min(20.0, avail_h)
     scale = min(max_w / iw, max_h / ih)
     w, h = iw * scale, ih * scale
     x = x0 + 4
-    y = y0 - 2            # Grundlinie leicht überlappen, damit sie „aufsitzt"
+    y = base_y
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(pw, ph))

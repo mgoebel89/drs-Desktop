@@ -463,6 +463,16 @@ def jahrgang_save(
     j.name = name
     j.kuerzel = payload.kuerzel.strip()[:40]
     j.active = payload.active
+    # Ein Jahrgang wird als Ganzes abgeschlossen bzw. reaktiviert: der
+    # Aktiv-Zustand kaskadiert auf seine Klassen UND Lerngruppen, damit sie
+    # gemeinsam aus allen Auswahllisten verschwinden (bzw. wieder auftauchen).
+    # klassen_key/subjects_key bleiben dabei unberührt — nur die Sichtbarkeit.
+    db.execute(TtSchulklasse.__table__.update()
+               .where(TtSchulklasse.jahrgang_id == j.id)
+               .values(active=payload.active))
+    db.execute(TtKlasse.__table__.update()
+               .where(TtKlasse.jahrgang_id == j.id)
+               .values(active=payload.active))
     db.commit()
     return {"ok": True}
 
