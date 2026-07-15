@@ -140,9 +140,11 @@ def _normalize(t: dict) -> dict:
         "done": bool(t.get("done")),
         "due_date": _clean_date(t.get("due_date")),
         "priority": t.get("priority") if isinstance(t.get("priority"), int) else 0,
+        "description": t.get("description") or "",
         "identifier": t.get("identifier") or "",
         "labels": [
-            {"title": lb.get("title", ""), "hex_color": lb.get("hex_color", "")}
+            {"id": lb.get("id"), "title": lb.get("title", ""),
+             "hex_color": lb.get("hex_color", "")}
             for lb in (t.get("labels") or []) if isinstance(lb, dict)
         ],
     }
@@ -241,6 +243,115 @@ def set_done(user: User, task_id: int, done: bool = True) -> dict:
 def delete_task(user: User, task_id: int) -> None:
     cfg = _require_cfg(user, need_project=False)
     _call(cfg, "DELETE", f"/api/v1/tasks/{task_id}")
+
+
+def update_task(user: User, task_id: int, *, title: str | None = None,
+                due_date: str | None = None, priority: int | None = None,
+                description: str | None = None) -> dict:
+    """Felder einer Aufgabe ändern. Read-modify-write wie `set_done`: Vikunjas
+    Task-Update ersetzt das ganze Modell, darum erst laden und nur die
+    übergebenen Felder überschreiben. `None` = Feld unverändert lassen."""
+    cfg = _require_cfg(user, need_project=False)
+    raw, _ = _call(cfg, "GET", f"/api/v1/tasks/{task_id}")
+    if not raw:
+        raise VikunjaError("Aufgabe nicht gefunden.", 404)
+    if title is not None:
+        t = title.strip()
+        if not t:
+            raise VikunjaError("Titel fehlt.", 400)
+        raw["title"] = t[:250]
+    if description is not None:
+        raw["description"] = description
+    if priority is not None:
+        raw["priority"] = max(0, min(5, int(priority)))
+    if due_date is not None:
+        raw["due_date"] = _to_vikunja_datetime(due_date)  # "" → Null-Datum
+    data, _ = _call(cfg, "POST", f"/api/v1/tasks/{task_id}", body=raw)
+    return _normalize(data or raw)
+
+
+# ── Kanban-Board (Views-API ab Vikunja 0.22) ─────────────────────────────
+
+def get_kanban_view_id(cfg: VikunjaConfig) -> int:
+    """Die Kanban-View des Projekts finden. Seit 0.22 hängen Buckets an einer
+    View, nicht mehr direkt am Projekt. `view_kind` kann als String ('kanban')
+    oder als Enum-Index (3) kommen — beides akzeptieren."""
+    data, _ = _call(cfg, "GET", f"/api/v1/projects/{cfg.project_id}/views")
+    for v in (data or []):
+        if not isinstance(v, dict):
+            continue
+        kind = v.get("view_kind")
+        if str(kind).lower() == "kanban" or kind == 3:
+            return int(v["id"])
+    raise VikunjaError("Keine Kanban-Ansicht im Projekt gefunden.", 502)
+
+
+def list_board(user: User) -> dict:
+    """Die Spalten (Buckets) der Kanban-View samt ihrer Aufgaben.
+
+    Der Buckets-Endpoint liefert im Kanban-Kontext die Tasks je Bucket gleich
+    mit — ein Request genügt fürs ganze Board."""
+    cfg = _require_cfg(user)
+    view_id = get_kanban_view_id(cfg)
+    data, _ = _call(
+        cfg, "GET",
+        f"/api/v1/projects/{cfg.project_id}/views/{view_id}/buckets")
+    buckets = []
+    for b in (data or []):
+        if not isinstance(b, dict):
+            continue
+        tasks = [_normalize(t) for t in (b.get("tasks") or [])
+                 if isinstance(t, dict)]
+        buckets.append({
+            "id": b.get("id"),
+            "title": b.get("title") or "(ohne Titel)",
+            "limit": b.get("limit") or 0,
+            "is_done_bucket": bool(b.get("is_done_bucket")),
+            "tasks": tasks,
+        })
+    return {"view_id": view_id, "buckets": buckets}
+
+
+def move_task(user: User, bucket_id: int, task_id: int,
+              position: float | None = None) -> None:
+    """Aufgabe in einen anderen Bucket schieben.
+
+    Ab Vikunja 0.24 ignoriert das Task-Update ein `bucket_id` — Verschieben
+    läuft ausschließlich über diesen dedizierten Endpoint. Ins „Erledigt"-Bucket
+    zu schieben hakt die Aufgabe serverseitig automatisch ab (und umgekehrt)."""
+    cfg = _require_cfg(user)
+    view_id = get_kanban_view_id(cfg)
+    body: dict = {"task_id": int(task_id), "bucket_id": int(bucket_id),
+                  "project_view_id": view_id}
+    if position is not None:
+        body["position"] = position
+    _call(cfg, "POST",
+          f"/api/v1/projects/{cfg.project_id}/views/{view_id}"
+          f"/buckets/{bucket_id}/tasks", body=body)
+
+
+# ── Labels ───────────────────────────────────────────────────────────────
+
+def list_labels(user: User) -> list[dict]:
+    """Alle Labels des Nutzers (für die Auswahl in der Edit-Karte)."""
+    cfg = _require_cfg(user, need_project=False)
+    data, _ = _call(cfg, "GET", "/api/v1/labels")
+    return [
+        {"id": lb["id"], "title": lb.get("title", ""),
+         "hex_color": lb.get("hex_color", "")}
+        for lb in (data or []) if isinstance(lb, dict) and lb.get("id")
+    ]
+
+
+def add_label(user: User, task_id: int, label_id: int) -> None:
+    cfg = _require_cfg(user, need_project=False)
+    _call(cfg, "PUT", f"/api/v1/tasks/{task_id}/labels",
+          body={"label_id": int(label_id)})
+
+
+def remove_label(user: User, task_id: int, label_id: int) -> None:
+    cfg = _require_cfg(user, need_project=False)
+    _call(cfg, "DELETE", f"/api/v1/tasks/{task_id}/labels/{label_id}")
 
 
 def test_connection(user: User) -> tuple[bool, str]:

@@ -168,6 +168,35 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
+### Vikunja-Board (2026-07-15, später)
+
+Das Aufgaben-Modul um ein **Kanban-Board** erweitert (bisher nur flache Liste):
+
+- **Umschalter Liste ↔ Board** oben (merkt sich die Wahl in `localStorage`, `#board`
+  im Hash erzwingt das Board). Die schnelle Fälligkeits-Liste bleibt fürs Alltags-
+  Abhaken, das Board fürs Sortieren.
+- **Views-API ab Vikunja 0.22:** Buckets hängen an einer Kanban-**View**. Neue
+  Client-Funktionen in `services/vikunja_client.py`: `get_kanban_view_id`
+  (findet die View über `view_kind`), `list_board` (Buckets + eingebettete Tasks),
+  `move_task` (dedizierter Endpoint `…/views/:view/buckets/:bucket/tasks` — ab 0.24
+  ignoriert das Task-Update `bucket_id`!), `update_task`, `list_labels`/`add_label`/
+  `remove_label`. `_normalize` um `description` + Label-`id` erweitert.
+- **Drag & Drop überall** per Pointer-Events (Muster wie die Schüler-Wischzuordnung),
+  ein Klick ohne Ziehen öffnet die **Edit-Karte** (Titel/Fällig/Priorität/Beschreibung
+  + Labels setzen/entfernen). Drop ins „Erledigt"-Bucket hakt serverseitig automatisch
+  ab. Frontend in neuer `static/vikunja.js`; Board-CSS + Umschalter + Beschreibungs-
+  feld in `templates/vikunja/list.html`.
+- Neue Endpoints in `routers/vikunja.py`: `GET /api/vikunja/board`,
+  `POST …/tasks/{id}/move`, `POST …/tasks/{id}/update`, `GET /api/vikunja/labels`,
+  `POST …/tasks/{id}/labels` + `…/labels/{id}/delete`.
+
+Verifiziert wurde das komplette Frontend gegen **gemockte** Vikunja-Aufrufe
+(Board rendern, Drag&Drop mit Move-Call, Edit-Karte laden/speichern, Label
+add/remove) — die echte Vikunja-Instanz ist aus der Dev-Umgebung nicht erreichbar.
+**Offen: End-to-End-Test gegen die reale Instanz** (v. a. `view_kind`-Form,
+Move-Body, Label-Endpoints). Bucket-Verwaltung (Spalten anlegen/umbenennen) ist
+bewusst noch nicht drin.
+
 ### UI-Feinschliff aus dem Testlauf (2026-07-15, später)
 
 Sieben beim Testen gefundene Punkte, alle umgesetzt und gegen die echte App

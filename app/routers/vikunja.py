@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Body, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -57,15 +57,17 @@ def aufgaben_create(
     due_date: str = Form(""),
     priority: int = Form(0),
     description: str = Form(""),
+    view: str = Form(""),
 ):
+    suffix = "#board" if view == "board" else ""
     try:
         task = vk.create_task(user, title, due_date, priority, description)
     except vk.VikunjaError as e:
-        return RedirectResponse(f"/aufgaben?err={str(e)[:200]}", status_code=303)
+        return RedirectResponse(f"/aufgaben?err={str(e)[:200]}{suffix}", status_code=303)
     audit(db, "vikunja_task_created", actor=user,
           target=str(task.get("id") or ""), detail=title[:120], request=request)
     db.commit()
-    return RedirectResponse("/aufgaben", status_code=303)
+    return RedirectResponse(f"/aufgaben{suffix}", status_code=303)
 
 
 @router.post("/api/vikunja/tasks/{task_id}/done")
@@ -122,3 +124,103 @@ def dashboard_tasks(
         "total": len(tasks),
         "tasks": tasks[:max(1, min(limit, 20))],
     })
+
+
+# ── Kanban-Board ──────────────────────────────────────────────────────────
+
+@router.get("/api/vikunja/board")
+def board(user: Annotated[User, Depends(require_user)]):
+    """Spalten (Buckets) + Aufgaben der Kanban-View."""
+    try:
+        return JSONResponse({"ok": True, **vk.list_board(user)})
+    except vk.VikunjaError as e:
+        return _error_response(e)
+
+
+@router.post("/api/vikunja/tasks/{task_id}/move")
+def task_move(
+    request: Request,
+    task_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    payload: dict = Body(...),
+):
+    """Aufgabe in einen anderen Bucket schieben (Drag & Drop im Board)."""
+    try:
+        bucket_id = int(payload.get("bucket_id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "bucket_id fehlt."}, status_code=400)
+    position = payload.get("position")
+    try:
+        vk.move_task(user, bucket_id, task_id,
+                     float(position) if position is not None else None)
+    except vk.VikunjaError as e:
+        return _error_response(e)
+    audit(db, "vikunja_task_moved", actor=user, target=str(task_id),
+          detail=f"bucket {bucket_id}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/vikunja/tasks/{task_id}/update")
+def task_update(
+    request: Request,
+    task_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    payload: dict = Body(...),
+):
+    """Titel/Fälligkeit/Priorität/Beschreibung ändern (Edit-Karte)."""
+    try:
+        task = vk.update_task(
+            user, task_id,
+            title=payload.get("title"),
+            due_date=payload.get("due_date"),
+            priority=(int(payload["priority"]) if "priority" in payload else None),
+            description=payload.get("description"),
+        )
+    except vk.VikunjaError as e:
+        return _error_response(e)
+    audit(db, "vikunja_task_updated", actor=user, target=str(task_id), request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "task": task})
+
+
+# ── Labels ────────────────────────────────────────────────────────────────
+
+@router.get("/api/vikunja/labels")
+def labels(user: Annotated[User, Depends(require_user)]):
+    try:
+        return JSONResponse({"ok": True, "labels": vk.list_labels(user)})
+    except vk.VikunjaError as e:
+        return _error_response(e)
+
+
+@router.post("/api/vikunja/tasks/{task_id}/labels")
+def task_label_add(
+    task_id: int,
+    user: Annotated[User, Depends(require_user)],
+    payload: dict = Body(...),
+):
+    try:
+        label_id = int(payload.get("label_id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "label_id fehlt."}, status_code=400)
+    try:
+        vk.add_label(user, task_id, label_id)
+    except vk.VikunjaError as e:
+        return _error_response(e)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/vikunja/tasks/{task_id}/labels/{label_id}/delete")
+def task_label_remove(
+    task_id: int,
+    label_id: int,
+    user: Annotated[User, Depends(require_user)],
+):
+    try:
+        vk.remove_label(user, task_id, label_id)
+    except vk.VikunjaError as e:
+        return _error_response(e)
+    return JSONResponse({"ok": True})

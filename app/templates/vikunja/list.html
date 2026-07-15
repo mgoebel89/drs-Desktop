@@ -1,9 +1,61 @@
 {% extends "base.html" %}
 {% block title %}Aufgaben{% endblock %}
 {% block content %}
+<style>
+  .view-toggle { display: inline-flex; gap: 0; border: 1px solid var(--blau); border-radius: 8px; overflow: hidden; }
+  .vt-btn { border: 0; background: transparent; color: var(--blau); font-family: inherit;
+    font-size: 13px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
+  .vt-btn + .vt-btn { border-left: 1px solid var(--blau); }
+  .vt-btn.active { background: var(--blau); color: #fff; }
+
+  /* Kanban-Board */
+  .board { display: flex; gap: .8rem; overflow-x: auto; padding-bottom: .6rem; align-items: flex-start; }
+  .board-col { flex: 0 0 260px; background: #f4f6f8; border-radius: 10px; padding: .5rem;
+    display: flex; flex-direction: column; min-height: 80px; }
+  .board-col.is-done { background: #eef7ee; }
+  .board-col.drop-target { outline: 2px dashed var(--blau); outline-offset: -2px; }
+  .board-col-head { display: flex; align-items: center; justify-content: space-between;
+    padding: .1rem .3rem .5rem; }
+  .board-col-title { font-weight: 700; color: var(--blau); font-size: 13px; }
+  .board-col.is-done .board-col-title { color: var(--gruen); }
+  .board-col-count { font-size: 11px; color: var(--muted); background: #fff; border-radius: 10px;
+    padding: 1px 8px; font-weight: 600; }
+  .board-cards { display: flex; flex-direction: column; gap: .5rem; min-height: 24px; }
+  .board-card { background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    padding: .5rem .6rem; cursor: grab; box-shadow: 0 1px 2px rgba(0,0,0,.05); touch-action: none; }
+  .board-card:hover { border-color: var(--blau); }
+  .board-card.dragging-src { opacity: .4; }
+  .bc-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
+  .bc-desc { font-size: 11px; color: var(--muted); margin-top: 2px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .bc-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; align-items: center; }
+  .bc-due { font-size: 11px; color: var(--muted); }
+  .bc-due.is-overdue { color: var(--pink); font-weight: 700; }
+  .bc-prio { background: #ffe3e3; color: #c0392b; }
+  .bc-label { color: #333; }
+  /* Drag-Klon, folgt dem Zeiger */
+  .drag-ghost { position: fixed; z-index: 2000; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    transform: rotate(2deg); opacity: .95; }
+  /* Label-Chips in der Edit-Karte */
+  .lbl-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: .5rem; }
+  .lbl-chip { color: #333; display: inline-flex; align-items: center; gap: 4px; }
+  .lbl-x { border: 0; background: transparent; cursor: pointer; font-size: 14px; line-height: 1;
+    color: inherit; padding: 0; }
+  .task-form textarea { min-height: 60px; }
+</style>
+
 <div class="card">
-  <h1>Aufgaben</h1>
-  <p class="muted">Offene Aufgaben aus deinem Vikunja-Projekt — fällige zuerst. Abgehakte Aufgaben verschwinden aus der Liste.</p>
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0">Aufgaben</h1>
+    {% if configured and not error %}
+    <div class="view-toggle" style="margin-left:auto" role="tablist">
+      <button type="button" class="vt-btn active" data-view="list">☰ Liste</button>
+      <button type="button" class="vt-btn" data-view="board">▦ Board</button>
+    </div>
+    {% endif %}
+  </div>
+  <p class="muted">Aufgaben aus deinem Vikunja-Projekt. In der <strong>Liste</strong> stehen die offenen,
+    fällige zuerst; im <strong>Board</strong> ziehst du Karten zwischen den Spalten.</p>
 
   {% if request.query_params.get('err') %}
     <div class="flash flash-err" style="margin-top:1rem">{{ request.query_params.get('err') }}</div>
@@ -36,39 +88,52 @@
         {% endfor %}
       </select>
     </div>
+    <div style="flex:1 1 100%">
+      <label>Beschreibung (optional)</label>
+      <textarea name="description" placeholder="Notizen, Kontext, Checkliste …"></textarea>
+    </div>
+    <input type="hidden" name="view" id="createView" value="list">
     <div><button class="btn" type="submit">+ Anlegen</button></div>
   </form>
 
-  <h2 style="margin-top:1.8rem">Offen <span class="muted" id="taskCount">({{ tasks|length }})</span></h2>
-  {% if tasks %}
-  <ul class="task-list" id="taskList">
-    {% for t in tasks %}
-    <li class="task-item" data-id="{{ t.id }}">
-      <input type="checkbox" class="task-check" title="Als erledigt markieren">
-      <div class="task-main">
-        <strong>{{ t.title }}</strong>
-        <div class="task-meta">
-          {% if t.due_date %}
-          <span class="task-due" data-due="{{ t.due_date }}">{{ t.due_date[8:10] }}.{{ t.due_date[5:7] }}.{{ t.due_date[0:4] }}</span>
-          {% else %}
-          <span class="muted">ohne Fälligkeit</span>
-          {% endif %}
-          {% if t.priority >= 3 %}
-          <span class="badge task-prio">{{ priorities.get(t.priority, '') }}</span>
-          {% endif %}
-          {% for lb in t.labels %}
-          <span class="badge task-label" style="background:{{ lb.hex_color or '#eee' }}">{{ lb.title }}</span>
-          {% endfor %}
+  <!-- Listen-Ansicht -->
+  <div id="view-list">
+    <h2 style="margin-top:1.8rem">Offen <span class="muted" id="taskCount">({{ tasks|length }})</span></h2>
+    {% if tasks %}
+    <ul class="task-list" id="taskList">
+      {% for t in tasks %}
+      <li class="task-item" data-id="{{ t.id }}">
+        <input type="checkbox" class="task-check" title="Als erledigt markieren">
+        <div class="task-main">
+          <strong>{{ t.title }}</strong>
+          <div class="task-meta">
+            {% if t.due_date %}
+            <span class="task-due" data-due="{{ t.due_date }}">{{ t.due_date[8:10] }}.{{ t.due_date[5:7] }}.{{ t.due_date[0:4] }}</span>
+            {% else %}
+            <span class="muted">ohne Fälligkeit</span>
+            {% endif %}
+            {% if t.priority >= 3 %}
+            <span class="badge task-prio">{{ priorities.get(t.priority, '') }}</span>
+            {% endif %}
+            {% for lb in t.labels %}
+            <span class="badge task-label" style="background:{{ lb.hex_color or '#eee' }}">{{ lb.title }}</span>
+            {% endfor %}
+          </div>
         </div>
-      </div>
-      <button class="btn-sec task-del" title="Aufgabe löschen"
-              style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="muted">Keine offenen Aufgaben. 🎉</p>
-  {% endif %}
+        <button class="btn-sec task-del" title="Aufgabe löschen"
+                style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)">✕</button>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Keine offenen Aufgaben. 🎉</p>
+    {% endif %}
+  </div>
+
+  <!-- Board-Ansicht -->
+  <div id="view-board" hidden>
+    <div id="board" class="board" style="margin-top:1.4rem"><div class="muted">lädt …</div></div>
+  </div>
 
   {% endif %}
 </div>
@@ -132,4 +197,8 @@
   });
 })();
 </script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vikunja.js?v={{ static_version() }}"></script>
 {% endblock %}
