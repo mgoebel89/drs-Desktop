@@ -326,18 +326,22 @@
   // nachgezogen bekommt, ist Sache des Backends.
   async function openCreate() {
     // Alles, was die Auswahlfelder brauchen, VOR dem Öffnen laden — ein
-    // nachlaufendes getJSON() lässt die Dropdowns leer.
-    if (!BUCKETS.length) {
-      try { const d = await getJSON('/api/vikunja/board'); if (d.ok) BUCKETS = d.buckets || []; }
-      catch (_) { /* ohne Spaltenliste legen wir in die Standardspalte */ }
-    }
-    if (!LABELS.length) {
-      try { const d = await getJSON('/api/vikunja/labels'); if (d.ok) LABELS = d.labels || []; }
-      catch (_) { /* Labels sind optional */ }
-    }
-    if (!LERNGRUPPEN.length) {
-      try { const d = await getJSON('/api/vikunja/lerngruppen'); if (d.ok) LERNGRUPPEN = d.lerngruppen || []; }
-      catch (_) { /* ohne Lerngruppen bleibt der Picker leer */ }
+    // nachlaufendes getJSON() lässt die Dropdowns leer. Aber PARALLEL und je
+    // einzeln abgefangen: nacheinander würde eine klemmende Vikunja-Instanz den
+    // Knopf minutenlang tot wirken lassen, und eine fehlende Liste darf die
+    // anderen Felder nicht verhindern.
+    const hole = async (url, ok) => {
+      try { const d = await getJSON(url); if (d.ok) ok(d); } catch (_) { /* Feld bleibt leer */ }
+    };
+    newBtn.disabled = true;
+    try {
+      await Promise.all([
+        BUCKETS.length ? null : hole('/api/vikunja/board', (d) => { BUCKETS = d.buckets || []; }),
+        LABELS.length ? null : hole('/api/vikunja/labels', (d) => { LABELS = d.labels || []; }),
+        LERNGRUPPEN.length ? null : hole('/api/vikunja/lerngruppen', (d) => { LERNGRUPPEN = d.lerngruppen || []; }),
+      ]);
+    } finally {
+      newBtn.disabled = false;
     }
 
     const title = el('input', { maxlength: '250', placeholder: 'z. B. Klausur BSMT 22b korrigieren' });

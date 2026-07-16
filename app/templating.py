@@ -66,11 +66,20 @@ templates.env.globals["ai_enabled"] = _ai_enabled
 
 
 def _static_version() -> int:
-    """Cache-Busting: Zeitstempel der drs.css. Ändert sich die Datei, ändert
-    sich der ?v=-Parameter, und der Browser lädt die CSS garantiert neu."""
+    """Cache-Busting für ALLE Dateien unter /static: der jüngste Zeitstempel im
+    Verzeichnis.
+
+    Früher stand hier nur die mtime der `drs.css` — an diesem einen Wert hängt
+    aber auch jedes `<script src="…?v=…">`. Wer JavaScript ohne CSS änderte,
+    bekam denselben `?v=`-Wert und damit die alte Datei aus dem Browser-Cache
+    serviert (genau so blieb der Aufgaben-Dialog tot). Ein gemeinsamer Wert über
+    alle Assets macht eine JS-Änderung wieder sichtbar; dass dabei auch die CSS
+    neu geladen wird, ist bei einer Handvoll kleiner Dateien belanglos.
+    """
     try:
-        return int((BASE_DIR / "static" / "drs.css").stat().st_mtime)
-    except OSError:
+        return max(int(p.stat().st_mtime)
+                   for p in (BASE_DIR / "static").iterdir() if p.is_file())
+    except (OSError, ValueError):
         return 0
 
 

@@ -168,6 +168,18 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
+### ⚠️ Cache-Busting galt nur für CSS (2026-07-16, behoben)
+
+**Landmine für jede künftige Änderung:** `static_version()` in `app/templating.py`
+lieferte die mtime der **`drs.css`** — an diesem einen Wert hängt aber auch jedes
+`<script src="/static/….js?v={{ static_version() }}">` (12 Stellen, 4 JS-Dateien).
+Wer JavaScript ohne CSS änderte, bekam denselben `?v=`-Wert und damit die **alte
+Datei aus dem Browser-Cache**. Im Container beißt das besonders: `git pull` fasst
+unveränderte Dateien nicht an, die `drs.css` behält ihre mtime. So war der neue
+Aufgaben-Dialog nach dem Deploy tot — der Knopf existierte (Template neu), sein
+Handler nicht (JS alt). `static_version()` nimmt jetzt den **jüngsten Zeitstempel
+aller Dateien unter `/static`**; eine JS-Änderung bumpt die Version damit wieder.
+
 ### Vikunja: Bucket-Bug behoben + Anlege-Dialog (2026-07-16)
 
 **Der Bug:** Im Board standen alle Spalten auf 0, obwohl die Aufgaben in Vikunja
