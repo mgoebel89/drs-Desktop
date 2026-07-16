@@ -168,6 +168,19 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
+### ⚠️ Zeigergesten: pointercancel MUSS aufräumen (2026-07-16, behoben)
+
+Im Board blieb nach einem Zug der Klon am Zeiger kleben, und nichts ging mehr bis
+zum Neuladen. Ursache: Der Drag-Code räumte nur bei `pointerup` auf. Übernimmt der
+Browser die Geste selbst (Textauswahl, natives Drag), schickt er aber **kein
+pointerup, sondern `pointercancel`** — der Zustand blieb stehen, jeder weitere Zug
+erzeugte einen weiteren Geist. **Regel für jede Zeigergeste:** ein einziger
+`endDrag()`-Ausgang, an `pointerup` UND `pointercancel` gehängt; dazu auf
+`pointerdown` ein `preventDefault()` + `setPointerCapture()` und `user-select:none`
+auf der Karte, damit die Geste gar nicht erst abgebrochen wird. Die Schüler-
+Wischzuordnung (`schueler.js`) macht das seit jeher richtig — beim Portieren ins
+Board fehlte genau dieser Zweig.
+
 ### ⚠️ Cache-Busting galt nur für CSS (2026-07-16, behoben)
 
 **Landmine für jede künftige Änderung:** `static_version()` in `app/templating.py`

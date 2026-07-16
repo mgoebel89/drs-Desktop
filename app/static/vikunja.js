@@ -159,20 +159,41 @@
   // sich beim Neu-Rendern des Boards keine doppelten Listener an.
   let drag = null;
 
+  // Jede Ziehbewegung endet über GENAU diese Funktion — auch die abgebrochene.
+  // Ohne den pointercancel-Zweig blieb der Klon am Zeiger kleben und das Board
+  // war bis zum Neuladen tot: Der Browser schickt bei einer Geste, die er selbst
+  // übernimmt (Textauswahl, natives Drag), kein pointerup, sondern pointercancel.
+  function endDrag(d) {
+    if (d.clone) d.clone.remove();
+    d.card.classList.remove('dragging-src');
+    if (d.over) d.over.classList.remove('drop-target');
+    try { d.card.releasePointerCapture(d.pointerId); } catch (_) { /* schon weg */ }
+  }
+
   if (boardEl) {
     boardEl.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       const card = e.target.closest('.board-card');
-      if (!card) return;
+      if (!card || drag) return;              // nie zwei Züge gleichzeitig
+      // Verhindert, dass der Browser aus dem Ziehen eine Textauswahl oder ein
+      // natives Drag macht — beides würde die Geste abbrechen.
+      e.preventDefault();
+      try { card.setPointerCapture(e.pointerId); } catch (_) { /* dann eben ohne */ }
       drag = {
-        card, from: String(card.dataset.bucket),
+        card, from: String(card.dataset.bucket), pointerId: e.pointerId,
         x0: e.clientX, y0: e.clientY, moved: false,
         clone: null, over: null, offX: 0, offY: 0,
       };
     });
 
+    document.addEventListener('pointercancel', (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      const d = drag; drag = null;
+      endDrag(d);
+    });
+
     document.addEventListener('pointermove', (e) => {
-      if (!drag) return;
+      if (!drag || e.pointerId !== drag.pointerId) return;
       const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
       if (!drag.moved && Math.hypot(dx, dy) < 6) return;
       if (!drag.moved) {
@@ -197,13 +218,15 @@
       if (col) col.classList.add('drop-target');
     });
 
-    document.addEventListener('pointerup', () => {
-      if (!drag) return;
+    document.addEventListener('pointerup', (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
       const d = drag; drag = null;
-      if (!d.moved) { openEdit(d.card._task); return; }   // Klick → Edit-Karte
-      if (d.clone) d.clone.remove();
-      d.card.classList.remove('dragging-src');
-      if (d.over) d.over.classList.remove('drop-target');
+      if (!d.moved) {                                     // Klick → Edit-Karte
+        endDrag(d);
+        openEdit(d.card._task);
+        return;
+      }
+      endDrag(d);
       const toBucket = d.over ? String(d.over.dataset.bucket) : null;
       if (!toBucket || toBucket === d.from) return;
       // Optimistisch verschieben, bei Fehler neu laden.
