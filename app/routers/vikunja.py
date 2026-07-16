@@ -7,14 +7,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Body, Depends, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
 from app.models import User
 from app.services import vikunja_client as vk
+from app.services.lerngruppen import lerngruppen
 from app.templating import templates
 
 router = APIRouter()
@@ -48,26 +49,68 @@ def aufgaben_page(
     })
 
 
-@router.post("/aufgaben")
+@router.post("/api/vikunja/tasks")
 def aufgaben_create(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
-    title: str = Form(...),
-    due_date: str = Form(""),
-    priority: int = Form(0),
-    description: str = Form(""),
-    view: str = Form(""),
+    payload: dict = Body(...),
 ):
-    suffix = "#board" if view == "board" else ""
+    """Neue Aufgabe aus dem Anlege-Dialog.
+
+    Die gewählte Lerngruppe wird zu einem Vikunja-Label „Klasse: <Name>“ —
+    angelegt, falls es das noch nicht gibt. Ein Request von außen, mehrere nach
+    innen (Vikunja kennt beim Anlegen weder Bucket noch Labels)."""
+    label_ids: list[int] = []
+    for lid in (payload.get("label_ids") or []):
+        try:
+            label_ids.append(int(lid))
+        except (TypeError, ValueError):
+            continue
+
+    klasse = (payload.get("klasse") or "").strip()
     try:
-        task = vk.create_task(user, title, due_date, priority, description)
+        if klasse:
+            lb = vk.ensure_label(user, vk.klasse_label_title(klasse),
+                                 vk.KLASSE_LABEL_COLOR)
+            if lb.get("id") and lb["id"] not in label_ids:
+                label_ids.append(int(lb["id"]))
+
+        bucket_id = payload.get("bucket_id")
+        task = vk.create_task(
+            user,
+            title=str(payload.get("title") or ""),
+            due_date=str(payload.get("due_date") or ""),
+            priority=int(payload.get("priority") or 0),
+            description=str(payload.get("description") or ""),
+            bucket_id=int(bucket_id) if bucket_id else None,
+            label_ids=label_ids,
+        )
     except vk.VikunjaError as e:
-        return RedirectResponse(f"/aufgaben?err={str(e)[:200]}{suffix}", status_code=303)
+        return _error_response(e)
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Ungültige Eingabe."},
+                            status_code=400)
+
     audit(db, "vikunja_task_created", actor=user,
-          target=str(task.get("id") or ""), detail=title[:120], request=request)
+          target=str(task.get("id") or ""),
+          detail=str(payload.get("title") or "")[:120], request=request)
     db.commit()
-    return RedirectResponse(f"/aufgaben{suffix}", status_code=303)
+    return JSONResponse({"ok": True, "task": task})
+
+
+@router.get("/api/vikunja/lerngruppen")
+def aufgaben_lerngruppen(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Aktive Lerngruppen für den Klassen-Picker im Anlege-Dialog. Kommt aus
+    dem `lerngruppen()`-Service, damit stillgelegte Jahrgänge hier genauso
+    verschwinden wie in allen anderen Pickern."""
+    return JSONResponse({"ok": True, "lerngruppen": [
+        {"name": lg.display_name or lg.klassen_key}
+        for lg in lerngruppen(db, user)
+    ]})
 
 
 @router.post("/api/vikunja/tasks/{task_id}/done")

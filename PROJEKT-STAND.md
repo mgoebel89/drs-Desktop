@@ -168,6 +168,40 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
+### Vikunja: Bucket-Bug behoben + Anlege-Dialog (2026-07-16)
+
+**Der Bug:** Im Board standen alle Spalten auf 0, obwohl die Aufgaben in Vikunja
+zugeordnet waren. Ursache: `list_board()` las `…/views/{view}/buckets` und
+erwartete die Aufgaben eingebettet. Dieser Endpoint liefert aber **nur die
+Spalten-Metadaten**. Vikunja gibt die Aufgaben über den **Tasks**-Endpoint der
+View aus — ist die View vom Typ Kanban, antwortet `…/views/{view}/tasks` mit den
+Buckets *inklusive* ihrer Aufgaben statt mit einer flachen Liste. Genau darauf
+liegt der Abruf jetzt (`_fetch_buckets`), mit dem Buckets-Endpoint als
+Rückfallebene für ältere Instanzen. **Lehre:** Der frühere Mock war gegen die
+eigene Annahme gebaut und hat den Fehler bestätigt statt gefunden — der neue
+Mock bildet die echte API nach (Buckets-Endpoint liefert bewusst leere `tasks`)
+und mockt nur `_call`, sodass der komplette Client-Code echt läuft.
+
+**Anlege-Dialog:** Die Formular-Zeile über der Liste ist raus; „+ Neue Aufgabe"
+oben rechts öffnet ein `DRS.modal()` mit Titel, Fällig, **Klasse**, Spalte,
+Priorität, Beschreibung, Labels. Gespeichert wird ohne Reload (Karte + Listen-
+Eintrag werden eingesetzt, Liste sortiert wie der Server). Die alte Formular-
+Route `POST /aufgaben` ist gelöscht, es gibt nur noch `POST /api/vikunja/tasks`.
+
+**Klasse an einer Aufgabe = Vikunja-Label** „Klasse: <Lerngruppe>" (Farbe
+DRS-Blau), bei Bedarf automatisch angelegt (`ensure_label`), Auswahl kommt über
+`GET /api/vikunja/lerngruppen` aus dem `lerngruppen()`-Service (stillgelegte
+Jahrgänge fallen also mit raus). Bewusst **keine** eigene Tabelle: keine
+Migration, in Vikunja sichtbar und filterbar. Preis: Es ist ein String — wird
+eine Lerngruppe umbenannt, bleibt das alte Label stehen.
+
+Außerdem: Die Kanban-View-ID wird prozessweit gecacht (`_view_cache`, bei 404
+einmal frisch geholt) — vorher kostete jedes Verschieben einen zusätzlichen
+`/views`-Request. Verifiziert im Browser gegen die simulierte API: Karten in den
+richtigen Spalten, Dialog legt in die gewählte Spalte an, Labels inkl. Klassen-
+Label, Drag & Drop, Einsortieren in die Liste. **Offen bleibt der Test gegen die
+echte Instanz** (v. a. ob `view_kind` dort als String oder Index kommt).
+
 ### Vikunja-Board (2026-07-15, später)
 
 Das Aufgaben-Modul um ein **Kanban-Board** erweitert (bisher nur flache Liste):
@@ -195,7 +229,8 @@ Verifiziert wurde das komplette Frontend gegen **gemockte** Vikunja-Aufrufe
 add/remove) — die echte Vikunja-Instanz ist aus der Dev-Umgebung nicht erreichbar.
 **Offen: End-to-End-Test gegen die reale Instanz** (v. a. `view_kind`-Form,
 Move-Body, Label-Endpoints). Bucket-Verwaltung (Spalten anlegen/umbenennen) ist
-bewusst noch nicht drin.
+bewusst noch nicht drin. **Nachtrag 2026-07-16:** Der Board-Abruf war falsch —
+siehe den Abschnitt „Bucket-Bug behoben" oben.
 
 ### UI-Feinschliff aus dem Testlauf (2026-07-15, später)
 

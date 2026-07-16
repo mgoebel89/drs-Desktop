@@ -43,18 +43,30 @@
   const vBoard = document.getElementById('view-board');
   let boardLoaded = false;
   let LABELS = [];
+  let BUCKETS = [];        // Spalten der Kanban-View, auch für den Anlege-Dialog
+  let LERNGRUPPEN = [];
 
   // ── Umschalter ────────────────────────────────────────────────────────
   const toggle = document.querySelector('.view-toggle');
+
+  // Die Liste ist server-gerendert: Wer im Board etwas ändert oder löscht,
+  // macht sie ungültig. Statt sie nachzupflegen holen wir sie beim nächsten
+  // Umschalten einmal frisch — Reload nur dann, wenn er wirklich nötig ist.
+  let listStale = false;
+  function markListStale() { listStale = true; }
+  function reloadBoard() {
+    boardLoaded = false;
+    if (vBoard && !vBoard.hidden) loadBoard();
+  }
+
   function showView(name) {
     if (!vList || !vBoard) return;
     const board = name === 'board';
+    if (!board && listStale) { location.reload(); return; }
     vList.hidden = board;
     vBoard.hidden = !board;
     if (toggle) toggle.querySelectorAll('.vt-btn').forEach((b) =>
       b.classList.toggle('active', b.dataset.view === name));
-    const cv = document.getElementById('createView');
-    if (cv) cv.value = name;
     try { localStorage.setItem('aufgabenView', name); } catch (_) { /* egal */ }
     if (board && !boardLoaded) loadBoard();
   }
@@ -80,7 +92,8 @@
           + (d.error || 'Konnte das Board nicht laden.') + '</div>';
         return;
       }
-      renderBoard(d.buckets || []);
+      BUCKETS = d.buckets || [];
+      renderBoard(BUCKETS);
       boardLoaded = true;
     } catch (e) {
       boardEl.innerHTML = '<div class="flash flash-err" style="display:block">'
@@ -202,6 +215,10 @@
       if (fromCol) updateCount(fromCol);
       postJSON('/api/vikunja/tasks/' + d.card.dataset.id + '/move', {
         bucket_id: Number(toBucket),
+      }).then(() => {
+        // Ins „Erledigt"-Bucket zu schieben hakt in Vikunja ab — dann stimmt
+        // die offene Liste nicht mehr.
+        markListStale();
       }).catch((err) => {
         toast('Verschieben fehlgeschlagen: ' + err.message);
         loadBoard();
@@ -275,14 +292,14 @@
     modal({
       title: 'Aufgabe bearbeiten',
       body,
-      onClose: () => { if (dirty) loadBoard(); },  // reine Label-Änderungen nachziehen
+      onClose: () => { if (dirty) reloadBoard(); },  // reine Label-Änderungen nachziehen
       actions: [
         {
           label: 'Löschen', kind: 'danger',
           onClick: (close) => {
             if (!confirm('Aufgabe „' + t.title + '“ in Vikunja löschen?')) return;
             postJSON('/api/vikunja/tasks/' + t.id + '/delete', {})
-              .then(() => { dirty = false; close(); loadBoard(); })
+              .then(() => { dirty = false; close(); reloadBoard(); markListStale(); })
               .catch((e) => toast(e.message));
           },
         },
@@ -295,11 +312,176 @@
                 title: title.value, due_date: due.value,
                 priority: Number(prio.value), description: desc.value,
               });
-              dirty = false; close(); loadBoard();
+              dirty = false; close(); reloadBoard(); markListStale();
             } catch (e) { toast(e.message); }
           },
         },
       ],
     });
   }
+
+  // ── Anlege-Dialog ─────────────────────────────────────────────────────
+  // Ein Objekt mit ein paar Feldern → Modal, kein Vollbild-Assistent. Gespeichert
+  // wird in EINEM Request nach außen; dass Vikunja intern Bucket und Labels
+  // nachgezogen bekommt, ist Sache des Backends.
+  async function openCreate() {
+    // Alles, was die Auswahlfelder brauchen, VOR dem Öffnen laden — ein
+    // nachlaufendes getJSON() lässt die Dropdowns leer.
+    if (!BUCKETS.length) {
+      try { const d = await getJSON('/api/vikunja/board'); if (d.ok) BUCKETS = d.buckets || []; }
+      catch (_) { /* ohne Spaltenliste legen wir in die Standardspalte */ }
+    }
+    if (!LABELS.length) {
+      try { const d = await getJSON('/api/vikunja/labels'); if (d.ok) LABELS = d.labels || []; }
+      catch (_) { /* Labels sind optional */ }
+    }
+    if (!LERNGRUPPEN.length) {
+      try { const d = await getJSON('/api/vikunja/lerngruppen'); if (d.ok) LERNGRUPPEN = d.lerngruppen || []; }
+      catch (_) { /* ohne Lerngruppen bleibt der Picker leer */ }
+    }
+
+    const title = el('input', { maxlength: '250', placeholder: 'z. B. Klausur BSMT 22b korrigieren' });
+    const due = el('input', { type: 'date' });
+    const prio = el('select', {}, Object.entries(PRIORITY).map(([v, l]) =>
+      el('option', { value: v }, l || '— keine —')));
+    const desc = el('textarea', { rows: '4', placeholder: 'Notizen, Kontext, Checkliste …' });
+    const bucketSel = el('select', {}, [
+      el('option', { value: '' }, '— Standardspalte —'),
+      ...BUCKETS.map((b) => el('option', { value: b.id }, b.title)),
+    ]);
+    const klasseSel = el('select', {}, [
+      el('option', { value: '' }, '— keine —'),
+      ...LERNGRUPPEN.map((l) => el('option', { value: l.name }, l.name)),
+    ]);
+
+    // Labels vor dem Anlegen nur vormerken — die Aufgabe gibt es ja noch nicht.
+    const pending = [];
+    const chips = el('div', { class: 'lbl-chips' });
+    function renderChips() {
+      chips.innerHTML = '';
+      if (!pending.length) chips.appendChild(el('span', { class: 'muted', style: 'font-size:12px' }, 'keine'));
+      pending.forEach((lb) => chips.appendChild(el('span', {
+        class: 'badge lbl-chip', style: 'background:' + labelBg(lb.hex_color),
+      }, [
+        lb.title || '(Label)',
+        el('button', {
+          type: 'button', class: 'lbl-x', title: 'entfernen',
+          onClick: () => {
+            const i = pending.findIndex((x) => x.id === lb.id);
+            if (i >= 0) pending.splice(i, 1);
+            renderChips();
+          },
+        }, '×'),
+      ])));
+    }
+    renderChips();
+    const addSel = el('select', { class: 'lbl-add' }, [
+      el('option', { value: '' }, '+ Label hinzufügen …'),
+      ...LABELS.map((l) => el('option', { value: l.id }, l.title)),
+    ]);
+    addSel.addEventListener('change', () => {
+      const id = Number(addSel.value);
+      addSel.value = '';
+      const lb = LABELS.find((x) => x.id === id);
+      if (!lb || pending.some((x) => x.id === id)) return;
+      pending.push(lb); renderChips();
+    });
+
+    const body = el('div', {}, [
+      feld('Titel', title),
+      feld('Fällig am', due, 'leer = ohne Fälligkeit'),
+      feld('Klasse', klasseSel, 'wird in Vikunja als Label „Klasse: …“ gesetzt'),
+      feld('Spalte', bucketSel),
+      feld('Priorität', prio),
+      feld('Beschreibung', desc),
+      feld('Labels', el('div', {}, [chips, addSel])),
+    ]);
+
+    modal({
+      title: 'Neue Aufgabe',
+      body,
+      actions: [
+        { label: 'Abbrechen', onClick: (close) => close() },
+        {
+          label: 'Anlegen', kind: 'primary',
+          onClick: async (close) => {
+            if (!title.value.trim()) { toast('Titel fehlt.'); return; }
+            const bucketId = bucketSel.value ? Number(bucketSel.value) : null;
+            try {
+              const d = await postJSON('/api/vikunja/tasks', {
+                title: title.value, due_date: due.value,
+                priority: Number(prio.value), description: desc.value,
+                bucket_id: bucketId, klasse: klasseSel.value,
+                label_ids: pending.map((l) => l.id),
+              });
+              close();
+              toast('Aufgabe angelegt.');
+              afterCreate(d.task || {}, bucketId);
+            } catch (e) { toast(e.message); }
+          },
+        },
+      ],
+    });
+    title.focus();
+  }
+
+  // Frisch angelegte Aufgabe in beide Ansichten einsetzen, ohne Reload.
+  function afterCreate(task, bucketId) {
+    insertListItem(task);
+    if (!boardLoaded) return;              // Board lädt beim Umschalten ohnehin frisch
+    const col = bucketId
+      ? boardEl.querySelector('.board-col[data-bucket="' + bucketId + '"]') : null;
+    if (!col) { reloadBoard(); return; }   // Standardspalte kennt nur Vikunja
+    col.querySelector('.board-cards').appendChild(cardEl(task, bucketId));
+    updateCount(col);
+  }
+
+  function listItemEl(t) {
+    const meta = [];
+    if (t.due_date) {
+      const d = new Date(t.due_date);
+      const overdue = !isNaN(d) && d < todayStart();
+      meta.push(el('span', {
+        class: 'task-due' + (overdue ? ' is-overdue' : ''), 'data-due': t.due_date,
+      }, fmtDate(t.due_date)));
+    } else {
+      meta.push(el('span', { class: 'muted' }, 'ohne Fälligkeit'));
+    }
+    if (t.priority >= 3) meta.push(el('span', { class: 'badge task-prio' }, PRIORITY[t.priority] || ''));
+    (t.labels || []).forEach((lb) => meta.push(el('span', {
+      class: 'badge task-label', style: 'background:' + labelBg(lb.hex_color),
+    }, lb.title)));
+
+    return el('li', { class: 'task-item', 'data-id': t.id }, [
+      el('input', { type: 'checkbox', class: 'task-check', title: 'Als erledigt markieren' }),
+      el('div', { class: 'task-main' }, [
+        el('strong', {}, t.title),
+        el('div', { class: 'task-meta' }, meta),
+      ]),
+      el('button', {
+        class: 'btn-sec task-del', title: 'Aufgabe löschen',
+        style: 'padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)',
+      }, '✕'),
+    ]);
+  }
+
+  function insertListItem(t) {
+    const list = document.getElementById('taskList');
+    if (!list || !t.id) return;
+    const empty = list.querySelector('.task-empty');
+    if (empty) empty.remove();
+    // Einsortieren wie der Server: fällige zuerst, undatierte ans Ende.
+    const rank = (due) => (due ? '0' + due : '1');
+    const r = rank(t.due_date);
+    const ref = Array.from(list.querySelectorAll('.task-item')).find((it) => {
+      const d = it.querySelector('.task-due');
+      return rank(d ? d.dataset.due : '') > r;
+    }) || null;
+    list.insertBefore(listItemEl(t), ref);
+    const count = document.getElementById('taskCount');
+    if (count) count.textContent = '(' + list.querySelectorAll('.task-item').length + ')';
+  }
+
+  const newBtn = document.getElementById('newTaskBtn');
+  if (newBtn) newBtn.addEventListener('click', () => openCreate());
 })();

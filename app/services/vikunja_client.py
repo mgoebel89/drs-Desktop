@@ -211,7 +211,12 @@ def list_projects(user: User) -> list[dict]:
 
 
 def create_task(user: User, title: str, due_date: str = "",
-                priority: int = 0, description: str = "") -> dict:
+                priority: int = 0, description: str = "",
+                bucket_id: int | None = None,
+                label_ids: list[int] | None = None) -> dict:
+    """Aufgabe anlegen. Vikunja nimmt beim Anlegen weder Bucket noch Labels
+    entgegen — beides wird danach nachgezogen (Bucket per Move-Endpoint, Labels
+    einzeln). Ohne `bucket_id` landet die Aufgabe in Vikunjas Standard-Bucket."""
     cfg = _require_cfg(user)
     title = (title or "").strip()
     if not title:
@@ -224,7 +229,22 @@ def create_task(user: User, title: str, due_date: str = "",
     if description.strip():
         body["description"] = description.strip()
     data, _ = _call(cfg, "PUT", f"/api/v1/projects/{cfg.project_id}/tasks", body=body)
-    return _normalize(data or {})
+    task = _normalize(data or {})
+    task_id = task.get("id")
+    if not task_id:
+        return task
+
+    if bucket_id:
+        move_task(user, int(bucket_id), int(task_id))
+    for lid in (label_ids or []):
+        add_label(user, int(task_id), int(lid))
+    if label_ids:
+        # Labels stecken nicht in der Anlege-Antwort — einmal nachladen, damit
+        # die frisch eingefügte Karte im Board vollständig ist.
+        raw, _ = _call(cfg, "GET", f"/api/v1/tasks/{task_id}")
+        if raw:
+            task = _normalize(raw)
+    return task
 
 
 def set_done(user: User, task_id: int, done: bool = True) -> dict:
@@ -272,34 +292,65 @@ def update_task(user: User, task_id: int, *, title: str | None = None,
 
 # ── Kanban-Board (Views-API ab Vikunja 0.22) ─────────────────────────────
 
-def get_kanban_view_id(cfg: VikunjaConfig) -> int:
+# Die View-ID ändert sich praktisch nie, wird aber bei jedem Board-Aufruf und
+# jedem Verschieben gebraucht. Prozessweiter Cache je (Instanz, Projekt); wird
+# verworfen, sobald ein Aufruf damit ins Leere läuft.
+_view_cache: dict[tuple[str, int], int] = {}
+
+
+def get_kanban_view_id(cfg: VikunjaConfig, *, refresh: bool = False) -> int:
     """Die Kanban-View des Projekts finden. Seit 0.22 hängen Buckets an einer
     View, nicht mehr direkt am Projekt. `view_kind` kann als String ('kanban')
     oder als Enum-Index (3) kommen — beides akzeptieren."""
+    key = (cfg.url, cfg.project_id)
+    if not refresh and key in _view_cache:
+        return _view_cache[key]
     data, _ = _call(cfg, "GET", f"/api/v1/projects/{cfg.project_id}/views")
     for v in (data or []):
         if not isinstance(v, dict):
             continue
         kind = v.get("view_kind")
         if str(kind).lower() == "kanban" or kind == 3:
-            return int(v["id"])
+            _view_cache[key] = int(v["id"])
+            return _view_cache[key]
     raise VikunjaError("Keine Kanban-Ansicht im Projekt gefunden.", 502)
 
 
-def list_board(user: User) -> dict:
-    """Die Spalten (Buckets) der Kanban-View samt ihrer Aufgaben.
+def _looks_like_bucket(item: dict) -> bool:
+    """Bucket oder Task? Beide haben `title`, aber nur der Bucket trägt eine
+    Aufgabenliste bzw. den Bezug zur View."""
+    return "tasks" in item or "project_view_id" in item or "limit" in item
 
-    Der Buckets-Endpoint liefert im Kanban-Kontext die Tasks je Bucket gleich
-    mit — ein Request genügt fürs ganze Board."""
-    cfg = _require_cfg(user)
-    view_id = get_kanban_view_id(cfg)
+
+def _fetch_buckets(cfg: VikunjaConfig, view_id: int) -> list[dict]:
+    """Die Kanban-Spalten samt Aufgaben holen.
+
+    **Nicht** über `…/views/{view}/buckets` — dieser Endpoint liefert nur die
+    Spalten-Metadaten, seine `tasks` bleiben leer (genau daran hing das Board
+    mit lauter 0-Spalten). Vikunja gibt die Aufgaben über den TASKS-Endpoint
+    der View aus: Ist die View vom Typ Kanban, antwortet er mit den Buckets
+    *inklusive* ihrer Aufgaben statt mit einer flachen Liste.
+    """
     data, _ = _call(
         cfg, "GET",
-        f"/api/v1/projects/{cfg.project_id}/views/{view_id}/buckets")
+        f"/api/v1/projects/{cfg.project_id}/views/{view_id}/tasks",
+        params={"per_page": 100})   # Deckel je Spalte
+    items = [i for i in (data or []) if isinstance(i, dict)]
+    if items and any(_looks_like_bucket(i) for i in items):
+        return items
+    # Ältere Instanzen (ohne Bucket-Konfiguration an der View) antworten hier
+    # flach — dann trägt der Buckets-Endpoint die Aufgaben noch selbst.
+    data, _ = _call(
+        cfg, "GET", f"/api/v1/projects/{cfg.project_id}/views/{view_id}/buckets")
+    return [b for b in (data or []) if isinstance(b, dict)]
+
+
+def list_board(user: User) -> dict:
+    """Die Spalten (Buckets) der Kanban-View samt ihrer Aufgaben."""
+    cfg = _require_cfg(user)
+    view_id = get_kanban_view_id(cfg)
     buckets = []
-    for b in (data or []):
-        if not isinstance(b, dict):
-            continue
+    for b in _fetch_buckets(cfg, view_id):
         tasks = [_normalize(t) for t in (b.get("tasks") or [])
                  if isinstance(t, dict)]
         buckets.append({
@@ -320,14 +371,23 @@ def move_task(user: User, bucket_id: int, task_id: int,
     läuft ausschließlich über diesen dedizierten Endpoint. Ins „Erledigt"-Bucket
     zu schieben hakt die Aufgabe serverseitig automatisch ab (und umgekehrt)."""
     cfg = _require_cfg(user)
-    view_id = get_kanban_view_id(cfg)
-    body: dict = {"task_id": int(task_id), "bucket_id": int(bucket_id),
-                  "project_view_id": view_id}
-    if position is not None:
-        body["position"] = position
-    _call(cfg, "POST",
-          f"/api/v1/projects/{cfg.project_id}/views/{view_id}"
-          f"/buckets/{bucket_id}/tasks", body=body)
+
+    def _post(view_id: int) -> None:
+        body: dict = {"task_id": int(task_id), "bucket_id": int(bucket_id),
+                      "project_view_id": view_id}
+        if position is not None:
+            body["position"] = position
+        _call(cfg, "POST",
+              f"/api/v1/projects/{cfg.project_id}/views/{view_id}"
+              f"/buckets/{bucket_id}/tasks", body=body)
+
+    try:
+        _post(get_kanban_view_id(cfg))
+    except VikunjaError as e:
+        if e.status != 404:
+            raise
+        # Gecachte View-ID war veraltet (View neu gebaut) — einmal frisch holen.
+        _post(get_kanban_view_id(cfg, refresh=True))
 
 
 # ── Labels ───────────────────────────────────────────────────────────────
@@ -341,6 +401,37 @@ def list_labels(user: User) -> list[dict]:
          "hex_color": lb.get("hex_color", "")}
         for lb in (data or []) if isinstance(lb, dict) and lb.get("id")
     ]
+
+
+KLASSE_LABEL_PREFIX = "Klasse: "
+KLASSE_LABEL_COLOR = "1a4f7a"   # DRS-Blau, damit Klassen-Labels sofort auffallen
+
+
+def klasse_label_title(name: str) -> str:
+    return f"{KLASSE_LABEL_PREFIX}{(name or '').strip()}"
+
+
+def ensure_label(user: User, title: str, hex_color: str = "") -> dict:
+    """Label mit diesem Titel holen — oder anlegen, wenn es es noch nicht gibt.
+
+    So wird die Lerngruppe einer Aufgabe zu einem ganz normalen Vikunja-Label:
+    auch in Vikunja selbst sichtbar und filterbar, ohne eigene Tabelle bei uns.
+    Der Abgleich läuft über den Titel (ohne Groß-/Kleinschreibung), weil das
+    Label die einzige Wahrheit ist."""
+    cfg = _require_cfg(user, need_project=False)
+    wanted = (title or "").strip()
+    if not wanted:
+        raise VikunjaError("Label ohne Titel.", 400)
+    for lb in list_labels(user):
+        if lb["title"].strip().lower() == wanted.lower():
+            return lb
+    body = {"title": wanted[:250]}
+    if hex_color:
+        body["hex_color"] = hex_color
+    data, _ = _call(cfg, "PUT", "/api/v1/labels", body=body)
+    data = data or {}
+    return {"id": data.get("id"), "title": data.get("title") or wanted,
+            "hex_color": data.get("hex_color") or hex_color}
 
 
 def add_label(user: User, task_id: int, label_id: int) -> None:
