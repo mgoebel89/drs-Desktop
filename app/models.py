@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, Boolean, ForeignKey, LargeBinary, Text
+from sqlalchemy import (String, Integer, DateTime, Boolean, ForeignKey,
+                        LargeBinary, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -867,6 +868,69 @@ class TtException(Base):
     fuer_kollege: Mapped[str] = mapped_column(String(120), default="")
 
     grund: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PlanShiftJournal(Base):
+    """Protokoll einer Themen-Kaskade: pro Ausnahme (Ausfall / verschobene
+    Vertretung) die Liste der Paket-Bewegungen (Thema + Notizen + Material),
+    damit das Aufheben der Ausnahme die Kette exakt zurückschieben kann.
+
+    Eine Zeile = ein Einzelschritt `from → to` in der Reihe (Klasse + Fach).
+    `seq` ist die Anwendungsreihenfolge: Anwenden von hinten (großes seq zuerst),
+    Zurücknehmen von vorne (kleines seq zuerst). Die `moved_*`-Snapshots dienen
+    als Sicherheitsnetz, falls ein Zielblock zwischenzeitlich von Hand geleert
+    wurde."""
+    __tablename__ = "plan_shift_journal"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Bündelt die Kette; CASCADE, damit ein direktes Löschen der Ausnahme keine
+    # Journal-Leichen lässt (der reguläre Revert läuft aber vor dem Delete).
+    exception_id: Mapped[int] = mapped_column(
+        ForeignKey("tt_exceptions.id", ondelete="CASCADE"), index=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+
+    klassen_key: Mapped[str] = mapped_column(String(255), default="")
+    subjects_key: Mapped[str] = mapped_column(String(255), default="")
+    from_date: Mapped[str] = mapped_column(String(10), default="")
+    from_block_start: Mapped[str] = mapped_column(String(5), default="")
+    to_date: Mapped[str] = mapped_column(String(10), default="")
+    to_block_start: Mapped[str] = mapped_column(String(5), default="")
+
+    moved_theme: Mapped[str] = mapped_column(Text, default="")
+    moved_notes: Mapped[str] = mapped_column(Text, default="")
+    moved_material: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class LessonReflection(Base):
+    """Selbstreflexion des Lehrers zu einer gehaltenen Stunde, am key4 verankert
+    (wie LessonNote). 4 Kategorien × 3 Items auf 4-stufiger Skala + „Keine
+    Angabe"; die Bewertungen liegen als JSON (Item-ID → Stufe), fehlende Items
+    gelten als k. A. Wandert bei der Themen-Kaskade bewusst NICHT mit."""
+    __tablename__ = "lesson_reflections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "lesson_date", "klassen_key",
+                         "subjects_key", "block_start",
+                         name="uq_lesson_reflection_key4"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    lesson_date: Mapped[str] = mapped_column(String(10), index=True)
+    klassen_key: Mapped[str] = mapped_column(String(255), index=True)
+    subjects_key: Mapped[str] = mapped_column(String(255), index=True)
+    block_start: Mapped[str] = mapped_column(String(5), default="", index=True)
+
+    ratings_json: Mapped[str] = mapped_column(Text, default="{}")
+    free_text: Mapped[str] = mapped_column(Text, default="")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow)

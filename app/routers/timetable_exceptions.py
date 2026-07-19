@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.auth import audit, require_user
 from app.db import get_db
 from app.models import LessonNote, TtException, TtFach, TtSlot, User
-from app.services import schulkalender, timetable_grid
+from app.services import plan_cascade, schulkalender, timetable_grid
 from app.services.lerngruppen import lerngruppen
 
 router = APIRouter()
@@ -121,6 +121,9 @@ def exception_create(
     kk = (payload.get("klassen") or "").strip()
     sk = (payload.get("subjects") or "").strip()
     grund = (payload.get("grund") or "").strip()[:255]
+    # Bei Vertretung entscheidet der Lehrer, ob die geplanten Themen weiterlaufen
+    # oder wie bei Ausfall auf die nächste eigene Stunde verschoben werden.
+    move_mode = (payload.get("move_mode") or "weiterlaufen").strip()
 
     frei, frei_label = schulkalender.is_free(db, user, d)
     if frei and kind != "zusatz":
@@ -177,7 +180,10 @@ def exception_create(
         TtException.klassen_key == kk,
         TtException.subjects_key == sk)).first()
     if alt:
-        _undo_note_move(db, user, alt)
+        if alt.kind in ("ausfall", "vertretung"):
+            plan_cascade.cascade_revert(db, user, alt)
+        else:
+            _undo_note_move(db, user, alt)
         db.delete(alt)
         db.flush()
 
@@ -226,6 +232,15 @@ def exception_create(
                 note.block_start = ziel_block
 
     db.add(exc)
+    db.flush()  # exc.id für das Kaskaden-Journal
+
+    # Themen-Kaskade: Ausfall verschiebt immer, Vertretung nur auf Wunsch.
+    # (Die Notiz-Wanderung der 'verschiebung' läuft weiter über den Zielpfad oben.)
+    if kind == "ausfall" or (kind == "vertretung" and move_mode == "verschieben"):
+        cwarn = plan_cascade.cascade_shift(db, user, exc)
+        if cwarn:
+            warn = (warn + " " + cwarn).strip() if warn else cwarn
+
     audit(db, "tt_exception_added", actor=user,
           target=f"{kind} {d} {block_start}", detail=f"{kk} / {sk}", request=request)
     db.commit()
@@ -258,7 +273,10 @@ def exception_delete(
     exc = db.get(TtException, eid)
     if not exc or exc.user_id != user.id:
         return _err("Änderung nicht gefunden.", 404)
-    _undo_note_move(db, user, exc)
+    if exc.kind in ("ausfall", "vertretung"):
+        plan_cascade.cascade_revert(db, user, exc)
+    else:
+        _undo_note_move(db, user, exc)
     label = f"{exc.kind} {exc.lesson_date} {exc.block_start}"
     db.delete(exc)
     audit(db, "tt_exception_removed", actor=user, target=label, request=request)

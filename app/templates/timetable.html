@@ -96,7 +96,13 @@ window.MathJax = {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-weight: 500;
   }
-  .note-icon, .exam-icon { font-size: 10px; flex-shrink: 0; }
+  /* Geplantes Thema unter dem Fach — max. 2 Zeilen, dann abgeschnitten */
+  .tt-thema {
+    color: var(--blau); font-size: 10px; line-height: 1.2; margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .note-icon, .exam-icon, .reflect-icon { font-size: 10px; flex-shrink: 0; }
   .note-icon { color: var(--blau); }
   .exam-icon { color: #c62828; font-weight: 700; }
 
@@ -249,6 +255,11 @@ window.MathJax = {
     width: 100%; padding: 8px 10px; font-size: 13px;
     border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
   }
+  .mini-modal label.mm-radio {
+    display: flex; align-items: center; gap: 7px; font-size: 12px;
+    font-weight: 400; margin: .15rem 0; cursor: pointer;
+  }
+  .mini-modal label.mm-radio input { width: auto; margin: 0; }
   .mini-modal .mm-hint { font-size: 11px; color: var(--muted); margin-top: .3rem; }
   .mini-modal .mm-hint-err { color: var(--pink); font-weight: 600; }
   .mini-modal textarea {
@@ -442,6 +453,10 @@ window.MathJax = {
                 aria-haspopup="true" aria-expanded="false"
                 title="Weitere Aktionen">⋯</button>
         <div class="tt-menu" id="ttMenu" hidden>
+          <button type="button" id="btnDistribute"
+                  title="Ein Thema über mehrere Stunden einer Klasse verteilen">📚 Thema verteilen</button>
+          <button type="button" id="btnKlassenarbeit"
+                  title="Klassenarbeit anlegen (Termin, Thema, Aufgabe)">📝 Klassenarbeit</button>
           <a href="/timetable/arbeitsplan.pdf?week={{ grid.monday.isoformat() }}"
              target="_blank" rel="noopener"
              title="Wochen-Arbeitsplan dieser Woche als PDF im Browser öffnen">📄 Arbeitsplan (PDF)</a>
@@ -573,6 +588,7 @@ window.MathJax = {
                     {% set fach_display = sess_ov or series_ov or l.fach_display %}
                     {% set aufgaben_mark = grid.aufgaben_markers.get((d_iso, kk, sk, sl.start)) if grid.aufgaben_markers else None %}
                     {% set has_pin = (d_iso, kk, sk, sl.start) in (grid.pending_forward_reminders or []) %}
+                    {% set has_refl = (d_iso, kk, sk, sl.start) in (grid.reflections_present or []) %}
                     <div class="tt-lesson {{ state }} status-{{ l.status }}{% if is_exam %} exam{% endif %}"
                          data-lesson='{{ l|tojson|forceescape }}'
                          data-day="{{ grid.days[d_idx].date.strftime('%d.%m.%Y') }}"
@@ -587,6 +603,7 @@ window.MathJax = {
                         {% if state != 'cancelled' %}
                           {% if is_exam %}<span class="exam-icon" title="Prüfung">!</span>{% endif %}
                           {% if has_note %}<span class="note-icon" title="Notizen vorhanden">📝</span>{% endif %}
+                          {% if has_refl %}<span class="reflect-icon" title="Reflexion vorhanden">🔎</span>{% endif %}
                           {% if has_pin %}<span class="forward-pin" title="Bemerkung aus letzter Stunde offen">📌</span>{% endif %}
                         {% endif %}
                         <span>{{ cls }}</span>
@@ -608,6 +625,8 @@ window.MathJax = {
                           <div class="tt-vertretung">Vertretung{% if l.vertretung_name %}: {{ l.vertretung_name }}{% endif %}</div>
                         {% endif %}
                         {% if fach_display %}<div class="tt-fach">{{ fach_display }}</div>{% endif %}
+                        {% set theme_txt = grid.themes.get((d_iso, kk, sk, sl.start)) if grid.themes else None %}
+                        {% if theme_txt %}<div class="tt-thema" title="{{ theme_txt }}">{{ theme_txt }}</div>{% endif %}
                         {% if raum %}<div class="tt-room">{{ raum }}</div>{% endif %}
                         {% if aufgaben_mark %}
                           <div class="tt-aufgaben"
@@ -681,6 +700,7 @@ window.MathJax = {
   <button type="button" data-act="forward">📌 Bemerkung für nächste Stunde</button>
   <hr>
   <button type="button" data-act="prev">🔍 Letzte Stunde anzeigen</button>
+  <button type="button" data-act="reflect">🔎 Stunde reflektieren</button>
   <button type="button" data-act="exam">✅ Prüfung umschalten</button>
   <hr>
   <button type="button" data-act="cancel">❌ Stunde entfällt …</button>
@@ -742,6 +762,11 @@ window.MathJax = {
   <input id="mm-subst-name" placeholder="Name des Kollegen">
   <label>Grund (optional)</label>
   <input id="mm-subst-grund" placeholder="z. B. Fortbildung">
+  <label style="margin-top:.5rem">Geplante Themen</label>
+  <label class="mm-radio"><input type="radio" name="subst-mode" value="weiterlaufen" checked>
+    laufen normal weiter (der Stoff wird behandelt)</label>
+  <label class="mm-radio"><input type="radio" name="subst-mode" value="verschieben">
+    auf die nächste eigene Stunde verschieben</label>
   <div class="mm-actions">
     <button type="button" class="btn btn-sec" data-mm-close>Abbrechen</button>
     <button type="button" class="btn" id="mm-subst-save">Eintragen</button>
@@ -1027,9 +1052,14 @@ async function openLessonPanel(l, dayHuman, dateIso, slot, klassenKey, subjectsK
     +   '<div id="exams-list" style="margin:.3rem 0;font-size:13px"></div>'
     +   '<a class="btn-sec" href="#" id="exam-new-btn" style="display:inline-block;padding:5px 12px;font-size:12px;text-decoration:none">+ Neue Prüfung für diese Stunde</a>'
     + '</details>'
+    + '<button type="button" class="btn-sec" id="refl-open-btn" style="margin-top:1rem;padding:6px 12px;font-size:12px">🔎 Stunde reflektieren</button>'
     + '</form>';
 
   _body.innerHTML = html;
+  const _reflBtn = document.getElementById('refl-open-btn');
+  if (_reflBtn) _reflBtn.addEventListener('click', () => {
+    if (window.openReflection && _currentLessonKey) window.openReflection(_currentLessonKey);
+  });
   _panel.classList.add('open');
   _backdrop.classList.add('open');
   _panel.setAttribute('aria-hidden', 'false');
@@ -1309,6 +1339,8 @@ _blockMenu.querySelectorAll('button[data-act]').forEach(btn => {
       miniForwardOpen(key, el);
     } else if (act === 'prev') {
       quickPrevOpen(key);
+    } else if (act === 'reflect') {
+      if (window.openReflection) window.openReflection(key, lessonEl);
     } else if (act === 'exam') {
       await toggleExamForBlock(key, el);
     } else if (act === 'cancel') {
@@ -1417,13 +1449,17 @@ function excOpenSubst(key, el) {
     _lessonInfo(el) + ' — die Stunde bleibt im Plan und dokumentierbar.';
   document.getElementById('mm-subst-name').value = '';
   document.getElementById('mm-subst-grund').value = '';
+  const first = document.querySelector('input[name="subst-mode"][value="weiterlaufen"]');
+  if (first) first.checked = true;
   mmShow('mm-subst');
 }
 document.getElementById('mm-subst-save').addEventListener('click', () => {
   const name = document.getElementById('mm-subst-name').value.trim();
   if (!name) { alert('Bitte den Namen der Vertretung angeben.'); return; }
+  const mode = document.querySelector('input[name="subst-mode"]:checked');
   excPost({...(_excKey), kind: 'vertretung', vertretung_name: name,
-           grund: document.getElementById('mm-subst-grund').value});
+           grund: document.getElementById('mm-subst-grund').value,
+           move_mode: mode ? mode.value : 'weiterlaufen'});
 });
 
 // ── Verschieben: Zielblöcke kommen aus dem Zeitraster der Zielwoche ───────
@@ -1981,6 +2017,437 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
 
   const todayIdx = picks.findIndex(b => b.dataset.date === todayIso);
   setDay(todayIdx >= 0 ? todayIdx : 0);
+})();
+</script>
+
+<style>
+  .dist-list { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+    max-height: 46vh; overflow: auto; margin-top: 4px; }
+  .dist-day { font-weight: 600; font-size: 12px; color: var(--muted);
+    margin: 8px 0 2px; }
+  .dist-day:first-child { margin-top: 0; }
+  .dist-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px;
+    border-radius: 6px; cursor: pointer; }
+  .dist-row:hover { background: var(--blau-hell); }
+  .dist-row input { width: auto; margin: 0; flex-shrink: 0; }
+  .dist-row.locked { opacity: .55; cursor: not-allowed; }
+  .dist-two { display: flex; gap: 10px; }
+  .dist-two .drs-field { flex: 1; }
+</style>
+
+<script>
+/* „Thema verteilen" — Overlay aus dem ⋯-Menü.
+ * Klasse + Fach + freier Zeitraum → reale Blöcke der Reihe als Checkboxen,
+ * mitlaufender Zähler (1 Block = 2 Schulstunden). Ausfall/Vertretung gesperrt,
+ * belegte Blöcke markiert + nicht vorausgewählt. Schreibt nur das Thema. */
+(function () {
+  const btn = document.getElementById('btnDistribute');
+  if (!btn || !window.DRS) return;
+  const el = DRS.el;
+  const SCHULSTUNDEN_PRO_BLOCK = 2;
+
+  function iso(d) { return d.toISOString().slice(0, 10); }
+  function fmtDate(s) {
+    const wd = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][new Date(s + 'T00:00').getDay()];
+    return `${wd} ${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}`;
+  }
+  function field(label, node) {
+    return el('label', { class: 'drs-field' },
+      [el('span', { class: 'drs-field-label' }, label), node]);
+  }
+
+  btn.addEventListener('click', open);
+
+  async function open() {
+    let stamm;
+    try { stamm = await DRS.getJSON('/api/timetable/stammdaten'); }
+    catch (e) { DRS.toast('Stammdaten nicht ladbar.'); return; }
+    const klassen = stamm.klassen || [], faecher = stamm.faecher || [];
+
+    const klasseSel = el('select', {}, [el('option', { value: '' }, 'Klasse wählen…'),
+      ...klassen.map(k => el('option', { value: k.key }, k.name))]);
+    const fachSel = el('select', {}, [el('option', { value: '' }, 'Fach wählen…'),
+      ...faecher.map(f => el('option', { value: f.key }, f.name))]);
+    const themeInp = el('input', { type: 'text', placeholder: 'z. B. Pneumatik-Grundschaltungen' });
+    const today = new Date();
+    const vonInp = el('input', { type: 'date', value: iso(today) });
+    const bisInp = el('input', { type: 'date', value: iso(new Date(today.getTime() + 42 * 864e5)) });
+    const list = el('div', { class: 'dist-list' });
+    const counter = el('div', { class: 'muted', style: 'margin:.4rem 0;font-weight:600' }, '—');
+
+    const body = el('div', {}, [
+      field('Klasse', klasseSel), field('Fach', fachSel), field('Thema', themeInp),
+      el('div', { class: 'dist-two' }, [field('Von', vonInp), field('Bis', bisInp)]),
+      counter, list,
+    ]);
+
+    let blocks = [];
+    const checked = new Set();
+    const keyOf = b => b.date + '|' + b.block_start;
+
+    function updateCounter() {
+      const n = checked.size;
+      counter.textContent = n
+        ? `${n} ${n === 1 ? 'Block' : 'Blöcke'} · ${n * SCHULSTUNDEN_PRO_BLOCK} Schulstunden`
+        : 'Noch keine Stunde gewählt';
+    }
+
+    async function reload() {
+      checked.clear();
+      list.innerHTML = '';
+      updateCounter();
+      const kk = klasseSel.value, sk = fachSel.value, von = vonInp.value, bis = bisInp.value;
+      if (!kk || !sk || !von || !bis) {
+        list.appendChild(el('div', { class: 'muted' }, 'Klasse, Fach und Zeitraum wählen.'));
+        return;
+      }
+      let res;
+      try {
+        res = await DRS.getJSON('/api/timetable/plan-blocks?klassen='
+          + encodeURIComponent(kk) + '&fach=' + encodeURIComponent(sk)
+          + '&von=' + von + '&bis=' + bis);
+      } catch (e) {
+        list.appendChild(el('div', { class: 'flash flash-err', style: 'display:block' },
+          'Blöcke nicht ladbar.'));
+        return;
+      }
+      blocks = res.blocks || [];
+      if (!blocks.length) {
+        list.appendChild(el('div', { class: 'muted' },
+          'Keine Stunden dieser Klasse/Fach im Zeitraum.'));
+        return;
+      }
+      let curDate = null;
+      blocks.forEach(b => {
+        if (b.date !== curDate) {
+          curDate = b.date;
+          list.appendChild(el('div', { class: 'dist-day' }, fmtDate(b.date)));
+        }
+        const cb = el('input', { type: 'checkbox' });
+        cb.disabled = !!b.locked;
+        cb.addEventListener('change', () => {
+          if (cb.checked) checked.add(keyOf(b)); else checked.delete(keyOf(b));
+          updateCounter();
+        });
+        let meta = '';
+        if (b.locked) meta = ' — ' + (b.status === 'ausfall' ? 'Ausfall' : 'Vertretung');
+        else if (b.has_theme) meta = ' — schon belegt: ' + b.existing_theme;
+        list.appendChild(el('label', { class: 'dist-row' + (b.locked ? ' locked' : '') }, [
+          cb, el('span', {}, b.slot_name + ' · ' + b.fach_display),
+          meta ? el('span', { class: 'muted' }, meta) : null,
+        ]));
+      });
+      updateCounter();
+    }
+
+    [klasseSel, fachSel, vonInp, bisInp].forEach(s => s.addEventListener('change', reload));
+
+    DRS.modal({
+      title: '📚 Thema verteilen',
+      body,
+      actions: [
+        {
+          label: 'Verteilen', kind: 'primary', onClick: async (close) => {
+            const kk = klasseSel.value, sk = fachSel.value, theme = themeInp.value.trim();
+            if (!kk || !sk) { DRS.toast('Klasse und Fach wählen.'); return; }
+            if (!theme) { DRS.toast('Thema eingeben.'); return; }
+            const chosen = blocks.filter(b => checked.has(keyOf(b)) && !b.locked)
+              .map(b => ({ date: b.date, block_start: b.block_start }));
+            if (!chosen.length) { DRS.toast('Keine Stunde gewählt.'); return; }
+            try {
+              const r = await DRS.postJSON('/api/timetable/distribute-theme',
+                { klassen: kk, fach: sk, theme, blocks: chosen });
+              DRS.toast(`Thema in ${r.written} Stunde${r.written === 1 ? '' : 'n'} gesetzt.`);
+              close();
+              location.reload();
+            } catch (e) { DRS.toast(e.message || 'Konnte nicht speichern.'); }
+          },
+        },
+        { label: 'Abbrechen', kind: 'sec', onClick: (c) => c() },
+      ],
+    });
+    reload();
+  }
+})();
+</script>
+
+<style>
+  .ka-blocks { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+    margin-top: 4px; }
+  .ka-blocks label { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
+    font-size: 13px; cursor: pointer; }
+  .ka-blocks input { width: auto; margin: 0; }
+  .ka-since { border: 1px solid var(--border); border-radius: 8px; margin-top: 4px;
+    max-height: 30vh; overflow: auto; }
+  .ka-since table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ka-since td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .ka-since td:first-child { white-space: nowrap; color: var(--muted); width: 1%; }
+  .ka-since .empty { padding: 10px; color: var(--muted); font-size: 12px; }
+</style>
+
+<script>
+/* „Klassenarbeit" — Overlay aus dem ⋯-Menü.
+ * Klasse + Fach + Datum + Thema, Blockauswahl am Termin, Planungstabelle
+ * „Themen seit der letzten Klassenarbeit". Markiert den Block als Prüfung und
+ * legt eine Vikunja-Aufgabe an (Backend). */
+(function () {
+  const btn = document.getElementById('btnKlassenarbeit');
+  if (!btn || !window.DRS) return;
+  const el = DRS.el;
+
+  function iso(d) { return d.toISOString().slice(0, 10); }
+  function fmtDate(s) {
+    const wd = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][new Date(s + 'T00:00').getDay()];
+    return `${wd} ${s.slice(8, 10)}.${s.slice(5, 7)}.`;
+  }
+  function field(label, node) {
+    return el('label', { class: 'drs-field' },
+      [el('span', { class: 'drs-field-label' }, label), node]);
+  }
+
+  btn.addEventListener('click', open);
+
+  async function open() {
+    let stamm;
+    try { stamm = await DRS.getJSON('/api/timetable/stammdaten'); }
+    catch (e) { DRS.toast('Stammdaten nicht ladbar.'); return; }
+    const klassen = stamm.klassen || [], faecher = stamm.faecher || [];
+
+    const klasseSel = el('select', {}, [el('option', { value: '' }, 'Klasse wählen…'),
+      ...klassen.map(k => el('option', { value: k.key }, k.name))]);
+    const fachSel = el('select', {}, [el('option', { value: '' }, 'Fach wählen…'),
+      ...faecher.map(f => el('option', { value: f.key }, f.name))]);
+    const datumInp = el('input', { type: 'date', value: iso(new Date()) });
+    const themeInp = el('input', { type: 'text', placeholder: 'Thema der Klassenarbeit' });
+    const blockBox = el('div', { class: 'ka-blocks' });
+    const sinceBox = el('div', { class: 'ka-since' });
+
+    let chosenBlock = null;  // {block_start, subjects_key}
+
+    const body = el('div', {}, [
+      field('Klasse', klasseSel), field('Fach', fachSel),
+      el('div', { class: 'dist-two' }, [field('Datum', datumInp), field('Thema', themeInp)]),
+      el('div', { class: 'drs-field-label' }, 'Welcher Block?'), blockBox,
+      el('div', { class: 'drs-field-label', style: 'margin-top:10px' },
+        'Themen seit der letzten Klassenarbeit'), sinceBox,
+    ]);
+
+    async function loadBlocks() {
+      blockBox.innerHTML = '';
+      chosenBlock = null;
+      const kk = klasseSel.value, sk = fachSel.value, dt = datumInp.value;
+      if (!kk || !sk || !dt) {
+        blockBox.appendChild(el('div', { class: 'muted' }, 'Klasse, Fach und Datum wählen.'));
+        return;
+      }
+      let res;
+      try {
+        res = await DRS.getJSON('/api/timetable/plan-blocks?klassen='
+          + encodeURIComponent(kk) + '&fach=' + encodeURIComponent(sk)
+          + '&von=' + dt + '&bis=' + dt);
+      } catch (e) {
+        blockBox.appendChild(el('div', { class: 'flash flash-err', style: 'display:block' },
+          'Blöcke nicht ladbar.')); return;
+      }
+      const blocks = res.blocks || [];
+      if (!blocks.length) {
+        blockBox.appendChild(el('div', { class: 'muted' },
+          'An diesem Tag hat die Klasse dieses Fach nicht.')); return;
+      }
+      blocks.forEach((b, i) => {
+        const rb = el('input', { type: 'radio', name: 'ka-block', value: b.block_start });
+        if (i === 0) { rb.checked = true; chosenBlock = b; }
+        rb.addEventListener('change', () => { chosenBlock = b; });
+        blockBox.appendChild(el('label', {}, [rb,
+          el('span', {}, b.slot_name + ' · ' + b.fach_display
+            + (b.has_theme ? ' (belegt: ' + b.existing_theme + ')' : ''))]));
+      });
+    }
+
+    async function loadSince() {
+      sinceBox.innerHTML = '';
+      const kk = klasseSel.value, dt = datumInp.value;
+      if (!kk || !dt) { sinceBox.appendChild(el('div', { class: 'empty' }, '—')); return; }
+      let res;
+      try {
+        res = await DRS.getJSON('/api/timetable/themes-since-last-exam?klassen='
+          + encodeURIComponent(kk) + '&datum=' + dt);
+      } catch (e) { sinceBox.appendChild(el('div', { class: 'empty' }, 'Nicht ladbar.')); return; }
+      const themes = res.themes || [];
+      if (!themes.length) {
+        sinceBox.appendChild(el('div', { class: 'empty' },
+          'Seit der letzten Klassenarbeit sind noch keine Themen erfasst.'));
+        return;
+      }
+      sinceBox.appendChild(el('table', {}, [el('tbody', {},
+        themes.map(t => el('tr', {}, [
+          el('td', {}, fmtDate(t.date)), el('td', {}, t.theme)])))]));
+    }
+
+    function reload() { loadBlocks(); loadSince(); }
+    klasseSel.addEventListener('change', reload);
+    fachSel.addEventListener('change', loadBlocks);
+    datumInp.addEventListener('change', reload);
+
+    DRS.modal({
+      title: '📝 Klassenarbeit',
+      body,
+      actions: [
+        {
+          label: 'Anlegen', kind: 'primary', onClick: async (close) => {
+            const kk = klasseSel.value, sk = fachSel.value;
+            const theme = themeInp.value.trim(), dt = datumInp.value;
+            if (!kk || !sk) { DRS.toast('Klasse und Fach wählen.'); return; }
+            if (!dt) { DRS.toast('Datum wählen.'); return; }
+            if (!theme) { DRS.toast('Thema eingeben.'); return; }
+            if (!chosenBlock) { DRS.toast('Block wählen.'); return; }
+            try {
+              const r = await DRS.postJSON('/api/timetable/klassenarbeit', {
+                klassen: kk, subjects_key: sk, datum: dt,
+                block_start: chosenBlock.block_start, theme,
+              });
+              DRS.toast(r.task_created ? 'Klassenarbeit + Aufgabe angelegt.'
+                : 'Klassenarbeit angelegt.');
+              if (r.warn) setTimeout(() => alert(r.warn), 50);
+              close();
+              location.reload();
+            } catch (e) { DRS.toast(e.message || 'Konnte nicht speichern.'); }
+          },
+        },
+        { label: 'Abbrechen', kind: 'sec', onClick: (c) => c() },
+      ],
+    });
+    reload();
+  }
+})();
+</script>
+
+<style>
+  .refl-cat-title { font-weight: 600; margin: 14px 0 6px; color: var(--blau); }
+  .refl-cat-title:first-child { margin-top: 0; }
+  .refl-item { margin-bottom: 12px; }
+  .refl-item .stmt { font-size: 13px; margin-bottom: 5px; }
+  .refl-scale { display: flex; flex-wrap: wrap; gap: 4px; }
+  .refl-scale button {
+    flex: 1 1 auto; min-width: 62px; padding: 7px 4px; font-size: 11px;
+    border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
+    cursor: pointer; color: var(--text);
+  }
+  .refl-scale button.sel { background: var(--blau); color: #fff; border-color: var(--blau); }
+  .refl-scale button.ka { flex: 0 0 auto; min-width: 54px; color: var(--muted); }
+  .refl-scale button.ka.sel { background: var(--muted); border-color: var(--muted); color: #fff; }
+  .refl-note-chip {
+    font-size: 12px; border: 1px dashed var(--border); background: #fafafa;
+    border-radius: 14px; padding: 4px 12px; cursor: pointer; margin-top: 6px;
+  }
+</style>
+
+<script>
+/* „Stunde reflektieren" — Overlay per Rechtsklick/Long-Press-Menü und Panel.
+ * 4 Kategorien × 3 Items, 4-stufige Skala + „k. A." (Default), plus optionale
+ * Notiz. Auto-Save wie bei den Block-Notizen. */
+(function () {
+  if (!window.DRS) return;
+  const el = DRS.el;
+
+  const CATS = [
+    { title: 'Herausforderungen', items: [
+      ['her1', 'Die Aufgaben in meinem Unterricht sind nicht zu leicht und auch nicht zu schwer'],
+      ['her2', 'Ich möchte, dass sich meine Schülerinnen und Schüler beim Lernen anstrengen'],
+      ['her3', 'In meinem Unterricht lernen die Schülerinnen und Schüler viel'] ] },
+    { title: 'Klarheit', items: [
+      ['kla1', 'Die Schülerinnen und Schüler können meinem Unterricht gut folgen.'],
+      ['kla2', 'Ich spreche so zu meinen Schülerinnen und Schülern, dass sie mich verstehen'],
+      ['kla3', 'Ich frage meine Schülerinnen und Schüler, ob sie im Unterricht alles verstanden haben'] ] },
+    { title: 'Motivation', items: [
+      ['mot1', 'Es gelingt mir den Unterricht für die Schülerinnen und Schüler interessant zu gestalten.'],
+      ['mot2', 'Es gelingt mir meinen Schülerinnen und Schülern zu vermitteln, warum ein Lerninhalt für sie wichtig ist.'],
+      ['mot3', 'Ich achte darauf, dass möglichst alle Schülerinnen und Schüler im Unterricht mitmachen.'] ] },
+    { title: 'Sicherung', items: [
+      ['sic1', 'Ich sorge dafür, dass wichtige Inhalte im Unterricht wiederholt werden.'],
+      ['sic2', 'Ich lasse meine Schülerinnen und Schülern im Unterricht genügend Zeit zum Üben.'],
+      ['sic3', 'Ich fasse am Ende einer Unterrichtsstunde alles nochmals zusammen.'] ] },
+  ];
+  const SCALE = [
+    ['voll', 'trifft voll zu'], ['eher', 'trifft eher zu'],
+    ['eher_nicht', 'trifft eher nicht zu'], ['gar_nicht', 'trifft gar nicht zu'],
+  ];
+
+  window.openReflection = async function (key, lessonEl) {
+    const ratings = {};
+    let freeText = '';
+    try {
+      const r = await DRS.getJSON('/api/lesson-reflection?date=' + encodeURIComponent(key.date)
+        + '&klassen=' + encodeURIComponent(key.klassen)
+        + '&subjects=' + encodeURIComponent(key.subjects)
+        + '&block_start=' + encodeURIComponent(key.block_start));
+      if (r.reflection) {
+        Object.assign(ratings, r.reflection.ratings || {});
+        freeText = r.reflection.free_text || '';
+      }
+    } catch (e) { /* leere Reflexion */ }
+
+    let saved = false, timer = null;
+    function scheduleSave() {
+      saved = true;
+      clearTimeout(timer);
+      timer = setTimeout(doSave, 700);
+    }
+    async function doSave() {
+      clearTimeout(timer);
+      try {
+        await DRS.postJSON('/api/lesson-reflection', {
+          date: key.date, klassen: key.klassen, subjects: key.subjects,
+          block_start: key.block_start, ratings, free_text: freeText,
+        });
+      } catch (e) { DRS.toast('Reflexion nicht gespeichert.'); }
+    }
+
+    const body = el('div', {});
+    CATS.forEach(cat => {
+      body.appendChild(el('div', { class: 'refl-cat-title' }, cat.title));
+      cat.items.forEach(([id, text]) => {
+        const scale = el('div', { class: 'refl-scale' });
+        const btns = {};
+        function paint() {
+          const v = ratings[id];
+          SCALE.forEach(([val]) => btns[val].classList.toggle('sel', v === val));
+          btns.ka.classList.toggle('sel', !v);
+        }
+        SCALE.forEach(([val, label]) => {
+          const b = el('button', { type: 'button', title: label }, label);
+          b.addEventListener('click', () => { ratings[id] = val; paint(); scheduleSave(); });
+          btns[val] = b; scale.appendChild(b);
+        });
+        const ka = el('button', { type: 'button', class: 'ka', title: 'Keine Angabe' }, 'k. A.');
+        ka.addEventListener('click', () => { delete ratings[id]; paint(); scheduleSave(); });
+        btns.ka = ka; scale.appendChild(ka);
+        body.appendChild(el('div', { class: 'refl-item' },
+          [el('div', { class: 'stmt' }, text), scale]));
+        paint();
+      });
+    });
+
+    // Optionale Notiz — zuschaltbar, damit das Formular schlank bleibt.
+    const noteWrap = el('div', {});
+    const ta = el('textarea', { placeholder: 'Was nehme ich für die nächste Stunde mit?',
+      style: 'width:100%;min-height:70px' });
+    ta.value = freeText;
+    ta.addEventListener('input', () => { freeText = ta.value; scheduleSave(); });
+    const chip = el('button', { type: 'button', class: 'refl-note-chip' }, '+ Notiz');
+    chip.addEventListener('click', () => { noteWrap.appendChild(ta); chip.remove(); ta.focus(); });
+    noteWrap.appendChild(chip);
+    if (freeText.trim()) { chip.remove(); noteWrap.appendChild(ta); }
+    body.appendChild(el('div', { class: 'refl-cat-title' }, 'Notiz'));
+    body.appendChild(noteWrap);
+
+    DRS.modal({
+      title: '🔎 Stunde reflektieren',
+      body,
+      onClose: () => { if (saved) location.reload(); },
+      actions: [{ label: 'Fertig', kind: 'primary', onClick: async (close) => { await doSave(); close(); } }],
+    });
+  };
 })();
 </script>
 {% endblock %}
