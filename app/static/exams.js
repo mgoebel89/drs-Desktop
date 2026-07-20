@@ -239,6 +239,80 @@
     });
   };
 
+  // ---------- Moodle-Test importieren ----------
+
+  EX.moodleImport = function () {
+    const titel = el('input', { type: 'text', placeholder: 'z. B. Moodle-Test Pneumatik' });
+    const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
+    const datei = el('input', { type: 'file', accept: '.json,application/json' });
+    const info = el('div', { class: 'moodle-info muted' },
+      'Wähle die aus Moodle exportierte JSON-Datei.');
+    let geprueft = null;
+
+    // Erst Vorschau holen — es wird nichts geschrieben, bevor du sie gesehen hast.
+    datei.addEventListener('change', async () => {
+      geprueft = null;
+      if (!datei.files.length) { info.textContent = 'Keine Datei gewählt.'; return; }
+      info.textContent = 'lese Datei …';
+      const fd = new FormData();
+      fd.append('datei', datei.files[0]);
+      try {
+        const r = await fetch('/api/exams/moodle/vorschau', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Datei nicht lesbar');
+        geprueft = d;
+        info.innerHTML = '';
+        info.appendChild(el('strong', {}, `${d.anzahl} Schüler gefunden`));
+        if (d.abteilungen.length) {
+          info.appendChild(el('div', {}, 'Abteilungen: ' + d.abteilungen.join(', ')));
+        }
+        if (d.ohne_ergebnis) {
+          info.appendChild(el('div', {}, `${d.ohne_ergebnis} davon ohne Ergebnis`));
+        }
+        info.appendChild(el('div', { class: 'muted' },
+          d.namen.join(' · ') + (d.anzahl > d.namen.length ? ' …' : '')));
+      } catch (e) {
+        info.textContent = e.message || 'Datei konnte nicht gelesen werden.';
+      }
+    });
+
+    const body = el('div', {}, [
+      el('p', { class: 'muted' },
+        'Die Teilnehmer kommen aus der Datei, nicht aus einer Klasse — eine '
+        + 'Zuordnung zu einer Lerngruppe gibt es hier deshalb nicht. Bewertet '
+        + 'wird über einen Punkt „Gesamtbewertung" mit dem Moodle-Prozentwert.'),
+      DRS.feld('Titel', titel),
+      DRS.feld('Datum', datum),
+      DRS.feld('Moodle-JSON', datei),
+      info,
+    ]);
+
+    DRS.modal({
+      title: '⬆ Moodle-Test importieren',
+      body,
+      actions: [
+        {
+          label: 'Importieren', kind: 'primary', onClick: async (close) => {
+            if (!datei.files.length) { DRS.toast('Bitte eine Datei wählen.'); return; }
+            if (!geprueft) { DRS.toast('Die Datei wird noch geprüft.'); return; }
+            const fd = new FormData();
+            fd.append('titel', titel.value.trim());
+            fd.append('datum', datum.value);
+            fd.append('datei', datei.files[0]);
+            try {
+              const r = await fetch('/api/exams/moodle', { method: 'POST', body: fd });
+              const d = await r.json();
+              if (!r.ok) throw new Error(d.detail || 'Import fehlgeschlagen');
+              close();
+              location.href = d.url;
+            } catch (e) { DRS.toast(e.message || 'Import fehlgeschlagen.'); }
+          },
+        },
+        { label: 'Abbrechen', kind: 'sec', onClick: (c) => c() },
+      ],
+    });
+  };
+
   // ---------- Zuordnung ändern ----------
 
   EX.zuordnungModal = async function (examId) {
