@@ -2019,7 +2019,11 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   setDay(todayIdx >= 0 ? todayIdx : 0);
 })();
 </script>
+{% endblock %}
 
+{# Die neuen Overlays brauchen DRS.modal aus /static/drs.js. Das lädt base.html
+   ERST NACH dem content-Block — darum leben sie hier im scripts-Block. #}
+{% block scripts %}
 <style>
   .dist-list { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
     max-height: 46vh; overflow: auto; margin-top: 4px; }
@@ -2084,6 +2088,9 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     let blocks = [];
     const checked = new Set();
     const keyOf = b => b.date + '|' + b.block_start;
+    // Mehrere schnelle Änderungen (Klasse → Fach → Datum) starten parallele
+    // Abrufe; ohne diesen Zähler rendern veraltete Antworten in dieselbe Liste.
+    let reqSeq = 0;
 
     function updateCounter() {
       const n = checked.size;
@@ -2093,6 +2100,7 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     }
 
     async function reload() {
+      const my = ++reqSeq;
       checked.clear();
       list.innerHTML = '';
       updateCounter();
@@ -2107,10 +2115,13 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
           + encodeURIComponent(kk) + '&fach=' + encodeURIComponent(sk)
           + '&von=' + von + '&bis=' + bis);
       } catch (e) {
+        if (my !== reqSeq) return;
         list.appendChild(el('div', { class: 'flash flash-err', style: 'display:block' },
           'Blöcke nicht ladbar.'));
         return;
       }
+      if (my !== reqSeq) return;   // ein neuerer Abruf ist unterwegs
+      list.innerHTML = '';
       blocks = res.blocks || [];
       if (!blocks.length) {
         list.appendChild(el('div', { class: 'muted' },
@@ -2223,6 +2234,7 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     const sinceBox = el('div', { class: 'ka-since' });
 
     let chosenBlock = null;  // {block_start, subjects_key}
+    let blkSeq = 0, sinceSeq = 0;   // gegen sich überholende Abrufe
 
     const body = el('div', {}, [
       field('Klasse', klasseSel), field('Fach', fachSel),
@@ -2233,6 +2245,7 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     ]);
 
     async function loadBlocks() {
+      const my = ++blkSeq;
       blockBox.innerHTML = '';
       chosenBlock = null;
       const kk = klasseSel.value, sk = fachSel.value, dt = datumInp.value;
@@ -2246,9 +2259,12 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
           + encodeURIComponent(kk) + '&fach=' + encodeURIComponent(sk)
           + '&von=' + dt + '&bis=' + dt);
       } catch (e) {
+        if (my !== blkSeq) return;
         blockBox.appendChild(el('div', { class: 'flash flash-err', style: 'display:block' },
           'Blöcke nicht ladbar.')); return;
       }
+      if (my !== blkSeq) return;
+      blockBox.innerHTML = '';
       const blocks = res.blocks || [];
       if (!blocks.length) {
         blockBox.appendChild(el('div', { class: 'muted' },
@@ -2265,6 +2281,7 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
     }
 
     async function loadSince() {
+      const my = ++sinceSeq;
       sinceBox.innerHTML = '';
       const kk = klasseSel.value, dt = datumInp.value;
       if (!kk || !dt) { sinceBox.appendChild(el('div', { class: 'empty' }, '—')); return; }
@@ -2272,7 +2289,12 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
       try {
         res = await DRS.getJSON('/api/timetable/themes-since-last-exam?klassen='
           + encodeURIComponent(kk) + '&datum=' + dt);
-      } catch (e) { sinceBox.appendChild(el('div', { class: 'empty' }, 'Nicht ladbar.')); return; }
+      } catch (e) {
+        if (my !== sinceSeq) return;
+        sinceBox.appendChild(el('div', { class: 'empty' }, 'Nicht ladbar.')); return;
+      }
+      if (my !== sinceSeq) return;
+      sinceBox.innerHTML = '';
       const themes = res.themes || [];
       if (!themes.length) {
         sinceBox.appendChild(el('div', { class: 'empty' },
@@ -2329,7 +2351,8 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   .refl-item .stmt { font-size: 13px; margin-bottom: 5px; }
   .refl-scale { display: flex; flex-wrap: wrap; gap: 4px; }
   .refl-scale button {
-    flex: 1 1 auto; min-width: 62px; padding: 7px 4px; font-size: 11px;
+    flex: 1 1 auto; min-width: 62px; padding: 9px 4px; font-size: 11px;
+    min-height: 36px;
     border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
     cursor: pointer; color: var(--text);
   }
@@ -2339,6 +2362,15 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
   .refl-note-chip {
     font-size: 12px; border: 1px dashed var(--border); background: #fafafa;
     border-radius: 14px; padding: 4px 12px; cursor: pointer; margin-top: 6px;
+  }
+  /* Auf dem Handy müssen die Flächen mit dem Daumen treffbar sein (~44 px). */
+  @media (max-width: 760px) {
+    .refl-scale button { min-height: 44px; font-size: 12px; }
+    .refl-item .stmt { font-size: 14px; }
+    .dist-row { min-height: 44px; }
+    .dist-row input { width: 20px; height: 20px; }
+    .ka-blocks label { min-height: 44px; }
+    .ka-blocks input { width: 20px; height: 20px; }
   }
 </style>
 
