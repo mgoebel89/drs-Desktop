@@ -6,6 +6,8 @@
     <h1 style="margin:0;flex:1">Prüfungen / Bewertungen</h1>
     <a class="btn btn-sec" href="/exams/template.md"
        title="Leere Prüfungs-MD-Vorlage zum Download">📝 Leere Vorlage</a>
+    <button type="button" class="btn btn-sec" id="btnMoodleImport"
+            title="Prüfung aus einem Moodle-Test-Export (JSON) anlegen">⬆ Moodle-Test</button>
     <button type="button" class="btn" id="btnNeuePruefung">+ Neue Prüfung</button>
   </div>
   <p class="muted">Klassenarbeiten und Tests — jede Prüfung gehört zu einer Klasse
@@ -92,6 +94,8 @@
   DRS.mountIcons();
   document.getElementById('btnNeuePruefung')
     .addEventListener('click', () => DRSExams.anlegenWizard());
+  document.getElementById('btnMoodleImport')
+    .addEventListener('click', () => DRSExams.moodleImport());
   document.querySelectorAll('[data-del]').forEach(b => {
     b.addEventListener('click', async () => {
       const id = b.dataset.del;

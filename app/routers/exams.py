@@ -689,6 +689,107 @@ def api_exam_create(
     return JSONResponse({"ok": True, "id": ex.id, "url": f"/exams/{ex.id}"})
 
 
+@router.post("/api/exams/moodle/vorschau")
+async def api_moodle_vorschau(
+    user: Annotated[User, Depends(require_user)],
+    datei: UploadFile = File(...),
+):
+    """Liest die Moodle-JSON und zeigt, was ankäme — schreibt NICHTS.
+    Gleiches zweistufiges Muster wie der Schüler-Import."""
+    try:
+        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
+        eintraege = moodle_quiz.parse_moodle_json(raw)
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
+    if not eintraege:
+        raise HTTPException(400, "Die Datei enthält keine Schüler.")
+    ohne_note = sum(1 for e in eintraege if e.get("percent") is None)
+    return JSONResponse({
+        "ok": True,
+        "anzahl": len(eintraege),
+        "ohne_ergebnis": ohne_note,
+        "abteilungen": sorted({(e.get("abteilung") or "").strip()
+                               for e in eintraege if (e.get("abteilung") or "").strip()}),
+        "namen": [f'{e["nachname"]}, {e["vorname"]}' for e in eintraege[:8]],
+    })
+
+
+@router.post("/api/exams/moodle")
+async def api_moodle_import(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    titel: str = Form(""),
+    datum: str = Form(""),
+    datei: UploadFile = File(...),
+):
+    """Legt eine Prüfung aus einem Moodle-Test an.
+
+    Bewusst ein eigener Weg neben dem Assistenten: Die Teilnehmer kommen hier
+    aus der Datei, nicht aus einer Klasse — eine Zuordnung zu einer Lerngruppe
+    gibt es deshalb nicht. Die Schüler werden als eigene, inaktive Datensätze
+    ohne `klassen_key` angelegt (Moodle-Kurse bündeln oft mehrere Schulklassen
+    und die Bezeichnungen weichen ab); so tauchen sie weder in der Klassen-
+    auswahl noch in der Schülerliste auf, bleiben aber in dieser Prüfung
+    sichtbar und bewertbar."""
+    try:
+        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
+        eintraege = moodle_quiz.parse_moodle_json(raw)
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
+    if not eintraege:
+        raise HTTPException(400, "Die Datei enthält keine Schüler.")
+
+    abteilungen = []
+    for e in eintraege:
+        ab = (e.get("abteilung") or "").strip()
+        if ab and ab not in abteilungen:
+            abteilungen.append(ab)
+
+    ex = Exam(
+        owner_user_id=user.id,
+        title=(titel or "").strip()[:200] or "Moodle-Test",
+        datum=(datum or "").strip()[:10],
+        klassen_key=", ".join(abteilungen or ["Moodle-Import"])[:255],
+        grading_scale_key=grading.DEFAULT_SCALE,
+        input_mode="numeric",
+        bewertung_mode="punkte",
+    )
+    db.add(ex)
+    db.flush()
+
+    # Ein Feedbackpunkt „Gesamtbewertung" — Moodle liefert nur ein Prozentergebnis.
+    fp = ExamFeedbackPoint(
+        exam_id=ex.id, position=0, name="Gesamtbewertung", max_points=100.0,
+        scope="individual", eval_type="punkte", weight_pct=100.0,
+    )
+    db.add(fp)
+    db.flush()
+
+    for eintrag in eintraege:
+        s = Student(
+            owner_user_id=user.id, klassen_key="",
+            nachname=eintrag["nachname"][:120], vorname=eintrag["vorname"][:120],
+            active=False,
+        )
+        db.add(s)
+        db.flush()
+        db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+        if eintrag.get("percent") is not None:
+            db.add(ExamResult(
+                exam_id=ex.id, student_id=s.id,
+                erreicht_json=json.dumps(
+                    {str(fp.id): round(float(eintrag["percent"]), 2)},
+                    ensure_ascii=False),
+            ))
+
+    audit(db, "exam_created", actor=user, target=str(ex.id),
+          detail=f"{ex.title} / moodle={len(eintraege)}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "id": ex.id, "url": f"/exams/{ex.id}",
+                         "anzahl": len(eintraege)})
+
+
 @router.get("/exams/{ex_id}", response_class=HTMLResponse)
 def exams_detail(
     request: Request,

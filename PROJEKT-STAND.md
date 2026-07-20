@@ -236,6 +236,16 @@ den Assistenten mit Thema, Datum und Klasse des Blocks und schreibt endlich
 `lesson_note_id`. Eine **Klassenarbeit legt die Prüfung automatisch an**
 (`_maybe_create_exam` in `timetable.py`, vorher ein No-Op-Platzhalter).
 
+**Moodle-Test-Import** (Nachtrag): Beim UI-Umbau war der einzige Einstieg zum
+alten `/exams/new`-Formular weggefallen — der Import funktionierte technisch
+weiter, war aber nicht mehr erreichbar. Jetzt eigener Weg als Overlay
+(`DRSExams.moodleImport`, Button „⬆ Moodle-Test" in der Liste): zweistufig mit
+Vorschau (`POST /api/exams/moodle/vorschau` schreibt nichts), dann
+`POST /api/exams/moodle`. Die Teilnehmer kommen aus der Datei (inaktive Schüler
+ohne `klassen_key`), es gibt **keine** Lerngruppen-Zuordnung; bewertet wird über
+einen Punkt „Gesamtbewertung" mit dem Moodle-Prozentwert. Das alte
+`GET /exams/new` + der Moodle-Zweig in `POST /exams` bleiben als Fallback liegen.
+
 ### ⚠️ Skripte im content-Block laufen VOR drs.js (2026-07-20, behoben)
 
 **Landmine für jedes neue Overlay.** `base.html` bindet `/static/drs.js` erst in

@@ -214,6 +214,56 @@ def test_anlegen_ohne_ziel_wird_abgelehnt(client, db, stamm):
     assert r.status_code == 400
 
 
+# ── Moodle-Import ─────────────────────────────────────────────────────────
+
+import json as _json
+
+_MOODLE = _json.dumps([
+    {"nachname": "Ahrens", "vorname": "Ada", "abteilung": "MT26a", "bewertung10000": "85,5"},
+    {"nachname": "Bloch", "vorname": "Ben", "abteilung": "MT26a", "bewertung10000": "-"},
+    {"nachname": "Gesamtdurchschnitt", "vorname": "", "bewertung10000": "70"},
+])
+
+
+def test_moodle_vorschau_schreibt_nichts(client, db, stamm):
+    from app.models import Exam, Student
+    n_ex, n_stud = db.query(Exam).count(), db.query(Student).count()
+    r = client.post("/api/exams/moodle/vorschau",
+                    files={"datei": ("test.json", _MOODLE, "application/json")})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["anzahl"] == 2            # Gesamtdurchschnitt fällt raus
+    assert d["ohne_ergebnis"] == 1     # Bloch hat "-"
+    assert d["abteilungen"] == ["MT26a"]
+    # nichts geschrieben
+    assert db.query(Exam).count() == n_ex
+    assert db.query(Student).count() == n_stud
+
+
+def test_moodle_import_legt_pruefung_und_ergebnisse_an(client, db, stamm):
+    from app.models import Exam, ExamStudent, ExamResult, ExamFeedbackPoint
+    r = client.post("/api/exams/moodle", data={"titel": "Pneumatik-Test", "datum": "2026-09-20"},
+                    files={"datei": ("t.json", _MOODLE, "application/json")})
+    assert r.status_code == 200
+    ex = db.get(Exam, r.json()["id"])
+    assert ex.title == "Pneumatik-Test"
+    assert ex.bewertung_mode == "punkte"
+    assert ex.lerngruppe_id is None        # kein Klassen-Bezug
+    fps = db.query(ExamFeedbackPoint).filter_by(exam_id=ex.id).all()
+    assert len(fps) == 1 and fps[0].name == "Gesamtbewertung"
+    assert db.query(ExamStudent).filter_by(exam_id=ex.id).count() == 2
+    # Ada hat ein Ergebnis, Ben nicht
+    res = db.query(ExamResult).filter_by(exam_id=ex.id).all()
+    assert len(res) == 1
+    assert _json.loads(res[0].erreicht_json)[str(fps[0].id)] == 85.5
+
+
+def test_moodle_import_kaputte_datei(client, db, stamm):
+    r = client.post("/api/exams/moodle", data={"titel": "X"},
+                    files={"datei": ("t.json", "kein json", "application/json")})
+    assert r.status_code == 400
+
+
 def test_geloeschter_feedbackpunkt_raeumt_bewertungen_auf(client, db, stamm):
     ex = _exam(db, stamm, lerngruppe_id=stamm["lg_a"].id, bewertung_mode="punkte")
     a = ExamFeedbackPoint(exam_id=ex.id, position=0, name="A", max_points=10,
