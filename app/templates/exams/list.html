@@ -6,48 +6,102 @@
     <h1 style="margin:0;flex:1">Prüfungen / Bewertungen</h1>
     <a class="btn btn-sec" href="/exams/template.md"
        title="Leere Prüfungs-MD-Vorlage zum Download">📝 Leere Vorlage</a>
-    <a class="btn" href="/exams/new">+ Neue Prüfung</a>
+    <button type="button" class="btn" id="btnNeuePruefung">+ Neue Prüfung</button>
   </div>
-  <p class="muted">Klassenarbeiten, Tests, mündliche Bewertungen. Verknüpfung mit Lernsituationen möglich.</p>
+  <p class="muted">Klassenarbeiten und Tests — jede Prüfung gehört zu einer Klasse
+    oder Lerngruppe aus den Stammdaten.</p>
 
   {% if items %}
-  <table style="margin-top:1rem">
-    <thead><tr>
-      <th>Titel</th><th>Datum</th><th>Klasse</th><th>Skala</th><th>Modus</th><th>Stand</th><th></th>
-    </tr></thead>
-    <tbody>
+  <div class="card-grid" style="margin-top:1rem">
     {% for it in items %}
     {% set e = it.exam %}
-    <tr>
-      <td><a href="/exams/{{ e.id }}"><strong>{{ e.title }}</strong></a></td>
-      <td>{{ e.datum or '—' }}</td>
-      <td>{{ e.klassen_key or '—' }}</td>
-      <td style="font-size:11px;color:#666">{{ e.grading_scale_key }}</td>
-      <td>
-        {% if e.input_mode == 'stages' %}
-          <span class="badge b-teacher">Stufen</span>
-        {% else %}
-          <span class="badge b-inactive">Zahlen</span>
+    <div class="obj-card exam-card">
+      <a href="/exams/{{ e.id }}" class="exam-open">
+        <div class="obj-card-head">
+          <span data-icon="pruefen"></span>
+          <span class="obj-card-title">{{ e.title }}</span>
+        </div>
+        <div class="obj-card-meta">
+          {{ e.datum or 'ohne Datum' }}
+          {% if it.zuordnung %} · {{ it.zuordnung }}{% endif %}
+          {% if it.art in ('kombi', 'gruppe') %}
+            · {% if it.art == 'kombi' %}zusammengelegt{% else %}Teilgruppe{% endif %}
+          {% endif %}
+        </div>
+        <div class="obj-card-meta">
+          {% if it.has_results %}<span class="badge b-teacher">✓ bewertet</span>
+          {% elif it.has_students %}<span class="badge b-inactive">offen</span>
+          {% else %}<span class="badge" style="background:#fdecea;color:#c62828">keine Teilnehmer</span>
+          {% endif %}
+          {% if it.n_students %} · {{ it.n_students }} Teilnehmer{% endif %}
+          {% if e.input_mode == 'stages' %} · Stufen{% endif %}
+        </div>
+        {% if it.offen %}
+          <div class="obj-card-meta" style="color:var(--pink)">
+            noch keiner Lerngruppe zugeordnet
+          </div>
         {% endif %}
-      </td>
-      <td style="font-size:12px">
-        {% if it.has_results %}✓ bewertet{% elif it.has_students %}— offen{% else %}⚠ keine Schüler{% endif %}
-      </td>
-      <td>
-        <form method="post" action="/exams/{{ e.id }}/delete" style="display:inline"
-              onsubmit="return confirm('Prüfung „{{ e.title }}" wirklich löschen? Alle Bewertungen gehen verloren.');">
-          <input type="hidden" name="confirm" value="1">
-          <button class="btn-sec" type="submit"
-                  style="padding:3px 8px;font-size:11px;color:var(--pink);border-color:var(--pink)"
-                  title="Prüfung löschen">🗑</button>
-        </form>
-      </td>
-    </tr>
+      </a>
+      <button type="button" class="exam-del" title="Prüfung löschen"
+              data-del="{{ e.id }}" data-titel="{{ e.title }}">🗑</button>
+    </div>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
-    <p class="muted" style="margin-top:1rem">Noch keine Prüfungen angelegt.</p>
+    <p class="muted" style="margin-top:1rem">
+      Noch keine Prüfungen angelegt. Leg mit „+ Neue Prüfung" die erste an.
+    </p>
   {% endif %}
 </div>
+
+<style>
+  .exam-card { position: relative; padding: 0; }
+  .exam-open { display: block; padding: 12px 14px; text-decoration: none; color: inherit; }
+  .exam-open:hover { text-decoration: none; }
+  .exam-del {
+    position: absolute; top: 8px; right: 8px; border: 1px solid var(--border);
+    background: #fff; border-radius: 6px; cursor: pointer; font-size: 12px;
+    padding: 4px 8px; color: var(--pink); line-height: 1;
+  }
+  .exam-del:hover { border-color: var(--pink); background: #fdecea; }
+  /* Auswahlzeilen im Assistenten (Klasse/Lerngruppe, Bewertungsmodus) */
+  .pick-group { font-weight: 600; font-size: 13px; margin: 14px 0 6px; color: var(--blau); }
+  .pick-group:first-child { margin-top: 0; }
+  .pick-row {
+    display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px;
+    border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
+    cursor: pointer; min-height: 44px;
+  }
+  .pick-row:hover { border-color: var(--blau); background: var(--blau-hell); }
+  .pick-row input { width: auto; margin: 3px 0 0; flex-shrink: 0; }
+  .pick-row.pick-off { opacity: .5; cursor: not-allowed; }
+  .pick-title { display: block; font-size: 14px; }
+  .pick-sub { display: block; color: var(--muted); font-size: 12px; }
+  /* Feedbackpunkt-Editor */
+  .fp-list { margin-top: 6px; }
+  .fp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .fp-num { color: var(--muted); font-size: 12px; width: 16px; flex-shrink: 0; }
+  .fp-row input[type=text] { flex: 1; }
+  .fp-del { padding: 6px 9px; font-size: 12px; flex-shrink: 0; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/exams.js?v={{ static_version() }}"></script>
+<script>
+  DRS.mountIcons();
+  document.getElementById('btnNeuePruefung')
+    .addEventListener('click', () => DRSExams.anlegenWizard());
+  document.querySelectorAll('[data-del]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const id = b.dataset.del;
+      let fakten = [];
+      try {
+        const r = await DRS.getJSON('/api/exams/' + id + '/impact');
+        fakten = r.impact || [];
+      } catch (e) { /* Dialog geht auch ohne Kennzahlen auf */ }
+      DRSExams.loeschen(id, b.dataset.titel, fakten);
+    });
+  });
+</script>
 {% endblock %}

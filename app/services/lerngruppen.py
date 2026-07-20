@@ -85,6 +85,29 @@ def schueler_der_lerngruppe(db: Session, user: User,
     ).all())
 
 
+def lerngruppe_der_klasse(db: Session, user: User,
+                          schulklasse_id: int) -> TtKlasse | None:
+    """Die 1:1-Lerngruppe (`art='klasse'`) einer Schulklasse.
+
+    Der Gegenweg zu `klassen_der_lerngruppe`. Zu jeder Klasse legt die
+    Stammdaten-Verwaltung automatisch genau eine solche Lerngruppe an — sie
+    trägt den `klassen_key`, an dem Stundenplan und Notizen hängen. Damit lässt
+    sich überall dort, wo der Lehrer bequem eine *Klasse* wählen soll, sauber
+    auf die Lerngruppe auflösen, statt eine Schulklassen-ID an einer Stelle
+    einzutragen, die eine Lerngruppen-ID erwartet.
+
+    Gibt None zurück, wenn es (noch) keine 1:1-Lerngruppe gibt — der Aufrufer
+    entscheidet dann, ob er das als Fehler behandelt."""
+    return db.scalars(
+        select(TtKlasse)
+        .join(TtLerngruppeKlasse,
+              TtLerngruppeKlasse.lerngruppe_id == TtKlasse.id)
+        .where(TtLerngruppeKlasse.schulklasse_id == schulklasse_id,
+               TtKlasse.user_id == user.id,
+               TtKlasse.art == "klasse")
+    ).first()
+
+
 def klassen_der_lerngruppe(db: Session, lg: TtKlasse) -> list[TtSchulklasse]:
     return list(db.scalars(
         select(TtSchulklasse)

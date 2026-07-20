@@ -61,3 +61,43 @@ def plan(db):
     days = {f"B{i+1}": (date(2026, 8, 3) + timedelta(days=i)).isoformat()
             for i in range(5)}
     return {"user": user, "kk": "MT", "sk": "BBU", "bs": "08:00", "days": days}
+
+
+@pytest.fixture()
+def stamm(db):
+    """Vollständige Stammdaten: Jahrgang → Klasse → 3 Schüler, dazu die
+    1:1-Lerngruppe der Klasse (art='klasse') plus eine zweite Klasse."""
+    user = m.User(username="s", password_hash="x")
+    db.add(user)
+    db.flush()
+
+    jg = m.TtJahrgang(user_id=user.id, name="BSMT 26")
+    db.add(jg)
+    db.flush()
+
+    kl_a = m.TtSchulklasse(user_id=user.id, jahrgang_id=jg.id, name="BSMT 26 a")
+    kl_b = m.TtSchulklasse(user_id=user.id, jahrgang_id=jg.id, name="BSMT 26 b")
+    db.add_all([kl_a, kl_b])
+    db.flush()
+
+    # 1:1-Lerngruppen, wie die Stammdaten sie automatisch anlegen
+    lg_a = m.TtKlasse(user_id=user.id, klassen_key="BSMT26a",
+                      display_name="BSMT 26 a", art="klasse", jahrgang_id=jg.id)
+    lg_b = m.TtKlasse(user_id=user.id, klassen_key="BSMT26b",
+                      display_name="BSMT 26 b", art="klasse", jahrgang_id=jg.id)
+    db.add_all([lg_a, lg_b])
+    db.flush()
+    db.add(m.TtLerngruppeKlasse(lerngruppe_id=lg_a.id, schulklasse_id=kl_a.id))
+    db.add(m.TtLerngruppeKlasse(lerngruppe_id=lg_b.id, schulklasse_id=kl_b.id))
+
+    schueler = []
+    for nn, vn in [("Ahrens", "Ada"), ("Bloch", "Ben"), ("Curt", "Cem")]:
+        s = m.Student(owner_user_id=user.id, klassen_key="BSMT26a",
+                      schulklasse_id=kl_a.id, jahrgang_id=jg.id,
+                      nachname=nn, vorname=vn, active=True)
+        db.add(s)
+        schueler.append(s)
+    db.flush()
+    db.commit()
+    return {"user": user, "jahrgang": jg, "klasse_a": kl_a, "klasse_b": kl_b,
+            "lg_a": lg_a, "lg_b": lg_b, "schueler": schueler}
