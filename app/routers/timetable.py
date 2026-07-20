@@ -3,6 +3,7 @@
 Die Stunden kommen aus app/services/timetable_grid.py (Grundstundenplan-Version,
 A/B-Woche, Ferien, einmalige Änderungen) — nicht mehr aus WebUntis. Dazu die
 Lehrer-Notizen pro Stunde und die iCal-Termine."""
+import json
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
@@ -15,9 +16,10 @@ from app.auth import require_user
 from app.db import get_db
 from app.models import (
     Exam, IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
-    LessonSeriesOverride, LsArbeitsblatt, LsAufgabe, User,
+    LessonReflection, LessonSeriesOverride, LsArbeitsblatt, LsAufgabe,
+    TtException, TtKlasse, User,
 )
-from app.services import aufgabe_sync, ical_client, timetable_grid
+from app.services import aufgabe_sync, ical_client, timetable_grid, vikunja_client
 from app.templating import templates
 
 router = APIRouter()
@@ -73,6 +75,7 @@ def timetable_view(
     # Key nun mit block_start: (date, klassen_key, subjects_key, block_start)
     notes_present: set[tuple[str, str, str, str]] = set()
     exams: set[tuple[str, str, str, str]] = set()
+    themes: dict[tuple[str, str, str, str], str] = {}
     session_override: dict[tuple[str, str, str, str], str] = {}
     series_override: dict[tuple[str, str], str] = {}
 
@@ -106,11 +109,26 @@ def timetable_view(
                 notes_present.add(key)
             if ex:
                 exams.add(key)
+            if (theme or "").strip():
+                themes[key] = theme
             if (sov or "").strip():
                 session_override[key] = sov
 
         grid["notes_present"] = notes_present
         grid["exams"] = exams
+        grid["themes"] = themes
+
+        reflections_present: set[tuple[str, str, str, str]] = set()
+        for d, kk, sk, bs in db.query(
+            LessonReflection.lesson_date, LessonReflection.klassen_key,
+            LessonReflection.subjects_key, LessonReflection.block_start,
+        ).filter(
+            LessonReflection.user_id == user.id,
+            LessonReflection.lesson_date >= monday.isoformat(),
+            LessonReflection.lesson_date <= friday.isoformat(),
+        ).all():
+            reflections_present.add((d, kk or "", sk or "", bs or ""))
+        grid["reflections_present"] = reflections_present
         grid["session_override"] = session_override
         grid["series_override"] = series_override
 
@@ -1548,6 +1566,320 @@ def api_get_block_exams(
 #         return JSONResponse({"ok": True, "lessons": lessons})
 #     except Exception as e:
 #         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
+
+
+def _reihe_blocks_in_range(db: Session, user: User, kk: str, sk: str,
+                           von: date, bis: date) -> list[dict]:
+    """Alle realen Blöcke der Reihe (Klasse+Fach) im Zeitraum [von, bis],
+    chronologisch, angereichert um Status und ein evtl. vorhandenes Thema.
+
+    Ferien/freie Tage fallen über das Grid weg. Ausfall/Vertretung/Wegverlegt
+    werden als `locked` markiert (dürfen kein Thema aufnehmen)."""
+    note_rows = db.query(
+        LessonNote.lesson_date, LessonNote.block_start, LessonNote.theme,
+    ).filter(
+        LessonNote.user_id == user.id, LessonNote.klassen_key == kk,
+        LessonNote.subjects_key == sk,
+        LessonNote.lesson_date >= von.isoformat(),
+        LessonNote.lesson_date <= bis.isoformat(),
+    ).all()
+    theme_map = {(d, bs): (t or "") for d, bs, t in note_rows}
+
+    out: list[dict] = []
+    monday = von - timedelta(days=von.weekday())
+    guard = 0
+    while monday <= bis and guard < 60:
+        guard += 1
+        grid = timetable_grid.get_week_grid(db, user, monday)
+        for day in grid["days"]:
+            if day["free"] or not (von <= day["date"] <= bis):
+                continue
+            d_idx = (day["date"] - grid["monday"]).days
+            d_iso = day["date"].isoformat()
+            for slot in grid["slots"]:
+                bs = slot["start"]
+                for l in grid["cells"].get((bs, d_idx), []):
+                    if l["klassen_key"] == kk and l["subjects_key"] == sk:
+                        ex_theme = theme_map.get((d_iso, bs), "")
+                        out.append({
+                            "date": d_iso, "block_start": bs, "subjects_key": sk,
+                            "slot_name": slot["name"],
+                            "fach_display": l["fach_display"],
+                            "status": l["status"],
+                            "locked": l["status"] in ("ausfall", "vertretung",
+                                                      "verlegt_weg"),
+                            "has_theme": bool(ex_theme.strip()),
+                            "existing_theme": ex_theme,
+                        })
+                        break
+        monday += timedelta(days=7)
+    out.sort(key=lambda b: (b["date"], b["block_start"]))
+    return out
+
+
+@router.get("/api/timetable/plan-blocks")
+def api_plan_blocks(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    klassen: str = "",
+    fach: str = "",
+    von: str = "",
+    bis: str = "",
+):
+    """Blöcke einer Reihe (Klasse+Fach) im Zeitraum — füttert die Verteil- und
+    die Klassenarbeits-Blockauswahl."""
+    kk, sk = klassen.strip(), fach.strip()
+    if not kk or not sk:
+        return JSONResponse({"ok": False, "error": "Klasse oder Fach fehlt."},
+                            status_code=400)
+    try:
+        v = date.fromisoformat(von.strip())
+        b = date.fromisoformat(bis.strip())
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Zeitraum fehlt oder ist "
+                             "ungültig."}, status_code=400)
+    if b < v:
+        v, b = b, v
+    if (b - v).days > 140:                 # Deckel: ~20 Wochen
+        b = v + timedelta(days=140)
+    return JSONResponse({"ok": True,
+                         "blocks": _reihe_blocks_in_range(db, user, kk, sk, v, b)})
+
+
+@router.post("/api/timetable/distribute-theme")
+def api_distribute_theme(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Schreibt EIN Thema in die angehakten Blöcke der Reihe (feld-erhaltend:
+    Notizen/Material bleiben). Gesperrte Blöcke (Ausfall/Vertretung/Verschiebung)
+    werden defensiv übersprungen."""
+    kk = (body.get("klassen") or "")[:255].strip()
+    sk = (body.get("fach") or "")[:255].strip()
+    theme = (body.get("theme") or "").strip()[:500]
+    blocks = body.get("blocks") or []
+    if not kk or not sk:
+        raise HTTPException(400, "Klasse oder Fach fehlt.")
+    if not theme:
+        raise HTTPException(400, "Thema fehlt.")
+
+    written, skipped = 0, 0
+    for blk in blocks:
+        d = (blk.get("date") or "")[:10]
+        bs = (blk.get("block_start") or "")[:5]
+        if len(d) != 10 or not bs:
+            continue
+        locked = db.query(TtException.id).filter(
+            TtException.user_id == user.id, TtException.lesson_date == d,
+            TtException.block_start == bs, TtException.klassen_key == kk,
+            TtException.subjects_key == sk,
+            TtException.kind.in_(("ausfall", "vertretung", "verschiebung")),
+        ).first()
+        if locked:
+            skipped += 1
+            continue
+        n = db.query(LessonNote).filter(
+            LessonNote.user_id == user.id, LessonNote.lesson_date == d,
+            LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+            LessonNote.block_start == bs,
+        ).first()
+        if not n:
+            n = LessonNote(user_id=user.id, lesson_date=d, klassen_key=kk,
+                           subjects_key=sk, block_start=bs)
+            db.add(n)
+        n.theme = theme
+        n.updated_at = datetime.utcnow()
+        written += 1
+    db.commit()
+    return JSONResponse({"ok": True, "written": written, "skipped": skipped})
+
+
+@router.get("/api/timetable/themes-since-last-exam")
+def api_themes_since_last_exam(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    klassen: str = "",
+    datum: str = "",
+):
+    """Planungshilfe fürs Klassenarbeit-Overlay: die Themen dieser Klasse seit
+    der letzten Prüfung (letzter is_exam-Block vor `datum`) bis zum neuen Termin,
+    chronologisch. Leere Themen fallen weg."""
+    kk = klassen.strip()
+    try:
+        d = date.fromisoformat(datum.strip())
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Datum fehlt."}, status_code=400)
+    if not kk:
+        return JSONResponse({"ok": False, "error": "Klasse fehlt."}, status_code=400)
+
+    last = db.query(LessonNote.lesson_date).filter(
+        LessonNote.user_id == user.id, LessonNote.klassen_key == kk,
+        LessonNote.is_exam.is_(True),
+        LessonNote.lesson_date < d.isoformat(),
+    ).order_by(LessonNote.lesson_date.desc()).first()
+    since = last[0] if last else ""
+
+    q = db.query(
+        LessonNote.lesson_date, LessonNote.subjects_key, LessonNote.theme,
+    ).filter(
+        LessonNote.user_id == user.id, LessonNote.klassen_key == kk,
+        LessonNote.theme != "", LessonNote.lesson_date < d.isoformat(),
+    )
+    if since:
+        q = q.filter(LessonNote.lesson_date > since)
+    rows = q.order_by(LessonNote.lesson_date, LessonNote.block_start).all()
+    themes = [{"date": r[0], "fach": r[1], "theme": r[2]}
+              for r in rows if (r[2] or "").strip()]
+    return JSONResponse({"ok": True, "since": since, "themes": themes})
+
+
+def _maybe_create_exam(db: Session, user: User, note: LessonNote,
+                       datum: str, klassen: str, theme: str) -> None:
+    """Platzhalter: Nach der Überarbeitung des Prüfungs-Moduls soll hier
+    automatisch ein Exam angelegt und über `note.id` verknüpft werden. Bewusst
+    als eigene Funktion, damit der spätere Haken ein Einzeiler bleibt."""
+    return None
+
+
+@router.post("/api/timetable/klassenarbeit")
+def api_klassenarbeit(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Legt eine Klassenarbeit an: markiert den gewählten Block als Prüfung
+    (is_exam, roter Rahmen) mit dem KA-Thema und erzeugt eine Vikunja-Aufgabe
+    (fällig 5 Tage vorher). Feld-erhaltend."""
+    kk = (body.get("klassen") or "")[:255].strip()
+    sk = (body.get("subjects_key") or body.get("fach") or "")[:255].strip()
+    theme = (body.get("theme") or "").strip()[:500]
+    bs = (body.get("block_start") or "")[:5].strip()
+    try:
+        d = date.fromisoformat((body.get("datum") or "").strip())
+    except ValueError:
+        raise HTTPException(400, "Datum fehlt oder ist ungültig.")
+    if not kk or not sk or not bs:
+        raise HTTPException(400, "Klasse, Fach oder Block fehlt.")
+    if not theme:
+        raise HTTPException(400, "Thema der Klassenarbeit fehlt.")
+
+    # Block als Prüfung markieren + KA-Thema setzen (Notizen/Material bleiben).
+    n = db.query(LessonNote).filter(
+        LessonNote.user_id == user.id, LessonNote.lesson_date == d.isoformat(),
+        LessonNote.klassen_key == kk, LessonNote.subjects_key == sk,
+        LessonNote.block_start == bs,
+    ).first()
+    if not n:
+        n = LessonNote(user_id=user.id, lesson_date=d.isoformat(),
+                       klassen_key=kk, subjects_key=sk, block_start=bs)
+        db.add(n)
+    n.is_exam = True
+    n.theme = theme
+    n.updated_at = datetime.utcnow()
+    db.flush()
+
+    _maybe_create_exam(db, user, n, d.isoformat(), kk, theme)
+
+    # Anzeigename der Lerngruppe fürs Label/den Titel.
+    lg = db.query(TtKlasse).filter(
+        TtKlasse.user_id == user.id, TtKlasse.klassen_key == kk).first()
+    disp = (lg.display_name if lg and lg.display_name else kk)
+
+    warn, task_created = "", False
+    if vikunja_client.is_configured(user):
+        try:
+            due = (d - timedelta(days=5)).isoformat()
+            label_ids = []
+            lbl = vikunja_client.ensure_label(
+                user, vikunja_client.klasse_label_title(disp),
+                vikunja_client.KLASSE_LABEL_COLOR)
+            if lbl.get("id"):
+                label_ids.append(int(lbl["id"]))
+            vikunja_client.create_task(
+                user, title=f"Klassenarbeit {disp}: {theme}",
+                due_date=due,
+                description=f"Klassenarbeit am {d.strftime('%d.%m.%Y')}.",
+                label_ids=label_ids)
+            task_created = True
+        except Exception as e:  # Vikunja darf die KA-Anlage nicht kippen
+            warn = f"Klassenarbeit gespeichert, aber die Aufgabe konnte nicht " \
+                   f"angelegt werden ({type(e).__name__})."
+    else:
+        warn = "Klassenarbeit gespeichert. Vikunja ist nicht eingerichtet — " \
+               "es wurde keine Aufgabe angelegt."
+
+    db.commit()
+    return JSONResponse({"ok": True, "warn": warn, "task_created": task_created})
+
+
+REFLECTION_VALUES = {"voll", "eher", "eher_nicht", "gar_nicht"}
+
+
+@router.get("/api/lesson-reflection")
+def api_get_reflection(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    date: str,
+    klassen: str = "",
+    subjects: str = "",
+    block_start: str = "",
+):
+    r = db.query(LessonReflection).filter(
+        LessonReflection.user_id == user.id, LessonReflection.lesson_date == date,
+        LessonReflection.klassen_key == klassen,
+        LessonReflection.subjects_key == subjects,
+        LessonReflection.block_start == block_start,
+    ).first()
+    if not r:
+        return JSONResponse({"ok": True, "reflection": None})
+    try:
+        ratings = json.loads(r.ratings_json or "{}")
+    except ValueError:
+        ratings = {}
+    return JSONResponse({"ok": True, "reflection": {
+        "ratings": ratings, "free_text": r.free_text or ""}})
+
+
+@router.post("/api/lesson-reflection")
+def api_save_reflection(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    d = (body.get("date") or "").strip()
+    if len(d) != 10:
+        raise HTTPException(400, "Ungültiges Datum (YYYY-MM-DD).")
+    kk = (body.get("klassen") or "")[:255]
+    sk = (body.get("subjects") or "")[:255]
+    bs = (body.get("block_start") or "")[:5]
+    # Nur erlaubte Stufen behalten; alles andere gilt als „Keine Angabe".
+    raw = body.get("ratings") or {}
+    ratings = {str(k): v for k, v in raw.items()
+               if isinstance(v, str) and v in REFLECTION_VALUES}
+    free_text = (body.get("free_text") or "").strip()
+
+    r = db.query(LessonReflection).filter(
+        LessonReflection.user_id == user.id, LessonReflection.lesson_date == d,
+        LessonReflection.klassen_key == kk, LessonReflection.subjects_key == sk,
+        LessonReflection.block_start == bs,
+    ).first()
+
+    if not ratings and not free_text:
+        if r:
+            db.delete(r)
+            db.commit()
+        return JSONResponse({"ok": True, "deleted": True})
+
+    if not r:
+        r = LessonReflection(user_id=user.id, lesson_date=d, klassen_key=kk,
+                             subjects_key=sk, block_start=bs)
+        db.add(r)
+    r.ratings_json = json.dumps(ratings)
+    r.free_text = free_text[:4000]
+    r.updated_at = datetime.utcnow()
+    db.commit()
+    return JSONResponse({"ok": True, "saved": True})
 
 
 @router.get("/api/dashboard/events")
