@@ -1213,12 +1213,28 @@ async function initBlockExams(dateIso, kk, sk, bs) {
   const newBtn = document.getElementById('exam-new-btn');
   if (!list) return;
 
-  // "Neue Prüfung"-Button: zur Anlage-Seite mit vorausgefüllter Klasse
-  // (LS-ID hängen wir an, falls die Note eine LS verknüpft hat)
-  newBtn.href = '/exams/new';
-  newBtn.addEventListener('click', (e) => {
+  // "Neue Prüfung"-Button öffnet den Anlege-Assistenten direkt hier, mit
+  // Klasse, Datum und Thema aus diesem Block vorbelegt. Die Prüfung merkt sich
+  // über `lesson_note_id`, zu welcher Stunde sie gehört.
+  newBtn.href = '#';
+  newBtn.addEventListener('click', async (e) => {
     e.preventDefault();
-    location.href = '/exams/new';
+    if (!window.DRSExams) { location.href = '/exams'; return; }
+    let noteId = null;
+    try {
+      const n = await DRS.getJSON('/api/lesson-note?date=' + encodeURIComponent(dateIso)
+        + '&klassen=' + encodeURIComponent(kk)
+        + '&subjects=' + encodeURIComponent(sk)
+        + '&block_start=' + encodeURIComponent(bs));
+      noteId = (n.note && n.note.id) || null;
+    } catch (err) { /* ohne Notiz-ID geht es auch */ }
+    const thema = document.getElementById('note-theme');
+    DRSExams.anlegenWizard({
+      title: (thema && thema.value.trim()) || '',
+      datum: dateIso,
+      klassen_key: kk,
+      lesson_note_id: noteId,
+    });
   });
 
   list.innerHTML = '<span class="muted" style="font-size:12px">lade …</span>';
@@ -2024,6 +2040,9 @@ document.querySelectorAll('.tt-event, .allday-event').forEach(el => {
 {# Die neuen Overlays brauchen DRS.modal aus /static/drs.js. Das lädt base.html
    ERST NACH dem content-Block — darum leben sie hier im scripts-Block. #}
 {% block scripts %}
+{# Prüfungs-Assistent, damit "+ Neue Prüfung für diese Stunde" direkt hier
+   als Overlay aufgeht statt auf eine eigene Seite zu springen. #}
+<script src="/static/exams.js?v={{ static_version() }}"></script>
 <style>
   .dist-list { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
     max-height: 46vh; overflow: auto; margin-top: 4px; }

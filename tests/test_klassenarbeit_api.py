@@ -44,6 +44,56 @@ def test_themes_since_last_exam_boundary(client, db, plan):
     assert themes == ["Neu-1", "Neu-2"]  # Alt-vor-KA und KA1 fallen raus
 
 
+def test_klassenarbeit_legt_pruefung_an_und_verknuepft_block(client, db, plan):
+    """Etappe 4: Die Klassenarbeit erzeugt gleich die passende Prüfung."""
+    from app.models import Exam, ExamStudent, LessonNote, Student
+    u, d, bs = plan["user"], plan["days"], plan["bs"]
+    # Die Lerngruppe 'MT' aus der plan-Fixture bekommt einen Schüler über eine
+    # Schulklasse, damit Teilnehmer vorausgewählt werden können.
+    from app import models as m
+    jg = m.TtJahrgang(user_id=u.id, name="J")
+    db.add(jg); db.flush()
+    kl = m.TtSchulklasse(user_id=u.id, jahrgang_id=jg.id, name="MT-Klasse")
+    db.add(kl); db.flush()
+    lg = db.query(m.TtKlasse).filter_by(user_id=u.id, klassen_key="MT").first()
+    db.add(m.TtLerngruppeKlasse(lerngruppe_id=lg.id, schulklasse_id=kl.id))
+    db.add(Student(owner_user_id=u.id, klassen_key="MT", schulklasse_id=kl.id,
+                   nachname="Test", vorname="Tim", active=True))
+    db.commit()
+
+    r = client.post("/api/timetable/klassenarbeit", json={
+        "klassen": "MT", "subjects_key": "BBU", "datum": d["B3"],
+        "block_start": bs, "theme": "Pneumatik-Test"})
+    assert r.status_code == 200
+    ex_id = r.json()["exam_id"]
+    assert ex_id is not None
+
+    ex = db.get(Exam, ex_id)
+    note = db.query(LessonNote).filter_by(
+        user_id=u.id, lesson_date=d["B3"], klassen_key="MT",
+        subjects_key="BBU", block_start=bs).first()
+    assert ex.title == "Pneumatik-Test"
+    assert ex.datum == d["B3"]
+    assert ex.lerngruppe_id == lg.id
+    assert ex.klassen_key == "MT"
+    assert ex.lesson_note_id == note.id          # Verknüpfung zum Block
+    assert db.query(ExamStudent).filter_by(exam_id=ex.id).count() == 1
+
+
+def test_klassenarbeit_ohne_lerngruppe_legt_keine_pruefung_an(client, db, plan):
+    """Ohne passende Lerngruppe bleibt die Klassenarbeit trotzdem bestehen."""
+    from app.models import LessonNote
+    u, d, bs = plan["user"], plan["days"], plan["bs"]
+    r = client.post("/api/timetable/klassenarbeit", json={
+        "klassen": "GIBTESNICHT", "subjects_key": "BBU", "datum": d["B4"],
+        "block_start": bs, "theme": "X"})
+    assert r.status_code == 200
+    assert r.json()["exam_id"] is None
+    n = db.query(LessonNote).filter_by(
+        user_id=u.id, lesson_date=d["B4"], klassen_key="GIBTESNICHT").first()
+    assert n is not None and n.is_exam is True
+
+
 def test_klassenarbeit_marks_exam_and_preserves(client, db, plan):
     u, d, bs = plan["user"], plan["days"], plan["bs"]
     # Block hat schon Notizen — die müssen bleiben

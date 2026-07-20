@@ -45,6 +45,15 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   4-stufig + „Keine Angabe" + Notiz, eigenes 🔎-Icon im Grid) und die
   **Themen-Kaskade**. Migrationen **0028** + **0029**.
 
+- **Prüfungsmodul modernisiert** (2026-07-20, NEU): Eine Prüfung gehört jetzt zu
+  **genau einer Klasse oder Lerngruppe**. Eine Klasse wird dabei serverseitig auf
+  ihre 1:1-Lerngruppe aufgelöst (neuer Service-Helfer `lerngruppe_der_klasse`) —
+  intern hängt alles weiter am `klassen_key`. Anlegen läuft über einen
+  **DRS-Assistenten** (ein Request am Ende statt vier Seitenwechsel), die
+  Arbeitsschritte auf der Detailseite über **Overlays**. Drei ernste Fehler
+  behoben: ein harter 500er, eine kaputte Teilnehmerliste und stiller
+  Notenverlust bei den Feedbackpunkten. **Keine Migration nötig.**
+
 **Migrations-Stand: 0029.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
@@ -183,6 +192,49 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 ---
 
 ## 3. Aktuell offene Punkte
+
+### Prüfungsmodul: Zuordnung, Overlays, behobene Fehler (2026-07-20)
+
+**Zuordnung.** `Exam.lerngruppe_id` ist ein FK auf **Lerngruppen** (`tt_klassen`).
+Eine Schulklassen-ID dort einzutragen wäre eine stille Datenverfälschung — SQLite
+erzwingt keine FKs, die ID zeigte einfach auf eine fremde Lerngruppe. Deshalb:
+In der Oberfläche wählt man Klasse **oder** Lerngruppe, der Server löst eine
+Klasse über `lerngruppen.lerngruppe_der_klasse()` auf ihre 1:1-Lerngruppe auf.
+`Exam.klassen_key` trägt seither den **echten Key** (nicht den Anzeigenamen) —
+daran hängt die Stundenplan-Zuordnung. Die Picker-API liefert Klassen und
+Lerngruppen bewusst getrennt; die 1:1-Lerngruppen erscheinen NICHT zusätzlich in
+der Lerngruppen-Liste, sonst stünde jede Klasse doppelt.
+
+**Behobene Fehler:**
+- `_add_class_members` wurde aufgerufen, war aber **nie definiert** → jedes
+  Hinzufügen einer Klasse endete in einem `NameError` (HTTP 500).
+- Die Teilnehmerliste verglich `Student.klassen_key` gegen die **Anzeigenamen**
+  in `Exam.klassen_key` → bei Kombi-/Teilgruppen leer, obwohl Teilnehmer
+  existierten. Sie kommt jetzt aus der Lerngruppe **plus** allen bereits
+  erfassten Personen (Moodle-Import, klassenübergreifend, Altbestand).
+- Feedbackpunkte wurden beim Speichern **gelöscht und neu angelegt**, Noten nur
+  über die Position zurückgemappt → Umsortieren verschob still Bewertungen.
+  Jetzt ID-stabiles Upsert (`_save_feedback_points`), gelöschte Punkte räumen
+  ihre Werte sauber ab.
+- **Teil-Updates leerten Felder:** Der Einstellungen-Tab überschrieb `datum`
+  bedingungslos; das Zuordnungs-Overlay schickt nur `lerngruppe_id` und löschte
+  damit das Datum. **Regel:** in `save[einstellungen]` nur Felder anfassen, die
+  per `in body` auch mitgeschickt wurden.
+
+**Overlays.** Anlegen ist ein `DRS.wizard` (Grunddaten → Wer → Bewertung →
+Feedbackpunkte, ein Request am Ende). Auf der Detailseite bleiben nur die beiden
+großflächigen Ansichten **Bewertung** und **Export** als Tabs; Einstellungen,
+Teilnehmer und Feedbackpunkte öffnen als Overlay. Kniff dabei: Die Bereiche
+bleiben im DOM und werden beim Öffnen **in das Modal verschoben** (`DRS.modal`
+nimmt einen Node) — so bleiben alle bereits verdrahteten Handler des
+Feedbackpunkt-Editors (Stufen, Presets, Gewichtssumme) gültig, statt sie im
+Overlay nachzubauen. Beim Schließen wandert der Bereich an einen Platzhalter
+zurück.
+
+**Stundenplan-Verknüpfung geschlossen:** „+ Neue Prüfung für diese Stunde" öffnet
+den Assistenten mit Thema, Datum und Klasse des Blocks und schreibt endlich
+`lesson_note_id`. Eine **Klassenarbeit legt die Prüfung automatisch an**
+(`_maybe_create_exam` in `timetable.py`, vorher ein No-Op-Platzhalter).
 
 ### ⚠️ Skripte im content-Block laufen VOR drs.js (2026-07-20, behoben)
 
@@ -426,11 +478,7 @@ Schüler kommen jetzt aus den Stammdaten/Lerngruppen.
 
 ### Geplant, noch nicht umgesetzt
 
-1. **Exam-Anlage bei der Klassenarbeit**: `_maybe_create_exam()` in
-   `app/routers/timetable.py` ist ein bewusster No-Op-Platzhalter. Nach der
-   Überarbeitung des Prüfungs-Moduls dort ein `Exam` anlegen und über die
-   `LessonNote` verknüpfen — der Rest des Flows steht schon.
-2. **Moodle-Notenexport** (Phase B): Endpoint `/exams/{id}/export.csv?format=moodle`
+1. **Moodle-Notenexport** (Phase B): Endpoint `/exams/{id}/export.csv?format=moodle`
    ist als Platzhalter vorgesehen, noch nicht gebaut. `moodle_id` wird beim
    Schüler-Import bereits gespeichert. Doku in `docs/moodle-integration.md`.
 3. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`

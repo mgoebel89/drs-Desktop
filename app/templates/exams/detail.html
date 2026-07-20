@@ -7,7 +7,16 @@
     <a class="btn btn-sec" href="/exams">← Übersicht</a>
   </div>
   <p class="muted">
-    {{ exam.datum or 'kein Datum' }} · Klasse(n) {{ exam.klassen_key or '—' }}
+    {{ exam.datum or 'kein Datum' }} ·
+    {% if lerngruppe %}
+      {{ lerngruppe.display_name or lerngruppe.klassen_key }}
+      ({% if lerngruppe.art == 'kombi' %}zusammengelegt{% elif lerngruppe.art == 'gruppe' %}Teilgruppe{% else %}Klasse{% endif %})
+    {% elif exam.klassen_key %}
+      {{ exam.klassen_key }} <span style="color:var(--pink)">· keiner Lerngruppe zugeordnet</span>
+    {% else %}
+      <span style="color:var(--pink)">noch keiner Klasse zugeordnet</span>
+    {% endif %}
+    · {{ roster|selectattr('member')|list|length }} Teilnehmer
     {% if ls %}· LS <a href="/ls/{{ ls.id }}">{{ ls.display_name }}</a>{% endif %}
   </p>
 
@@ -22,16 +31,23 @@
   </div>
   {% endif %}
 
+  {# Die Arbeitsschritte laufen über Overlays (wie in den Stammdaten); auf der
+     Seite bleiben nur die beiden großflächigen Ansichten Bewertung und Export. #}
+  <div class="ex-actions">
+    <button type="button" class="btn-sec" data-pane="tab-set">⚙ Einstellungen</button>
+    <button type="button" class="btn-sec" id="btn-zuordnung">🎓 Zuordnung</button>
+    <button type="button" class="btn-sec" data-pane="tab-part">👥 Teilnehmer</button>
+    <button type="button" class="btn-sec" data-pane="tab-fps">🧩 Feedbackpunkte</button>
+    <button type="button" class="btn-sec ex-del" id="btn-exam-del">🗑 Löschen</button>
+  </div>
+
   <div class="tab-row" style="display:flex;gap:.3rem;border-bottom:2px solid #eee;margin-top:.8rem;flex-wrap:wrap">
-    <button type="button" class="tab-btn active" data-target="tab-set">Einstellungen</button>
-    <button type="button" class="tab-btn" data-target="tab-part">Teilnehmer</button>
-    <button type="button" class="tab-btn" data-target="tab-fps">Feedbackpunkte</button>
-    <button type="button" class="tab-btn" data-target="tab-eval">Bewertung</button>
+    <button type="button" class="tab-btn active" data-target="tab-eval">Bewertung</button>
     <button type="button" class="tab-btn" data-target="tab-exp">Export</button>
   </div>
 
-  <!-- ── EINSTELLUNGEN ── -->
-  <div id="tab-set" class="tab-pane" style="padding:1rem 0">
+  <!-- ── EINSTELLUNGEN (Inhalt des Overlays) ── -->
+  <div id="tab-set" class="tab-pane pane-modal" style="padding:1rem 0;display:none">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.9rem;max-width:760px">
       <div style="grid-column:1/3"><label>Titel</label><input id="f-title" value="{{ exam.title }}"></div>
       <div><label>Datum</label><input id="f-datum" type="date" value="{{ exam.datum }}"></div>
@@ -40,22 +56,7 @@
           {% for ref, lbl in scales %}<option value="{{ ref }}" {% if ref == exam.grading_scale_key %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
         </select>
       </div>
-      <div style="grid-column:1/3"><label>Klasse(n)</label>
-        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.3rem">
-          {% for k in all_klassen %}
-          <label style="font-weight:normal;display:flex;align-items:center;gap:.35rem;padding:.3rem .6rem;border:1px solid #ddd;border-radius:6px;cursor:pointer">
-            <input type="checkbox" class="cls-cb" value="{{ k }}" {% if k in exam_classes %}checked{% endif %}> {{ k }}
-          </label>
-          {% endfor %}
-        </div>
-        <p class="muted" style="font-size:11px;margin-top:.3rem">Neue Klassen: alle Schüler werden Teilnehmer.</p>
-      </div>
-      <div style="grid-column:1/3;display:flex;justify-content:space-between;margin-top:.6rem">
-        <form method="post" action="/exams/{{ exam.id }}/delete"
-              onsubmit="return confirm('Prüfung „{{ exam.title }}" wirklich löschen? Alle Bewertungen gehen verloren.');">
-          <input type="hidden" name="confirm" value="1">
-          <button class="btn-sec" type="submit" style="color:#c62828;border-color:#c62828">🗑 Löschen</button>
-        </form>
+      <div style="grid-column:1/3;display:flex;justify-content:flex-end;margin-top:.6rem">
         <button class="btn" type="button" id="btn-set-save">Speichern</button>
       </div>
       <div style="grid-column:1/3"><span id="set-status" class="muted" style="font-size:12px"></span></div>
@@ -63,7 +64,7 @@
   </div>
 
   <!-- ── TEILNEHMER ── -->
-  <div id="tab-part" class="tab-pane" style="padding:1rem 0;display:none">
+  <div id="tab-part" class="tab-pane pane-modal" style="padding:1rem 0;display:none">
     {% if roster %}
     <p class="muted" style="font-size:12px">Häkchen = nimmt teil. Gruppe optional (A, B …).</p>
     <table>
@@ -90,7 +91,7 @@
   </div>
 
   <!-- ── FEEDBACKPUNKTE ── -->
-  <div id="tab-fps" class="tab-pane" style="padding:1rem 0;display:none">
+  <div id="tab-fps" class="tab-pane pane-modal" style="padding:1rem 0;display:none">
     <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.8rem;flex-wrap:wrap">
       <label style="margin:0">Aus Vorlage:</label>
       <select id="tmpl-select" style="min-width:200px"><option value="">— wählen —</option></select>
@@ -124,7 +125,7 @@
   </div>
 
   <!-- ── BEWERTUNG ── -->
-  <div id="tab-eval" class="tab-pane" style="padding:1rem 0;display:none">
+  <div id="tab-eval" class="tab-pane" style="padding:1rem 0">
     {% if not students_view %}
       <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;padding:1rem">Keine Teilnehmer. Bitte im Teilnehmer-Tab auswählen.</div>
     {% elif not feedback_points %}
@@ -396,6 +397,7 @@ document.getElementById('btn-fps-save').addEventListener('click',async()=>{
   else st.textContent='✗ '+(d.detail||'Fehler');
 });
 renderFPs();
+window._examRenderFPs = renderFPs;   // damit das Overlay neu zeichnen kann
 
 // Aus Vorlage
 (async()=>{
@@ -540,5 +542,58 @@ if(nmBtn)nmBtn.addEventListener('click',()=>{
   .tab-btn{border:none;background:transparent;padding:.6rem 1rem;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;font-family:inherit;color:#666;}
   .tab-btn:hover{color:#333;} .tab-btn.active{color:var(--blau);font-weight:600;}
   .wz-stage:hover{background:#f5f3ff !important;}
+  .ex-actions{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.9rem;}
+  .ex-actions .btn-sec{font-size:13px;padding:7px 12px;min-height:40px;}
+  .ex-actions .ex-del{color:var(--pink);border-color:var(--pink);margin-left:auto;}
+  .ex-actions .ex-del:hover{background:#fdecea;}
+  /* Bereiche, die nur im Overlay erscheinen — nie auf der Seite selbst */
+  .pane-modal{display:none;}
+  .drs-modal .pane-modal{display:block !important;padding-top:0 !important;}
 </style>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/exams.js?v={{ static_version() }}"></script>
+<script>
+/* Die Arbeitsschritte laufen als Overlay. Die Bereiche bleiben im DOM und
+ * werden beim Öffnen in das Modal VERSCHOBEN — so bleiben alle bereits
+ * verdrahteten Handler (Feedbackpunkt-Editor mit Stufen, Teilnehmer-Save …)
+ * unverändert gültig, statt sie im Overlay noch einmal nachzubauen. */
+(function () {
+  const TITEL = { 'tab-set': '⚙ Einstellungen', 'tab-part': '👥 Teilnehmer',
+                  'tab-fps': '🧩 Feedbackpunkte' };
+
+  document.querySelectorAll('[data-pane]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.pane;
+      const pane = document.getElementById(id);
+      if (!pane) return;
+      const platzhalter = document.createComment('pane:' + id);
+      pane.parentNode.insertBefore(platzhalter, pane);
+      DRS.modal({
+        title: TITEL[id] || '',
+        body: pane,
+        actions: [{ label: 'Schließen', kind: 'sec', onClick: (c) => c() }],
+        onClose() {   // Bereich zurück an seinen Platz im DOM
+          platzhalter.parentNode.insertBefore(pane, platzhalter);
+          platzhalter.remove();
+        },
+      });
+      if (id === 'tab-fps' && window._examRenderFPs) window._examRenderFPs();
+    });
+  });
+
+  document.getElementById('btn-zuordnung').addEventListener('click',
+    () => DRSExams.zuordnungModal(EXAM_ID));
+
+  document.getElementById('btn-exam-del').addEventListener('click', async () => {
+    let fakten = [];
+    try {
+      const r = await DRS.getJSON('/api/exams/' + EXAM_ID + '/impact');
+      fakten = r.impact || [];
+    } catch (e) { /* Dialog geht auch ohne Kennzahlen auf */ }
+    DRSExams.loeschen(EXAM_ID, {{ exam.title|tojson }}, fakten, '/exams');
+  });
+})();
+</script>
 {% endblock %}

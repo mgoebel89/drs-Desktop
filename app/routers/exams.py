@@ -10,16 +10,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import audit, require_user
 from app.db import get_db
 from app.models import (Exam, ExamFeedbackPoint, ExamGroupResult, ExamResult,
                         ExamStudent, FeedbackTemplate, LearningSituation,
-                        Student, TtKlasse, User)
+                        LessonNote, Student, TtJahrgang, TtKlasse,
+                        TtSchulklasse, User)
 from app.services import exam_md, grading, moodle_quiz, obsidian_writer
-from app.services.lerngruppen import lerngruppen, schueler_der_lerngruppe
+from app.services.lerngruppen import (lerngruppe_der_klasse, lerngruppen,
+                                      schueler_der_lerngruppe)
 from app.services.playwright_pdf import render_pdf
 from app import branding
 from fastapi.responses import PlainTextResponse, Response
@@ -48,6 +50,65 @@ def _loadjson(s: str | None) -> dict:
 
 def _exam_classes(ex: Exam) -> list[str]:
     return [c.strip() for c in (ex.klassen_key or "").split(",") if c.strip()]
+
+
+def _exam_lerngruppe(db: Session, user: User, ex: Exam) -> TtKlasse | None:
+    """Die Lerngruppe, der die Prüfung zugeordnet ist (oder None bei Altbestand)."""
+    if not ex.lerngruppe_id:
+        return None
+    lg = db.get(TtKlasse, ex.lerngruppe_id)
+    return lg if lg and lg.user_id == user.id else None
+
+
+def _set_lerngruppe(db: Session, user: User, ex: Exam, raw) -> None:
+    """Ordnet die Prüfung GENAU EINER Lerngruppe zu.
+
+    Eine Klasse wird vom Aufrufer vorher über
+    `lerngruppen.lerngruppe_der_klasse()` aufgelöst — hier kommt immer eine
+    Lerngruppen-ID an. `klassen_key` wird daraus abgeleitet und trägt bewusst
+    den echten Schlüssel (nicht den Anzeigenamen): Daran hängt die Zuordnung
+    im Stundenplan. Bei einem Wechsel werden die Schüler der neuen Gruppe
+    vorausgewählt; bereits erfasste Teilnehmer bleiben erhalten."""
+    if raw in (None, "", 0):
+        ex.lerngruppe_id = None
+        return
+    try:
+        lg = db.get(TtKlasse, int(raw))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Ungültige Lerngruppe.")
+    if not lg or lg.user_id != user.id:
+        raise HTTPException(404, "Lerngruppe nicht gefunden.")
+    wechsel = ex.lerngruppe_id != lg.id
+    ex.lerngruppe_id = lg.id
+    ex.klassen_key = (lg.klassen_key or "")[:255]
+    if wechsel:
+        _add_gruppe_members(db, user, ex, [lg])
+
+
+def _exam_roster(db: Session, user: User, ex: Exam) -> list[dict]:
+    """Auswahlliste für den Teilnehmer-Schritt.
+
+    Schüler der zugeordneten Lerngruppe PLUS alle, die bereits Teilnehmer sind.
+    Der zweite Teil ist wichtig: Moodle-Importe, klassenübergreifende Prüfungen
+    und Altbestand hängen an keiner Lerngruppe — früher fielen sie aus der Liste
+    und waren dadurch weder sichtbar noch abwählbar, obwohl sie bewertet wurden."""
+    participants = _exam_participants(db, ex)
+    member_ids = {s.id for s, _ in participants}
+    member_group = {s.id: g for s, g in participants}
+
+    kandidaten: dict[int, Student] = {}
+    lg = _exam_lerngruppe(db, user, ex)
+    if lg:
+        for s in schueler_der_lerngruppe(db, user, lg):
+            kandidaten[s.id] = s
+    for s, _ in participants:
+        kandidaten.setdefault(s.id, s)
+
+    rows = sorted(kandidaten.values(),
+                  key=lambda s: ((s.nachname or "").lower(),
+                                 (s.vorname or "").lower()))
+    return [{"student": s, "member": s.id in member_ids,
+             "group_label": member_group.get(s.id, "")} for s in rows]
 
 
 def _exam_participants(db: Session, ex: Exam) -> list[tuple[Student, str]]:
@@ -195,18 +256,32 @@ def exams_list(
         select(Exam).where(Exam.owner_user_id == user.id)
         .order_by(Exam.datum.desc(), Exam.id.desc())
     ).all()
-    # Anzahl SuS für die Anzeige
+    # Kennzahlen in zwei Abfragen statt zwei je Prüfung (vorher N+1).
+    mit_ergebnis = {r[0] for r in db.execute(
+        select(ExamResult.exam_id).distinct()).all()}
+    teilnehmer: dict[int, int] = {}
+    for eid, n in db.execute(
+        select(ExamStudent.exam_id, func.count(ExamStudent.student_id))
+        .group_by(ExamStudent.exam_id)
+    ).all():
+        teilnehmer[eid] = n
+
+    lg_by_id = {g.id: g for g in lerngruppen(db, user, mit_inaktiven=True)}
     summary = []
     for e in rows:
-        n_results = db.scalar(
-            select(ExamResult.id).where(ExamResult.exam_id == e.id).limit(1)
-        )
-        n_students = db.scalar(
-            select(ExamStudent.student_id)
-            .where(ExamStudent.exam_id == e.id).limit(1)
-        )
-        summary.append({"exam": e, "has_results": bool(n_results),
-                        "has_students": bool(n_students)})
+        lg = lg_by_id.get(e.lerngruppe_id) if e.lerngruppe_id else None
+        summary.append({
+            "exam": e,
+            "has_results": e.id in mit_ergebnis,
+            "has_students": bool(teilnehmer.get(e.id)),
+            "n_students": teilnehmer.get(e.id, 0),
+            "lerngruppe": lg,
+            # Altbestand ohne saubere Zuordnung sichtbar machen
+            "zuordnung": (lg.display_name or lg.klassen_key) if lg
+                         else (e.klassen_key or ""),
+            "art": lg.art if lg else "",
+            "offen": lg is None,
+        })
     return templates.TemplateResponse(request, "exams/list.html", {
         "items": summary,
     })
@@ -477,6 +552,143 @@ def _valid_scale_ref(db: Session, user: User, ref: str) -> bool:
     return False
 
 
+@router.get("/api/exams/pickers")
+def api_exam_pickers(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Alles, was der Anlege-Assistent braucht — in einem Request.
+
+    Bewusst zwei getrennte Listen: `klassen` sind die Schulklassen aus den
+    Stammdaten (der Normalfall); sie werden über ihre 1:1-Lerngruppe zugeordnet.
+    `lerngruppen` enthält nur Zusammenlegungen und Teilgruppen — sonst stünde
+    jede Klasse doppelt in der Auswahl."""
+    klassen = []
+    for k in db.scalars(
+        select(TtSchulklasse)
+        .join(TtJahrgang, TtJahrgang.id == TtSchulklasse.jahrgang_id)
+        .where(TtSchulklasse.user_id == user.id,
+               TtSchulklasse.active.is_(True),
+               TtJahrgang.active.is_(True))
+        .order_by(TtJahrgang.position, TtSchulklasse.position, TtSchulklasse.name)
+    ).all():
+        lg = lerngruppe_der_klasse(db, user, k.id)
+        jg = db.get(TtJahrgang, k.jahrgang_id)
+        klassen.append({
+            "id": k.id, "name": k.name,
+            "jahrgang": jg.name if jg else "",
+            # None = keine 1:1-Lerngruppe vorhanden (Altbestand). Die Oberfläche
+            # graut solche Klassen aus, statt eine kaputte Zuordnung zu bauen.
+            "lerngruppe_id": lg.id if lg else None,
+            # für die Vorbefüllung aus dem Stundenplan (dort ist nur der Key bekannt)
+            "klassen_key": lg.klassen_key if lg else "",
+            "anzahl": len(schueler_der_lerngruppe(db, user, lg)) if lg else 0,
+        })
+
+    gruppen = [
+        {"id": g.id, "name": g.display_name or g.klassen_key, "art": g.art,
+         "klassen_key": g.klassen_key,
+         "anzahl": len(schueler_der_lerngruppe(db, user, g))}
+        for g in lerngruppen(db, user) if g.art in ("kombi", "gruppe")
+    ]
+
+    vorlagen = []
+    for t in db.scalars(
+        select(FeedbackTemplate)
+        .where(FeedbackTemplate.owner_user_id == user.id)
+        .order_by(FeedbackTemplate.name)
+    ).all():
+        vorlagen.append({"id": t.id, "name": t.name,
+                         "punkte": _loadjson(t.payload_json) or []})
+
+    return JSONResponse({
+        "ok": True,
+        "klassen": klassen,
+        "lerngruppen": gruppen,
+        "skalen": [{"ref": r, "label": l}
+                   for r, l in grading.list_scales_for(db, user)],
+        "default_scale": grading.DEFAULT_SCALE,
+        "vorlagen": vorlagen,
+        "heute": date.today().isoformat(),
+    })
+
+
+@router.post("/api/exams")
+def api_exam_create(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """Legt eine Prüfung in EINEM Request an (Assistent speichert erst am Ende).
+
+    Zuordnung ist genau eine Klasse ODER Lerngruppe: `ziel_typ` + `ziel_id`.
+    Eine Klasse wird hier serverseitig auf ihre 1:1-Lerngruppe aufgelöst, damit
+    die Prüfung an demselben Verband hängt, der auch im Stundenplan steht."""
+    title = (body.get("title") or "").strip()[:200] or "Neue Prüfung"
+    datum = (body.get("datum") or "").strip()[:10]
+
+    ziel_typ = (body.get("ziel_typ") or "").strip()
+    ziel_id = body.get("ziel_id")
+    if ziel_typ == "klasse":
+        try:
+            k = db.get(TtSchulklasse, int(ziel_id))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Ungültige Klasse.")
+        if not k or k.user_id != user.id:
+            raise HTTPException(404, "Klasse nicht gefunden.")
+        lg = lerngruppe_der_klasse(db, user, k.id)
+        if not lg:
+            raise HTTPException(
+                400, f'Zur Klasse „{k.name}" gibt es keine Lerngruppe. '
+                     'Leg sie in den Stammdaten an, dann lässt sich die '
+                     'Prüfung zuordnen.')
+        lerngruppe_id = lg.id
+    elif ziel_typ == "lerngruppe":
+        lerngruppe_id = ziel_id
+    else:
+        raise HTTPException(400, "Bitte eine Klasse oder Lerngruppe wählen.")
+
+    scale = body.get("grading_scale_key") or grading.DEFAULT_SCALE
+    if not _valid_scale_ref(db, user, scale):
+        scale = grading.DEFAULT_SCALE
+    input_mode = body.get("input_mode")
+    if input_mode not in ("numeric", "stages"):
+        input_mode = "numeric"
+    bewertung_mode = body.get("bewertung_mode")
+    if bewertung_mode not in ("note", "punkte"):
+        bewertung_mode = "note"
+
+    # Aus dem Stundenplan heraus angelegt: Block-Verknüpfung mitschreiben.
+    note_id = None
+    roh_note = body.get("lesson_note_id")
+    if roh_note not in (None, "", 0):
+        try:
+            n = db.get(LessonNote, int(roh_note))
+            if n and n.user_id == user.id:
+                note_id = n.id
+        except (TypeError, ValueError):
+            note_id = None
+
+    ex = Exam(owner_user_id=user.id, title=title, datum=datum,
+              grading_scale_key=scale, input_mode=input_mode,
+              bewertung_mode=bewertung_mode, lesson_note_id=note_id)
+    db.add(ex)
+    db.flush()
+
+    # setzt lerngruppe_id + klassen_key und wählt die Schüler vor
+    _set_lerngruppe(db, user, ex, lerngruppe_id)
+
+    fps = body.get("feedback_points") or []
+    if fps:
+        _save_feedback_points(db, ex, fps)
+
+    audit(db, "exam_created", actor=user, target=str(ex.id),
+          detail=f"{title} / {ex.klassen_key}", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "id": ex.id, "url": f"/exams/{ex.id}"})
+
+
 @router.get("/exams/{ex_id}", response_class=HTMLResponse)
 def exams_detail(
     request: Request,
@@ -489,29 +701,18 @@ def exams_detail(
     ctx = _scoring_ctx(db, user, ex)
     participants = _exam_participants(db, ex)
 
-    # Teilnehmer-Tab: alle Schüler der beteiligten Klassen + Member-Status
+    # Teilnehmer-Schritt: Schüler der zugeordneten Lerngruppe + bereits erfasste
+    # Teilnehmer. Früher wurde hier `Student.klassen_key` gegen die ANZEIGENAMEN
+    # in `Exam.klassen_key` verglichen — das matchte bei Kombi-/Teilgruppen nie
+    # und die Liste blieb leer, obwohl Teilnehmer existierten.
     exam_classes = _exam_classes(ex)
-    member_ids = {s.id for s, _ in participants}
-    member_group = {s.id: g for s, g in participants}
+    roster = _exam_roster(db, user, ex)
+    lerngruppe = _exam_lerngruppe(db, user, ex)
     all_klassen = [
         row[0] for row in db.execute(
             select(Student.klassen_key).where(Student.owner_user_id == user.id).distinct()
         ).all()
     ]
-    roster = []  # Schüler der beteiligten Klassen (für Checkboxen)
-    if exam_classes:
-        for s in db.scalars(
-            select(Student).where(
-                Student.owner_user_id == user.id,
-                Student.klassen_key.in_(exam_classes),
-                Student.active.is_(True),
-            ).order_by(Student.klassen_key, Student.nachname, Student.vorname)
-        ).all():
-            roster.append({
-                "student": s,
-                "member": s.id in member_ids,
-                "group_label": member_group.get(s.id, ""),
-            })
 
     # Bewertungs-Tab: Teilnehmer mit Live-Note
     comments_by_student = {r.student_id: (r.comment or "") for r in ex.results}
@@ -560,12 +761,100 @@ def exams_detail(
         "roster": roster,
         "all_klassen": all_klassen,
         "exam_classes": exam_classes,
+        "lerngruppe": lerngruppe,
         "sum_max": ctx["sum_max"],
         "scales": grading.list_scales_for(db, user),
         "scale_labels": scale_labels,
         "nm_blaetter": NM_BLAETTER,
         "nm_spalten": NM_SPALTEN,
     })
+
+
+def _save_feedback_points(db: Session, ex: Exam, fps_in: list) -> None:
+    """ID-STABILES UPSERT der Feedbackpunkte.
+
+    Die Bewertungen in `erreicht_json` hängen an der Feedbackpunkt-ID. Früher
+    wurden hier ALLE Punkte gelöscht, neu angelegt und die Werte anschließend
+    nur über die POSITION zurückgemappt — Umsortieren oder Löschen in der Mitte
+    schob damit still Noten auf den falschen Punkt. Jetzt wird jeder Punkt an
+    Ort und Stelle aktualisiert: bevorzugt über die mitgesendete `id`, sonst
+    (Oberflächen ohne id) über die Position. Seine ID — und damit die
+    Bewertung — bleibt erhalten.
+
+    Gemeinsam genutzt vom Anlege-Assistenten und vom Feedbackpunkt-Overlay."""
+    if not isinstance(fps_in, list):
+        raise HTTPException(400, "feedback_points muss Liste sein")
+
+    # Summe der Gewichte über alle note-FPs darf 100 % nicht überschreiten
+    # (das Frontend sperrt schon; hier ist die Pflicht-Schranke gegen direkte
+    # API-Aufrufe).
+    note_weight_sum = 0.0
+    for item in fps_in:
+        if (item.get("eval_type") or "").strip() == "note":
+            try:
+                note_weight_sum += float(item.get("weight_pct") or 0)
+            except (TypeError, ValueError):
+                continue
+    if note_weight_sum > 100.0001:
+        raise HTTPException(
+            400,
+            f"Summe der Gewichte ({note_weight_sum:.1f} %) darf 100 % nicht überschreiten",
+        )
+
+    # Im reinen Schulnoten- oder Punkte-Modus gilt der Prüfungs-Modus für alle.
+    forced_eval = None
+    if ex.bewertung_mode == "note":
+        forced_eval = "note"
+    elif ex.bewertung_mode == "punkte":
+        forced_eval = "punkte"
+
+    vorhanden = {fp.id: fp for fp in ex.feedback_points}
+    nach_position = sorted(ex.feedback_points, key=lambda f: f.position)
+    behalten: set[int] = set()
+
+    for i, item in enumerate(fps_in):
+        stages = item.get("stages") or []
+        scope = item.get("scope") if item.get("scope") in ("individual", "group") else "individual"
+        eval_type = forced_eval or (item.get("eval_type") if item.get("eval_type") in ("punkte", "note", "stufen") else "punkte")
+
+        fp = None
+        roh_id = item.get("id")
+        if roh_id not in (None, "", 0):
+            try:
+                fp = vorhanden.get(int(roh_id))
+            except (TypeError, ValueError):
+                fp = None
+        if fp is None and roh_id in (None, "", 0) and i < len(nach_position):
+            kandidat = nach_position[i]
+            if kandidat.id not in behalten:
+                fp = kandidat
+        if fp is None:
+            fp = ExamFeedbackPoint(exam_id=ex.id)
+            db.add(fp)
+
+        fp.position = i
+        fp.name = (item.get("name") or "").strip()[:200]
+        fp.max_points = float(item.get("max_points") or 0)
+        fp.scope = scope
+        fp.eval_type = eval_type
+        fp.weight_pct = float(item.get("weight_pct") or 0)
+        fp.stages_json = json.dumps(stages, ensure_ascii=False) if stages else ""
+        db.flush()          # neue Punkte brauchen ihre ID
+        behalten.add(fp.id)
+
+    # Wirklich entfernte Punkte löschen und ihre Werte aus den Bewertungen
+    # nehmen — sonst bliebe verwaister Ballast im JSON stehen.
+    entfernt = {str(fid) for fid in vorhanden if fid not in behalten}
+    for fid, fp in vorhanden.items():
+        if fid not in behalten:
+            db.delete(fp)
+    if entfernt:
+        for r in list(ex.results) + list(ex.group_results):
+            erreicht = _loadjson(r.erreicht_json)
+            rest = {k: v for k, v in erreicht.items() if k not in entfernt}
+            if len(rest) != len(erreicht):
+                r.erreicht_json = json.dumps(rest, ensure_ascii=False)
+    db.flush()
 
 
 @router.post("/exams/{ex_id}/save")
@@ -582,24 +871,31 @@ def exams_save(
     tab = body.get("tab") or ""
 
     if tab == "einstellungen":
-        ex.title = (body.get("title") or "").strip()[:200] or ex.title
-        ex.datum = (body.get("datum") or "").strip()[:10]
-        scale = body.get("grading_scale_key") or ""
-        if _valid_scale_ref(db, user, scale):
-            ex.grading_scale_key = scale
-        mode = body.get("input_mode") or ""
-        if mode in ("numeric", "stages"):
-            ex.input_mode = mode
-        # Klassen-Mehrfachauswahl
-        klassen = body.get("klassen")
-        if isinstance(klassen, list):
-            old_classes = set(_exam_classes(ex))
-            new_clean = [k.strip() for k in klassen if k.strip()]
+        # WICHTIG: nur Felder anfassen, die auch mitgeschickt wurden. Das
+        # Zuordnungs-Overlay sendet z. B. ausschließlich `lerngruppe_id` —
+        # ein bedingungsloses Überschreiben leerte damit das Datum.
+        if "title" in body:
+            ex.title = (body.get("title") or "").strip()[:200] or ex.title
+        if "datum" in body:
+            ex.datum = (body.get("datum") or "").strip()[:10]
+        if "grading_scale_key" in body:
+            scale = body.get("grading_scale_key") or ""
+            if _valid_scale_ref(db, user, scale):
+                ex.grading_scale_key = scale
+        if "input_mode" in body:
+            mode = body.get("input_mode") or ""
+            if mode in ("numeric", "stages"):
+                ex.input_mode = mode
+        # Zuordnung: genau EINE Lerngruppe. Eine Klasse löst der Aufrufer vorher
+        # auf ihre 1:1-Lerngruppe auf (siehe /api/exams/zuordnung).
+        if "lerngruppe_id" in body:
+            _set_lerngruppe(db, user, ex, body.get("lerngruppe_id"))
+        elif isinstance(body.get("klassen"), list):
+            # Altbestands-Oberfläche: nur die Anzeige-Liste pflegen. Hier stand
+            # früher ein Aufruf von `_add_class_members`, das es nie gab —
+            # jedes Hinzufügen einer Klasse endete in einem NameError (HTTP 500).
+            new_clean = [k.strip() for k in body["klassen"] if k.strip()]
             ex.klassen_key = ", ".join(new_clean)[:255]
-            # Neu hinzugekommene Klassen: Schüler vorauswählen
-            added = [k for k in new_clean if k not in old_classes]
-            if added:
-                _add_class_members(db, user, ex, added)
         ls_raw = body.get("learning_situation_id")
         if ls_raw in (None, "", 0):
             ex.learning_situation_id = None
@@ -645,63 +941,7 @@ def exams_save(
                 db.add(ExamStudent(exam_id=ex.id, student_id=sid, group_label=group_label))
 
     elif tab == "feedbackpunkte":
-        fps_in = body.get("feedback_points") or []
-        if not isinstance(fps_in, list):
-            raise HTTPException(400, "feedback_points muss Liste sein")
-        # Summe der Gewichte über alle note-FPs darf 100 % nicht
-        # überschreiten (Frontend hat den Save-Knopf bereits gesperrt;
-        # Backend ist hier die Pflicht-Schranke gegen direkten API-Aufruf).
-        note_weight_sum = 0.0
-        for item in fps_in:
-            if (item.get("eval_type") or "").strip() == "note":
-                try:
-                    note_weight_sum += float(item.get("weight_pct") or 0)
-                except (TypeError, ValueError):
-                    continue
-        if note_weight_sum > 100.0001:
-            raise HTTPException(
-                400,
-                f"Summe der Gewichte ({note_weight_sum:.1f} %) darf 100 % nicht überschreiten",
-            )
-        old_fps = list(ex.feedback_points)
-        for ofp in old_fps:
-            db.delete(ofp)
-        db.flush()
-        # Im reinen Schulnoten- oder Punkte-Modus erzwingen wir den
-        # eval_type aller FPs auf den Prüfungs-Modus.
-        forced_eval = None
-        if ex.bewertung_mode == "note":
-            forced_eval = "note"
-        elif ex.bewertung_mode == "punkte":
-            forced_eval = "punkte"
-        new_fps: list[ExamFeedbackPoint] = []
-        for i, item in enumerate(fps_in):
-            stages = item.get("stages") or []
-            scope = item.get("scope") if item.get("scope") in ("individual", "group") else "individual"
-            eval_type = forced_eval or (item.get("eval_type") if item.get("eval_type") in ("punkte", "note", "stufen") else "punkte")
-            fp = ExamFeedbackPoint(
-                exam_id=ex.id,
-                position=i,
-                name=(item.get("name") or "").strip()[:200],
-                max_points=float(item.get("max_points") or 0),
-                scope=scope,
-                eval_type=eval_type,
-                weight_pct=float(item.get("weight_pct") or 0),
-                stages_json=json.dumps(stages, ensure_ascii=False) if stages else "",
-            )
-            db.add(fp)
-            new_fps.append(fp)
-        db.flush()
-        # Bestehende Bewertungen per Position auf neue IDs mappen (Einzel + Gruppe)
-        new_id_by_pos = [fp.id for fp in new_fps]
-        old_id_by_pos = [fp.id for fp in old_fps]
-        if new_id_by_pos and old_id_by_pos:
-            id_map = {str(old_id_by_pos[i]): str(new_id_by_pos[i])
-                      for i in range(min(len(old_id_by_pos), len(new_id_by_pos)))}
-            for r in list(ex.results) + list(ex.group_results):
-                erreicht = _loadjson(r.erreicht_json)
-                mapped = {id_map[k]: v for k, v in erreicht.items() if k in id_map}
-                r.erreicht_json = json.dumps(mapped, ensure_ascii=False)
+        _save_feedback_points(db, ex, body.get("feedback_points") or [])
 
     elif tab == "bewertung":
         erreicht = body.get("erreicht") or {}
@@ -1358,6 +1598,48 @@ async def exams_import_md(
           detail=f"{imported} Schüler-Bewertungen", request=request)
     db.commit()
     return JSONResponse({"ok": True, "imported": imported})
+
+
+@router.post("/api/exams/{ex_id}/delete")
+def api_exam_delete(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Löschen aus dem Bestätigungs-Overlay. Die Auswirkungen zeigt der Dialog
+    vorher an (siehe /api/exams/{id}/impact)."""
+    ex = _get_exam(db, user, ex_id)
+    title = ex.title
+    db.delete(ex)
+    audit(db, "exam_deleted", actor=user, target=str(ex_id), detail=title,
+          request=request)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/api/exams/{ex_id}/impact")
+def api_exam_impact(
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Was hängt an dieser Prüfung — für den Lösch-Dialog. Gleiche Form wie in
+    den Stammdaten: `[{label, wert}]`, damit `DRS.confirmDanger` es direkt
+    anzeigen kann."""
+    ex = _get_exam(db, user, ex_id)
+    n_teil = db.scalar(select(func.count(ExamStudent.student_id))
+                       .where(ExamStudent.exam_id == ex.id)) or 0
+    n_bew = db.scalar(select(func.count(ExamResult.id))
+                      .where(ExamResult.exam_id == ex.id)) or 0
+    n_fp = db.scalar(select(func.count(ExamFeedbackPoint.id))
+                     .where(ExamFeedbackPoint.exam_id == ex.id)) or 0
+    fakten = [
+        {"label": "Teilnehmer" if n_teil != 1 else "Teilnehmer", "wert": n_teil},
+        {"label": "Bewertungen" if n_bew != 1 else "Bewertung", "wert": n_bew},
+        {"label": "Feedbackpunkte" if n_fp != 1 else "Feedbackpunkt", "wert": n_fp},
+    ]
+    return JSONResponse({"ok": True, "title": ex.title, "impact": fakten})
 
 
 @router.post("/exams/{ex_id}/delete")

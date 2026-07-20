@@ -15,11 +15,13 @@ from sqlalchemy.orm import Session
 from app.auth import require_user
 from app.db import get_db
 from app.models import (
-    Exam, IcalCalendar, LearningSituation, LessonNote, LessonNoteAufgabe,
-    LessonReflection, LessonSeriesOverride, LsArbeitsblatt, LsAufgabe,
-    TtException, TtKlasse, User,
+    Exam, ExamStudent, IcalCalendar, LearningSituation, LessonNote,
+    LessonNoteAufgabe, LessonReflection, LessonSeriesOverride, LsArbeitsblatt,
+    LsAufgabe, TtException, TtKlasse, User,
 )
-from app.services import aufgabe_sync, ical_client, timetable_grid, vikunja_client
+from app.services import (aufgabe_sync, grading, ical_client, timetable_grid,
+                          vikunja_client)
+from app.services.lerngruppen import schueler_der_lerngruppe
 from app.templating import templates
 
 router = APIRouter()
@@ -593,6 +595,9 @@ def _note_dict(n: LessonNote | None) -> dict:
                 "subject_override": "", "is_exam": False,
                 "forward_remarks": "", "forward_remarks_done_at": None}
     return {
+        # Die ID braucht der Prüfungs-Assistent, um die Prüfung mit diesem
+        # Block zu verknüpfen (lesson_note_id).
+        "id": n.id,
         "theme": n.theme or "",
         "notes": n.notes or "",
         "material": n.material or "",
@@ -1735,11 +1740,36 @@ def api_themes_since_last_exam(
 
 
 def _maybe_create_exam(db: Session, user: User, note: LessonNote,
-                       datum: str, klassen: str, theme: str) -> None:
-    """Platzhalter: Nach der Überarbeitung des Prüfungs-Moduls soll hier
-    automatisch ein Exam angelegt und über `note.id` verknüpft werden. Bewusst
-    als eigene Funktion, damit der spätere Haken ein Einzeiler bleibt."""
-    return None
+                       datum: str, klassen: str, theme: str) -> Exam | None:
+    """Legt zur Klassenarbeit gleich die passende Prüfung an und verknüpft sie
+    über `lesson_note_id` mit dem Block.
+
+    Die Lerngruppe kommt über den `klassen_key` des Blocks — damit hängt die
+    Prüfung an demselben Verband, der auch im Stundenplan steht. Ihre Schüler
+    werden als Teilnehmer vorausgewählt. Ohne passende Lerngruppe wird bewusst
+    nichts angelegt (die Klassenarbeit selbst bleibt trotzdem bestehen)."""
+    lg = db.query(TtKlasse).filter(
+        TtKlasse.user_id == user.id, TtKlasse.klassen_key == klassen,
+    ).first()
+    if not lg:
+        return None
+
+    ex = Exam(
+        owner_user_id=user.id,
+        title=(theme or "Klassenarbeit")[:200],
+        datum=datum,
+        klassen_key=(lg.klassen_key or "")[:255],
+        lerngruppe_id=lg.id,
+        lesson_note_id=note.id,
+        grading_scale_key=grading.DEFAULT_SCALE,
+        input_mode="numeric",
+        bewertung_mode="note",
+    )
+    db.add(ex)
+    db.flush()
+    for s in schueler_der_lerngruppe(db, user, lg):
+        db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+    return ex
 
 
 @router.post("/api/timetable/klassenarbeit")
@@ -1779,7 +1809,7 @@ def api_klassenarbeit(
     n.updated_at = datetime.utcnow()
     db.flush()
 
-    _maybe_create_exam(db, user, n, d.isoformat(), kk, theme)
+    neue_pruefung = _maybe_create_exam(db, user, n, d.isoformat(), kk, theme)
 
     # Anzeigename der Lerngruppe fürs Label/den Titel.
     lg = db.query(TtKlasse).filter(
@@ -1810,7 +1840,8 @@ def api_klassenarbeit(
                "es wurde keine Aufgabe angelegt."
 
     db.commit()
-    return JSONResponse({"ok": True, "warn": warn, "task_created": task_created})
+    return JSONResponse({"ok": True, "warn": warn, "task_created": task_created,
+                         "exam_id": neue_pruefung.id if neue_pruefung else None})
 
 
 REFLECTION_VALUES = {"voll", "eher", "eher_nicht", "gar_nicht"}
