@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-07-15 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-07-20 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -36,8 +36,16 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
 - **PDF-500-Fix** (2026-07-15): `drs-update` gleicht nach jedem pip-Upgrade den
   Playwright-Chromium ab (`playwright install chromium`), sonst crashen alle
   PDF-Exporte nach einem Playwright-Update mit Internal Server Error.
+- **Unterrichtsplanung** (2026-07-20, NEU): Vier Bausteine im Stundenplan —
+  **Thema verteilen** (⋯-Menü: Klasse+Fach+Zeitraum → Blöcke ankreuzen, Zähler
+  „N Blöcke · 2N Schulstunden"; Thema erscheint als Pille unter dem Fach),
+  **Klassenarbeit** (⋯-Menü: Blockauswahl + Tabelle „Themen seit der letzten
+  Klassenarbeit", setzt `is_exam`, legt eine Vikunja-Aufgabe 5 Tage vorher an),
+  **Reflexion** (Rechtsklick/Long-Press-Menü + Panel: 4 Kategorien × 3 Items,
+  4-stufig + „Keine Angabe" + Notiz, eigenes 🔎-Icon im Grid) und die
+  **Themen-Kaskade**. Migrationen **0028** + **0029**.
 
-**Migrations-Stand: 0027.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+**Migrations-Stand: 0029.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
 Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
@@ -115,6 +123,14 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 - **`exam_feedback_points`** — `scope` ('individual'|'group'), `eval_type` ('punkte'|'note'|'stufen'), `weight_pct` (Gewicht in % für die gewichtete Endnote). `erreicht_json`-Werte: Zahl (punkte/stufen) oder Noten-Label-String (note).
 - **`grading_scales`** (v2) — benutzerdefinierte Notenskalen (`scale_type` mss_noten/mss_punkte, `payload_json`-Stufen). `exams.grading_scale_key` referenziert `builtin:<key>` oder `custom:<id>`.
 - **`feedback_templates`** (v2) — wiederverwendbare Feedbackpunkt-Sets (`payload_json`).
+- **`plan_shift_journal`** (0028) — Journal der Themen-Kaskade. Pro Ausnahme eine
+  Kette aus Einzelschritten: `exception_id` (CASCADE), `seq`, `klassen_key`,
+  `subjects_key`, `from_date`/`from_block_start` → `to_date`/`to_block_start`,
+  plus Snapshot `moved_theme`/`moved_notes`/`moved_material`.
+- **`lesson_reflections`** (0029) — Selbstreflexion pro Stunde, am key4 verankert
+  (Unique über `user_id, lesson_date, klassen_key, subjects_key, block_start`).
+  `ratings_json` = Item-ID → `voll|eher|eher_nicht|gar_nicht` (fehlend = k. A.),
+  dazu `free_text`. Wandert bei der Kaskade bewusst NICHT mit.
 - Hinweis: `exams.klassen_key` ist seit v2 eine **Anzeige-Liste** (komma-getrennt); Teilnehmer-Wahrheit ist `exam_students`. MSS-Noten-Built-in korrigiert: 1+ entfällt, Top-Note 1.
 
 ---
@@ -167,6 +183,60 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 ---
 
 ## 3. Aktuell offene Punkte
+
+### ⚠️ Skripte im content-Block laufen VOR drs.js (2026-07-20, behoben)
+
+**Landmine für jedes neue Overlay.** `base.html` bindet `/static/drs.js` erst in
+Zeile 127 ein — **nach** `{% block content %}` (Zeile 100). Wer ein Skript, das
+`DRS.modal()` braucht, in den content-Block schreibt, greift auf ein noch nicht
+existierendes `window.DRS` zu. Die drei neuen Overlays hatten genau deshalb
+**keinen einzigen verdrahteten Knopf**: Ihr Schutz `if (!window.DRS) return;`
+griff bei jedem Laden, die Menüpunkte waren sichtbar, der Klick blieb wirkungslos.
+**Regel:** Alles, was DRS braucht, gehört in `{% block scripts %}` — der rendert
+nach dem Script-Tag. Gefunden wurde das erst im Browser; Server-Tests, Jinja-Parse
+und Python-Import sind dagegen blind.
+
+### ⚠️ Parallele Abrufe in dieselbe Liste (2026-07-20, behoben)
+
+Die Blocklisten der neuen Overlays laden bei jeder Änderung von Klasse/Fach/Datum
+neu. Ändert man drei Felder schnell hintereinander, laufen drei Abrufe parallel;
+jede Antwort rendert in denselben Container — im Test **57 statt 7 Zeilen**, Einträge
+doppelt. **Regel für jede nachladende Liste:** ein Sequenzzähler (`const my = ++seq`),
+und nach dem `await` verwerfen, wenn `my !== seq`. Erst danach den Container leeren
+und neu füllen.
+
+### Unterrichtsplanung: Kaskade + Overlays (2026-07-20)
+
+**Themen-Kaskade** (`app/services/plan_cascade.py`): Fällt ein Block aus (oder wird
+eine Vertretung im Dialog auf „verschieben" gestellt), wandert das Paket
+**Thema + Notizen + Material** auf die nächste **gehaltene** Stunde derselben Reihe
+(**Klasse + Fach**); alle folgenden Pakete rücken mit, bis ein leerer Block die Kette
+aufnimmt. **Klassenarbeits-Blöcke (`is_exam`) sind terminfest** — sie sind weder Ziel
+noch wandern sie, die Kette überspringt sie. `is_exam` und die Reflexion bleiben immer
+am Ursprungsblock.
+
+Architektur bewusst **physisch** (Umschreiben in `lesson_notes`) statt eines
+Positionsmodells: Das key4 bleibt die Wahrheit, Panel-, PDF- und Grid-Pfad bleiben
+unverändert. Reversibel über das **Journal** `plan_shift_journal` (eine Zeile je
+Einzelschritt, `exception_id` + `seq`). **Anwenden von hinten** (großes `seq` zuerst),
+**Zurücknehmen von vorne** — so ist der Zielblock beim Schreiben stets leer. Beim
+Aufheben der Ausnahme (`exception_delete`) läuft `cascade_revert` **vor** dem Löschen.
+
+**Bewusst unangetastet:** „Stunde verschieben" (`kind='verschiebung'`) behält seine
+alte Einzelnotiz-Wanderung über `_undo_note_move` — sie hat eine andere Semantik
+(gezieltes Ziel statt „nächste gehaltene Stunde") und war nicht Teil der Anforderung.
+
+**Long-Press:** Auf dem Handy öffnet der Long-Press weiterhin das **Kontextmenü** —
+das ist der einzige Touch-Weg zu Ausfall/Vertretung/Verschieben. Die Reflexion wurde
+deshalb NICHT auf den Long-Press gelegt, sondern als Menüeintrag „🔎 Stunde
+reflektieren" ergänzt (plus Button im Block-Panel).
+
+**Verifiziert im Browser** (lokaler Auth-Override gegen eine separate Test-DB):
+Themen-Pille, Verteilen inkl. Zähler/Sperren, Klassenarbeit inkl. Themen-Tabelle und
+rotem Rahmen, Reflexion inkl. Auto-Save und Icon, Kaskade end-to-end mit
+KA-Überspringen und exakter Rücknahme. Mobil (375 px): kein horizontales Scrollen,
+alle Touch-Flächen 44 px. **Offen:** die Vikunja-Aufgabe gegen eine echte Instanz
+(nur der „nicht konfiguriert"-Pfad ist getestet) und echtes Touch-Verhalten am Gerät.
 
 ### ⚠️ Zeigergesten: pointercancel MUSS aufräumen (2026-07-16, behoben)
 
@@ -332,7 +402,7 @@ verifiziert (lesender Auth-Override, keine Passwörter berührt):
   `playwright install chromium` (idempotent). Ursache war ein hochgezogenes
   `playwright`, dessen passender Chromium-Build fehlte → alle PDF-Exporte 500.
 
-> **Im Container ausrollen:** `sudo drs-update` (zieht bis Migration 0027 und
+> **Im Container ausrollen:** `sudo drs-update` (zieht bis Migration 0029 und
 > gleicht den Chromium-Build ab). Falls das alte Update-Skript den neuen
 > Playwright-Schritt noch nicht hat, einmalig von Hand:
 > `PLAYWRIGHT_BROWSERS_PATH=/opt/drs/playwright /opt/drs/venv/bin/playwright install chromium`
@@ -356,13 +426,17 @@ Schüler kommen jetzt aus den Stammdaten/Lerngruppen.
 
 ### Geplant, noch nicht umgesetzt
 
-1. **Moodle-Notenexport** (Phase B): Endpoint `/exams/{id}/export.csv?format=moodle`
+1. **Exam-Anlage bei der Klassenarbeit**: `_maybe_create_exam()` in
+   `app/routers/timetable.py` ist ein bewusster No-Op-Platzhalter. Nach der
+   Überarbeitung des Prüfungs-Moduls dort ein `Exam` anlegen und über die
+   `LessonNote` verknüpfen — der Rest des Flows steht schon.
+2. **Moodle-Notenexport** (Phase B): Endpoint `/exams/{id}/export.csv?format=moodle`
    ist als Platzhalter vorgesehen, noch nicht gebaut. `moodle_id` wird beim
    Schüler-Import bereits gespeichert. Doku in `docs/moodle-integration.md`.
-2. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`
+3. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`
    ist im Template vorbereitet, aber noch leer — User-Setting fehlt).
-3. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80).
-4. **Ideen-Backlog** siehe Auto-Memory `ideen-drs-lxc` (Vikunja-Ausbau,
+4. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80).
+5. **Ideen-Backlog** siehe Auto-Memory `ideen-drs-lxc` (Vikunja-Ausbau,
    Klassen/Lernfelder mit Stundenansatz, Stundenplanänderungs-Formular,
    Untis-Abgleich, Schüler-Notizen, NocoDB-Backup, lokale Diktierfunktion).
 
@@ -397,11 +471,12 @@ drs-lxc/
 ├── docs/
 │   ├── fobizz-agent-systemprompt.md   # zum 1× Einfügen in den Fobizz-Agent
 │   └── lerninhalt-md-schema.md        # Schema der Inhalts-MD für den Lehrer
+├── tests/                             # pytest: Kaskade + Endpoint-Integration
 └── app/
     ├── main.py
     ├── config.py, db.py, models.py, crypto.py, auth.py, branding.py, cli.py
     ├── templating.py                  # geteilte Jinja-Instanz mit school_name() Global
-    ├── alembic/versions/0001–0012_*.py
+    ├── alembic/versions/0001–0029_*.py
     ├── routers/
     │   ├── auth.py, setup.py, users.py, profile.py     # profile.py: + SMB-Block
     │   ├── worksheets.py, settings.py, help.py, timetable.py
@@ -410,6 +485,11 @@ drs-lxc/
     │   ├── preview.py                 # PDF/Bild inline, OnlyOffice-Iframe
     │   └── obsidian.py                # MD-Rendering der Vault-Notiz
     ├── services/
+    │   ├── plan_cascade.py            # Themen-Kaskade: held_blocks, cascade_shift/-revert
+    │   ├── timetable_grid.py          # Wochengrid des manuellen Plans (Ersatz für WebUntis)
+    │   ├── lerngruppen.py             # aktive Lerngruppen für alle Picker
+    │   ├── vikunja_client.py          # create_task, ensure_label, Board/Buckets
+    │   ├── stundenplanaenderung_pdf.py# AcroForm-Befüllung des Schulformulars
     │   ├── playwright_pdf.py
     │   ├── webuntis_client.py
     │   ├── ical_client.py
@@ -450,11 +530,15 @@ Login: **`mgoebel`** (Admin)
 ## 6. Letzte Commits
 
 Alle Stände sind auf GitHub `mgoebel89/drs-Desktop` @ `main` gepusht.
-Migrations-Stand: **0027**.
+Migrations-Stand: **0029**.
 
 | Commit | Was |
 |---|---|
-| _(dieser)_ | **Schüler-Austritt** (Grund + letzter Schultag, Migration 0027), **Monatsvorschau** im Stundenplan, **PDF-500-Fix** (drs-update gleicht Chromium ab), Projektstand aktualisiert |
+| _(dieser)_ | **Unterrichtsplanung**: Thema verteilen, Klassenarbeit, Reflexion, Themen-Kaskade. Migrationen 0028 + 0029, erste Testsuite (`tests/`, 14 Tests) |
+| `48e81e2` | Fix aus dem Browser-Test: Overlays liefen nie (drs.js lädt nach dem content-Block), Race in den Blocklisten, Touch-Flächen 44 px |
+| `056c323` | Unterrichtsplanung — Feature-Commit |
+| `8c09a8d` | Aufgaben-Board: pointercancel räumt auf |
+| _(älter)_ | **Schüler-Austritt** (Grund + letzter Schultag, Migration 0027), **Monatsvorschau** im Stundenplan, **PDF-500-Fix** (drs-update gleicht Chromium ab) |
 | `de2058e` | Schüler wandern in die Stammdaten; Stundenplan-/Prüfungs-Picker auf Lerngruppen |
 | `7d1ee48` | Stammdaten: Lerngruppen und Fächer endgültig löschbar, Fächer-Seite auf Karten |
 | `bdad5f1` | Stammdaten mit Kacheln, Assistenten und Detail-Modals |
@@ -470,10 +554,19 @@ Migrations-Stand: **0027**.
 letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
-Migration 0027 und gleicht den Playwright-Chromium ab). Die Änderungen vom
-2026-07-15 wurden lokal verifiziert (Migration up/down, App-Import, Jinja-Parse,
-Austritt-Logik live, Monats-Popover + `schueler.js` im Browser) — der
-**Browser-End-to-End-Test im Container steht noch aus** (siehe Abschnitt 3).
+Migration **0029** und gleicht den Playwright-Chromium ab). Die Unterrichtsplanung
+wurde lokal im Browser verifiziert (Desktop + 375-px-Viewport, siehe Abschnitt 3);
+im Container bleiben zu prüfen: die **Vikunja-Aufgabe** bei einer Klassenarbeit gegen
+die echte Instanz und das **Touch-Verhalten am Gerät**.
+
+### Tests
+
+Seit 2026-07-20 gibt es `tests/` (pytest, 14 Tests): Kaskade als Unit-Tests
+(`test_plan_cascade.py`) plus Endpoint-Integration über FastAPI-TestClient mit
+Auth-Override. Ausführen: `.venv/Scripts/python.exe -m pytest tests/ -q`
+(pytest ist Dev-Werkzeug und steht bewusst nicht in `requirements.txt`).
+Die Fixtures bauen eine In-Memory-DB mit minimalem Stundenplan — **`StaticPool` +
+`check_same_thread=False` sind Pflicht**, sonst sieht der TestClient-Thread die DB nicht.
 
 ---
 
