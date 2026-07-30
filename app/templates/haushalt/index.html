@@ -2,8 +2,7 @@
 {% block title %}Haushalt{% endblock %}
 {% block content %}
 <style>
-  .hh-bar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-  .hh-bar select { width: auto; }
+  .toolbar select { width: auto; }
 
   .hh-table { width: 100%; border-collapse: collapse; }
   .hh-table th, .hh-table td { padding: .45rem .5rem; border-bottom: 1px solid var(--border);
@@ -21,7 +20,7 @@
   .hh-bar-rest > span { display: block; height: 100%; background: var(--blau); }
   .hh-bar-rest.voll > span { background: #c62828; }
 
-  .hh-kopf { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .hh-kopf { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin-bottom: .8rem; }
   .hh-kopf h2 { margin: 0; font-size: 17px; }
   .hh-kopf .muted { font-size: 12px; }
 
@@ -37,9 +36,9 @@
 </style>
 
 <div class="card">
-  <div class="hh-bar">
+  <div class="toolbar">
     <h1 style="margin:0">Haushalt</h1>
-    <div style="flex:1"></div>
+    <div class="spacer"></div>
     <span class="muted">Haushaltsjahr</span>
     <select id="hhJahr"></select>
     <button type="button" class="btn" id="hhNeuerPosten">+ Neuer Posten</button>

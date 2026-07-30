@@ -4,10 +4,30 @@
 <div class="card">
   <h1>Profil</h1>
   <p class="muted">{{ user.username }} · {{ user.full_name or '—' }}</p>
+</div>
 
+<div class="settings-layout">
+  <div class="settings-nav" id="settingsNav">
+    <button type="button" data-cat="konto">Konto</button>
+    <button type="button" data-cat="dokumente">Dokumente</button>
+    <button type="button" data-cat="aufgaben">Aufgaben</button>
+    <button type="button" data-cat="kalender">Kalender</button>
+    <button type="button" data-cat="unterschrift">Unterschrift</button>
+    <button type="button" data-cat="material">Materialien</button>
+    <button type="button" data-cat="ki">KI-Zugang</button>
+  </div>
+
+  <div class="settings-content">
+
+  <section class="settings-cat" data-cat="konto" hidden>
+  <div class="card">
   <h2>Passwort ändern</h2>
-  <p><a class="btn-sec btn" href="/change-password">Passwort ändern</a></p>
+  <p><a class="btn-sec" href="/change-password">Passwort ändern</a></p>
+  </div>
+  </section>
 
+  <section class="settings-cat" data-cat="ki" hidden>
+  <div class="card">
   <h2>Anthropic API-Key</h2>
   {% if anthropic_set %}
     <p>Aktueller Key: <code>{{ anthropic_masked }}</code></p>
@@ -24,12 +44,19 @@
     <div style="margin-top:.6rem"><button class="btn" type="submit">Speichern</button></div>
   </form>
 
+  </div>
+  </section>
+
   {# WebUntis wird nicht mehr genutzt: der Stundenplan wird manuell gepflegt
      (Stundenplan → ⚙ Einstellungen). Sektion ausgeblendet; Endpoints und
-     Credentials bleiben vorerst liegen, Löschen in Phase 3. #}
+     Credentials bleiben vorerst liegen, Löschen in Phase 3.
+     ACHTUNG beim Reaktivieren: Der Block steht bewusst ZWISCHEN zwei
+     Kategorien. Er braucht dann eine eigene <section class="settings-cat">
+     und einen Knopf in der Navigation oben, sonst steht er in jeder
+     Kategorie sichtbar da. #}
   {% if false %}
   <h2>WebUntis-Zugang</h2>
-  <form method="post" action="/profile/untis" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+  <form method="post" action="/profile/untis" class="form-2">
     <div>
       <label>Server (z.B. neilo.webuntis.com)</label>
       <input name="server" value="{{ untis.server or '' }}">
@@ -78,6 +105,8 @@
   </script>
   {% endif %}
 
+  <section class="settings-cat" data-cat="aufgaben" hidden>
+  <div class="card">
   <h2 id="vikunja">Aufgaben (Vikunja)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Anbindung an deine Vikunja-Instanz. Es wird genau <strong>ein Projekt</strong> genutzt —
@@ -88,7 +117,7 @@
   {% if request.query_params.get('vikunja_err') %}
     <div class="flash flash-err">URL und Token werden beide gebraucht.</div>
   {% endif %}
-  <form method="post" action="/profile/vikunja" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+  <form method="post" action="/profile/vikunja" class="form-2">
     <div>
       <label>Vikunja-URL (ohne /api/v1)</label>
       <input name="url" value="{{ vikunja.url }}" placeholder="http://192.168.2.40:3456">
@@ -165,6 +194,11 @@
   });
   </script>
 
+  </div>
+  </section>
+
+  <section class="settings-cat" data-cat="dokumente" hidden>
+  <div class="card">
   <h2 id="paperless">Dokumente (Paperless-ngx)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Anbindung an deine Paperless-Instanz. Der API-Token (Paperless: Profil → API-Token)
@@ -177,7 +211,7 @@
   {% if request.query_params.get('paperless_err') %}
     <div class="flash flash-err">URL und Token werden beide gebraucht.</div>
   {% endif %}
-  <form method="post" action="/profile/paperless" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+  <form method="post" action="/profile/paperless" class="form-2">
     <div>
       <label>Paperless-URL (ohne /api)</label>
       <input name="url" value="{{ paperless.url }}" placeholder="http://192.168.2.50:8000">
@@ -280,6 +314,11 @@
   });
   </script>
 
+  </div>
+  </section>
+
+  <section class="settings-cat" data-cat="material" hidden>
+  <div class="card">
   <h2>Materialien-Share (SMB)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Verbindung zu einem OMV-/NAS-Share über SMB. Pro Lernsituation wird im
@@ -287,7 +326,7 @@
     liegt als Unterordner im selben Share. Zugangsdaten werden verschlüsselt
     gespeichert.
   </p>
-  <form method="post" action="/profile/smb" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1rem">
+  <form method="post" action="/profile/smb" class="form-2">
     <div>
       <label>Host (IP oder Name)</label>
       <input name="host" value="{{ smb.host }}" placeholder="192.168.5.10">
@@ -341,6 +380,11 @@
   });
   </script>
 
+  </div>
+  </section>
+
+  <section class="settings-cat" data-cat="unterschrift" hidden>
+  <div class="card">
   <h2 id="unterschrift">Unterschrift & Paraphe</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Diese Bilder werden automatisch auf erzeugten Bewertungs-PDFs eingebettet —
@@ -349,7 +393,7 @@
     max. 500 KB. Transparenter Hintergrund empfohlen.
   </p>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;margin-bottom:1rem">
+  <div class="form-2" style="gap:1.2rem;margin-bottom:1rem">
     <div style="border:1px solid var(--border);border-radius:8px;padding:.9rem 1rem">
       <strong>Unterschrift</strong>
       <div style="min-height:80px;display:flex;align-items:center;justify-content:center;background:#fafafa;border-radius:6px;margin:.5rem 0;border:1px dashed #ddd">
@@ -393,6 +437,11 @@
     </div>
   </div>
 
+  </div>
+  </section>
+
+  <section class="settings-cat" data-cat="kalender" hidden>
+  <div class="card">
   <h2>Externe Kalender (iCal)</h2>
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Termine aus externen Kalendern (z.B. Outlook, Google, Nextcloud) im Stundenplan einblenden.
@@ -435,7 +484,7 @@
   {% endif %}
 
   <h3 style="font-size:14px;margin-top:.6rem">Kalender hinzufügen</h3>
-  <form method="post" action="/profile/ical/add" style="display:grid;grid-template-columns:1fr 100px 2fr auto;gap:.6rem;align-items:end">
+  <form method="post" action="/profile/ical/add" class="form-cols">
     <div>
       <label>Bezeichnung</label>
       <input name="label" required placeholder="z.B. Outlook" maxlength="80">
@@ -469,5 +518,41 @@
     });
   });
   </script>
-</div>
+  </div>
+  </section>
+
+  </div><!-- /.settings-content -->
+</div><!-- /.settings-layout -->
+
+<script>
+/* Kategorie-Umschalter. Alle Kategorien bleiben im DOM und werden nur
+   ein-/ausgeblendet — die Skripte oben haben ihre Handler beim Laden
+   verdrahtet, ein Neuaufbau würde sie verlieren.
+   Die Sprungmarken (#paperless, #vikunja, #unterschrift) bedienen weiter die
+   Weiterleitungen nach dem Speichern; sie öffnen jetzt zusätzlich die passende
+   Kategorie, sonst landete man auf einer Seite, deren Abschnitt versteckt ist. */
+(function () {
+  'use strict';
+  const nav = document.getElementById('settingsNav');
+  if (!nav) return;
+  const knoepfe = [...nav.querySelectorAll('button')];
+  const bereiche = [...document.querySelectorAll('.settings-cat')];
+  const HASH_KAT = { paperless: 'dokumente', vikunja: 'aufgaben', unterschrift: 'unterschrift' };
+
+  function zeige(kat) {
+    if (!bereiche.some(b => b.dataset.cat === kat)) kat = 'konto';
+    bereiche.forEach(b => { b.hidden = b.dataset.cat !== kat; });
+    knoepfe.forEach(b => b.classList.toggle('active', b.dataset.cat === kat));
+    try { sessionStorage.setItem('drs.profilKat', kat); } catch (_) { /* egal */ }
+  }
+
+  knoepfe.forEach(b => b.addEventListener('click', () => zeige(b.dataset.cat)));
+
+  let start = 'konto';
+  try { start = sessionStorage.getItem('drs.profilKat') || 'konto'; } catch (_) { /* egal */ }
+  const hash = (location.hash || '').replace('#', '');
+  if (HASH_KAT[hash]) start = HASH_KAT[hash];
+  zeige(start);
+})();
+</script>
 {% endblock %}
