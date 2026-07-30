@@ -149,9 +149,15 @@ def _call(cfg: PaperlessConfig, method: str, path: str, *,
     try:
         out = r.json()
     except ValueError:
-        # post_document liefert die Task-UUID als nackten String in Anführungszeichen
         return {"raw": r.text.strip().strip('"')}
-    return out if isinstance(out, dict) else {"results": out}
+    if isinstance(out, dict):
+        return out
+    # `post_document` antwortet mit der nackten Task-UUID — das ist gültiges
+    # JSON (ein String), landet also NICHT im ValueError-Zweig. Wer das
+    # übersieht, verliert die Task-ID und pollt danach ins Leere.
+    if isinstance(out, str):
+        return {"raw": out.strip()}
+    return {"results": out}
 
 
 def _fetch_all(cfg: PaperlessConfig, path: str) -> list[dict]:
@@ -316,20 +322,23 @@ def upload_document(user: User, *, filename: str, content: bytes,
     if cfg.upload_tag_id and cfg.upload_tag_id not in tags:
         tags.append(cfg.upload_tag_id)
 
-    data: list[tuple[str, str]] = []
+    # httpx erwartet für `data` eine Abbildung, KEINE Liste von Paaren — eine
+    # Liste wirft beim Kodieren. Mehrfachfelder (mehrere Tags) gehen als Liste
+    # im Wert; httpx schreibt daraus mehrere Formularfelder, genau wie es
+    # `post_document` haben will.
+    data: dict[str, object] = {}
     if title.strip():
-        data.append(("title", title.strip()))
+        data["title"] = title.strip()
     if created.strip():
-        data.append(("created", created.strip()))
+        data["created"] = created.strip()
     if correspondent:
-        data.append(("correspondent", str(int(correspondent))))
+        data["correspondent"] = str(int(correspondent))
     if document_type:
-        data.append(("document_type", str(int(document_type))))
+        data["document_type"] = str(int(document_type))
     if cfg.storage_path_id:
-        data.append(("storage_path", str(cfg.storage_path_id)))
-    # Mehrere Tags = das Feld mehrfach senden (so will es post_document).
-    for t in tags:
-        data.append(("tags", str(t)))
+        data["storage_path"] = str(cfg.storage_path_id)
+    if tags:
+        data["tags"] = [str(t) for t in tags]
 
     d = _call(cfg, "POST", "/api/documents/post_document/",
               files={"document": (filename, content, mimetype)}, data=data)
