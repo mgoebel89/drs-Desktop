@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ titel or "Vorgang" }}{% endblock %}
+{% block content %}
+<style>
+  .vg-kopf { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .vg-kopf h1 { margin: 0; font-size: 22px; }
+
+  .vg-status { font-size: 10px; font-weight: 700; border-radius: 999px;
+    padding: 2px 9px; background: #e8eef4; color: var(--muted); white-space: nowrap; }
+  .vg-status.geplant { background: #eef2f7; color: #4a5b6d; }
+  .vg-status.bearbeitung { background: #e6f0fb; color: #1f6feb; }
+  .vg-status.pausiert { background: #fdf3e3; color: #9a6b00; }
+  .vg-status.beendet { background: #eef4ee; color: #2e7d32; }
+
+  /* Zeitleiste */
+  .vg-hist { position: relative; margin-top: .8rem; padding-left: 1.4rem; }
+  .vg-hist::before { content: ''; position: absolute; left: 5px; top: 4px; bottom: 4px;
+    width: 2px; background: var(--border); }
+  .vg-eintrag { position: relative; padding: .6rem 0; border-bottom: 1px solid var(--border);
+    cursor: pointer; }
+  .vg-eintrag:hover { background: #f6f9fc; }
+  .vg-eintrag::before { content: ''; position: absolute; left: -1.4rem; top: 1rem;
+    width: 12px; height: 12px; border-radius: 50%; background: #fff;
+    border: 2px solid var(--blau); }
+  .vg-eintrag.erledigt::before { background: var(--blau); }
+  .vg-e-kopf { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+  .vg-typ { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 9px;
+    background: #e6f0fb; color: #1f6feb; white-space: nowrap; }
+  .vg-e-datum { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .vg-e-titel { font-weight: 600; font-size: 13px; }
+  .vg-e-body { font-size: 12px; color: #3b4a5a; margin-top: .2rem;
+    white-space: pre-wrap; word-break: break-word; }
+  .vg-e-betrag { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .vg-empf { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem; }
+  .vg-empf-chip { font-size: 11px; border-radius: 999px; padding: 2px 9px;
+    background: #f1f4f7; color: #4a5b6d; }
+  .vg-empf-chip.ok { background: #eef4ee; color: #2e7d32; }
+
+  /* Budget */
+  .vg-btable { width: 100%; border-collapse: collapse; }
+  .vg-btable th, .vg-btable td { padding: .4rem .5rem; border-bottom: 1px solid var(--border);
+    font-size: 12px; text-align: left; }
+  .vg-btable th { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+  .vg-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .vg-row-neg td { color: #c62828; }
+
+  /* Entscheidungsmatrix */
+  .vg-matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .vg-matrix th, .vg-matrix td { border: 1px solid var(--border); padding: .3rem .4rem; }
+  .vg-matrix th { background: #f4f6f8; font-weight: 600; }
+  .vg-matrix .gewinner { background: #eef4ee; }
+  .vg-matrix select { width: auto; min-width: 150px; padding: 2px 4px; font-size: 11px; }
+
+  @media (max-width: 760px) {
+    .vg-e-betrag { margin-left: 0; }
+  }
+</style>
+
+<div class="card">
+  <p style="margin:0 0 .6rem"><a href="/vorgaenge" class="muted">‹ Alle Vorgänge</a></p>
+  <div id="vgKopf"><p class="muted">lädt …</p></div>
+</div>
+
+<div id="vgBudget"></div>
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:17px">Zeitleiste</h2>
+    <div style="flex:1"></div>
+    <button type="button" class="btn-sec" id="vgAbgleich" hidden>Aufgaben abgleichen</button>
+    <button type="button" class="btn" id="vgNeuerEintrag">+ Eintrag</button>
+  </div>
+  <div id="vgHist" class="vg-hist"></div>
+</div>
+
+<script>window.VORGANG_ID = {{ vorgang_id }};</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vorgang-detail.js?v={{ static_version() }}"></script>
+{% endblock %}

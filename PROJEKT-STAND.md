@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-07-20 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-07-30 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -54,7 +54,35 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   behoben: ein harter 500er, eine kaputte Teilnehmerliste und stiller
   Notenverlust bei den Feedbackpunkten. **Keine Migration nötig.**
 
-**Migrations-Stand: 0029.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+- **Zwei Korrekturen** (2026-07-30): Im Aufgaben-Board ist die
+  **Erledigt-Spalte ausblendbar** (Schalter über der Tafel, Standard aus, Wahl
+  im `localStorage`). Im Stundenplan **und** im Arbeitsplan-PDF steht jetzt das
+  **Fach-Kürzel** statt des langen Namens — eine Stelle (`fach_label()` in
+  `timetable_grid.py`) speist beide; Ausnahmen nehmen das Kürzel aus den
+  Stammdaten statt aus ihrem alten Anzeige-Snapshot. Ohne gepflegtes Kürzel
+  bleibt der Anzeigename stehen.
+- **NEU: Modul „Dokumente"** (2026-07-30, Migration **0030**): Paperless-ngx als
+  Dokumentenspeicher über einen Backend-Proxy (`paperless_client.py`), Token
+  bleibt im Server. Kachel-/Listenansicht, Suche, Sortierung, Detail-Overlay
+  mit Vorschau/Eigenschaften/Notizen, Upload als DRS-Assistent mit Drag & Drop.
+  Kern der Anpassung gegenüber der Gemeindeverwaltung: Im Profil wählt man
+  **Anzeige-Tags** (ODER — eines genügt), einen **Upload-Tag** und einen
+  **Speicherpfad**; jeder Upload aus der App bekommt Tag und Pfad automatisch.
+- **NEU: Modul „Haushalt"** (2026-07-30, Migration **0031**): Zwei getrennte
+  Töpfe je Haushaltsjahr — **Verwaltungshaushalt** (bis 999 €) und
+  **Vermögenshaushalt** (ab 1000 €), je Posten Budget / verausgabt /
+  Restmittel. **Mittel verfallen zum Jahresende, kein Übertrag.** Dazu die
+  **Anschaffungsideen** fürs Folgejahr (Titel, Schätzbetrag, Begründung,
+  Priorität) mit Knopf „Vorgang anlegen". Beträge liegen als **Cent**.
+- **NEU: Modul „Vorgänge & Projekte"** (2026-07-30, Migration **0032**):
+  Kachelübersicht + Detail mit **Zeitleiste**. Zwölf Eintragstypen: Notiz,
+  Aufgabe (Vikunja), Frist/Wiedervorlage, Information weiterleiten, E-Mail,
+  Telefonat, Dokument, Angebot, Entscheidungsmatrix, Genehmigung,
+  Bestellung & Lieferung, Kosten. Kosten buchen je Eintrag auf **einen**
+  Haushaltsposten — ein Projekt darf aus beiden Töpfen schöpfen. Ein Vorgang
+  ist optional an eine **Lerngruppe** gehängt (Klassenführung).
+
+**Migrations-Stand: 0032.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
 Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
@@ -192,6 +220,61 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 ---
 
 ## 3. Aktuell offene Punkte
+
+### Dokumente / Haushalt / Vorgänge (2026-07-30, NEU)
+
+**Reihenfolge und Entscheidungen** stehen im Plan
+`~/.claude/plans/drs-lxc-dokumente-vorgaenge-haushalt.md`. Kurz die tragenden:
+
+- **Konfiguration pro Nutzer**, AES-GCM in `users.paperless_cfg_enc` — Muster
+  Vikunja. Kein Rollen-/PIN-Schutz wie in der Gemeindeverwaltung: drs-lxc hat
+  echte Logins, die Daten liegen ohnehin pro Nutzer.
+- **Tag-Filter ist ODER.** `search_documents` schneidet zusätzlich gewählte
+  Filter-Tags mit den Anzeige-Tags des Profils — die Ansicht kann also nie mehr
+  zeigen, als die Einstellung erlaubt.
+- **Die 1000-€-Grenze warnt, blockiert nicht.** Sie schlägt bei einer
+  Anschaffungsidee den Topf vor (im Dialog live beim Tippen des Betrags) und
+  begründet die Angebotspflicht — mehr nicht. Sammelbestellungen und
+  Preisänderungen sollen nicht gegen die Software arbeiten.
+- **Nur Kosten mindern Restmittel.** Ein Angebot trägt zwar einen Preis, ist
+  aber kein ausgegebenes Geld (`BETRAG_TYPEN` vs. `POSTEN_TYPEN` in
+  `services/vorgaenge.py`).
+- **Geld liegt als Cent (Integer)** in der DB, umgerechnet wird nur an der
+  Router-Grenze. Grund: `3 × 0,10 €` muss `0,30 €` bleiben.
+- **Ein Posten mit Buchungen ist nicht löschbar** (HTTP 409 mit Klartext) —
+  sonst änderten sich die Summen eines abgeschlossenen Jahres rückwirkend.
+- **Typ-spezifische Felder liegen als JSON** am Eintrag; `betrag_cent` und
+  `hh_posten_id` stehen als echte Spalten da, weil die Budget-Auswertung über
+  sie summiert. `normalize_payload()` lässt nur bekannte Felder durch.
+- **Aufgaben-Einträge** legen eine Vikunja-Aufgabe im fest konfigurierten
+  Projekt an, mit Label „Vorgang: <Titel>". Der Erledigt-Status wird **auf
+  Knopfdruck** zurückgespiegelt („Aufgaben abgleichen"), nicht bei jedem
+  Seitenaufbau — pro Aufgabe ein Request, ein klemmendes Vikunja soll die
+  Zeitleiste nicht aufhalten.
+- **E-Mail ohne Postfach:** Der Eintrag wird von Hand erfasst (Richtung, Von,
+  An, Betreff, Text) und die Mail als Datei in Paperless verknüpft. Ein echtes
+  IMAP-Postfach wie in der Gemeindeverwaltung wäre ein eigenes Modul.
+- **Empfänger sind Freitext mit Gedächtnis** (`vorgang_kontakte` + `datalist`),
+  bewusst keine Personen-Stammdaten.
+
+**Verifiziert im Browser** (lokaler Dev-Server, Sitzung direkt in der DB
+angelegt — kein Passwort angefasst): Posten in beiden Töpfen anlegen, Idee mit
+automatischem Topf-Vorschlag ab 1000 €, Vorgang anlegen, Kosten auf einen
+Posten buchen (Restmittel 850 → 600,10 €), Angebot ohne Wirkung auf die
+Restmittel, Weiterleitung mit zwei Empfängern und Kontakt-Gedächtnis,
+Entscheidungsmatrix mit Gewichtung (19/19 rechnerisch bestätigt) und
+abweichender Wahl, Löschsperre des bebuchten Postens (409). Danach wurden die
+Testdaten wieder aus der Dev-DB entfernt.
+
+**NOCH OFFEN — echter Test im Container:**
+- **Paperless ist lokal nicht erreichbar.** Der gesamte Verkehr (Liste, Upload,
+  Task-Polling, Notizen, Vorschau) ist ungetestet. Nach `drs-update`: im Profil
+  URL + Token eintragen, „Tags und Speicherpfade laden", Anzeige-Tags,
+  Upload-Tag und Speicherpfad wählen, dann ein Dokument hochladen.
+- **Vikunja ist lokal nicht erreichbar** — der Aufgaben-Eintrag am Vorgang und
+  „Aufgaben abgleichen" sind nur im „nicht konfiguriert"-Pfad geprüft.
+- Die **Antragsformulare** für die beiden Haushalte fehlen noch (Matthias
+  liefert die Vordrucke nach); die Ideenliste ist die Datenbasis dafür.
 
 ### Prüfungsmodul: Zuordnung, Overlays, behobene Fehler (2026-07-20)
 

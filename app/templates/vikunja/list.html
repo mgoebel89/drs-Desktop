@@ -9,6 +9,10 @@
   .vt-btn.active { background: var(--blau); color: #fff; }
 
   /* Kanban-Board */
+  .board-bar { display: flex; justify-content: flex-end; margin-top: 1.4rem; }
+  .board-donetoggle { display: inline-flex; align-items: center; gap: .4rem; font-size: 13px;
+    color: var(--muted); cursor: pointer; user-select: none; }
+  .board-donetoggle input { width: auto; margin: 0; }
   .board { display: flex; gap: .8rem; overflow-x: auto; padding-bottom: .6rem; align-items: flex-start; }
   .board-col { flex: 0 0 260px; background: #f4f6f8; border-radius: 10px; padding: .5rem;
     display: flex; flex-direction: column; min-height: 80px; }
@@ -103,7 +107,12 @@
 
   <!-- Board-Ansicht -->
   <div id="view-board" hidden>
-    <div id="board" class="board" style="margin-top:1.4rem"><div class="muted">lädt …</div></div>
+    <div class="board-bar">
+      <label class="board-donetoggle">
+        <input type="checkbox" id="showDoneCol"> Erledigt-Spalte anzeigen
+      </label>
+    </div>
+    <div id="board" class="board"><div class="muted">lädt …</div></div>
   </div>
 
   {% endif %}

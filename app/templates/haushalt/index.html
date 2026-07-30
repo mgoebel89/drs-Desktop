@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Haushalt{% endblock %}
+{% block content %}
+<style>
+  .hh-bar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .hh-bar select { width: auto; }
+
+  .hh-table { width: 100%; border-collapse: collapse; }
+  .hh-table th, .hh-table td { padding: .45rem .5rem; border-bottom: 1px solid var(--border);
+    font-size: 13px; text-align: left; }
+  .hh-table th { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .03em; }
+  .hh-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .hh-table tfoot td { font-weight: 700; border-top: 2px solid var(--border); border-bottom: 0; }
+  .hh-row-neg td { color: #c62828; }
+  .hh-row:hover { background: #f6f9fc; cursor: pointer; }
+
+  /* Restmittel-Balken: wie viel vom Posten schon weg ist */
+  .hh-bar-rest { height: 5px; border-radius: 3px; background: #e6ebf0; overflow: hidden;
+    margin-top: .25rem; }
+  .hh-bar-rest > span { display: block; height: 100%; background: var(--blau); }
+  .hh-bar-rest.voll > span { background: #c62828; }
+
+  .hh-kopf { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .hh-kopf h2 { margin: 0; font-size: 17px; }
+  .hh-kopf .muted { font-size: 12px; }
+
+  .hh-idee { display: flex; gap: .6rem; align-items: flex-start; padding: .5rem 0;
+    border-bottom: 1px solid var(--border); cursor: pointer; }
+  .hh-idee:hover { background: #f6f9fc; }
+  .hh-idee-haupt { flex: 1; min-width: 0; }
+  .hh-idee-titel { font-weight: 600; font-size: 13px; }
+  .hh-prio { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 1px 8px;
+    background: #e8eef4; color: var(--muted); white-space: nowrap; }
+  .hh-prio.p1 { background: #fdecea; color: #c62828; }
+  .hh-prio.p3 { background: #eef4ee; color: #2e7d32; }
+</style>
+
+<div class="card">
+  <div class="hh-bar">
+    <h1 style="margin:0">Haushalt</h1>
+    <div style="flex:1"></div>
+    <span class="muted">Haushaltsjahr</span>
+    <select id="hhJahr"></select>
+    <button type="button" class="btn" id="hhNeuerPosten">+ Neuer Posten</button>
+  </div>
+  <p class="muted">
+    Die Mittel verteilen sich auf zwei Töpfe. <strong>Nicht verausgabte Mittel verfallen
+    zum Ende des Haushaltsjahres</strong> und sind nicht übertragbar — jedes Jahr rechnet
+    für sich. Verbraucht wird ein Posten durch die <strong>Kosten-Einträge</strong> der
+    Vorgänge; Angebote allein mindern die Restmittel nicht.
+  </p>
+</div>
+
+<div id="hhToepfe"><div class="card"><p class="muted">lädt …</p></div></div>
+<div id="hhIdeen"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/haushalt.js?v={{ static_version() }}"></script>
+{% endblock %}

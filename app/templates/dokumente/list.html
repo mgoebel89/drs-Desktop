@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Dokumente{% endblock %}
+{% block content %}
+<style>
+  /* Umschalter — gleiches Muster wie im Aufgaben-Board */
+  .view-toggle { display: inline-flex; gap: 0; border: 1px solid var(--blau); border-radius: 8px; overflow: hidden; }
+  .vt-btn { border: 0; background: transparent; color: var(--blau); font-family: inherit;
+    font-size: 13px; font-weight: 600; padding: 6px 14px; cursor: pointer; }
+  .vt-btn + .vt-btn { border-left: 1px solid var(--blau); }
+  .vt-btn.active { background: var(--blau); color: #fff; }
+
+  /* Filterleiste */
+  .doc-bar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-top: 1rem; }
+  .doc-bar input[type=search] { flex: 1 1 220px; min-width: 180px; }
+  .doc-bar select { width: auto; }
+  .doc-chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .8rem; }
+  .doc-chip { border: 1px solid var(--border); background: #fff; border-radius: 999px;
+    padding: 3px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    color: var(--muted); font-family: inherit; }
+  .doc-chip.active { border-color: var(--blau); background: var(--blau); color: #fff; }
+
+  /* Kachelgalerie */
+  .doc-gallery { display: grid; gap: .9rem; margin-top: 1.2rem;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  .doc-tile { border: 1px solid var(--border); border-radius: 10px; background: #fff;
+    overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
+    text-align: left; padding: 0; font-family: inherit; }
+  .doc-tile:hover { border-color: var(--blau); box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+  .doc-thumb { height: 150px; background: #f4f6f8; display: flex; align-items: center;
+    justify-content: center; font-size: 34px; color: var(--muted); }
+  .doc-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+  .doc-tile-body { padding: .55rem .65rem .7rem; }
+  .doc-tile-title { font-weight: 600; font-size: 13px; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .doc-tile-meta { font-size: 11px; color: var(--muted); margin-top: .25rem; }
+  .doc-tags { display: flex; gap: .25rem; flex-wrap: wrap; margin-top: .4rem; }
+  .doc-tag { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 1px 7px; }
+
+  /* Listenansicht */
+  .doc-listrow { display: flex; gap: .8rem; align-items: center; width: 100%;
+    border: 0; border-bottom: 1px solid var(--border); background: transparent;
+    padding: .55rem .2rem; cursor: pointer; text-align: left; font-family: inherit; }
+  .doc-listrow:hover { background: #f6f9fc; }
+  .doc-listrow .doc-tile-title { -webkit-line-clamp: 1; flex: 1; }
+
+  /* Detail-Overlay */
+  .doc-detail { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+  .doc-preview { background: #f4f6f8; border-radius: 8px; min-height: 320px; }
+  .doc-preview embed, .doc-preview img { width: 100%; height: 420px; border-radius: 8px; }
+  .doc-notes li { display: flex; gap: .5rem; align-items: flex-start; padding: .35rem 0;
+    border-bottom: 1px solid var(--border); }
+
+  /* Upload */
+  .dropzone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.6rem;
+    text-align: center; color: var(--muted); cursor: pointer; }
+  .dropzone.over { border-color: var(--blau); background: #f2f7fc; color: var(--blau); }
+
+  @media (max-width: 760px) {
+    .doc-detail { grid-template-columns: 1fr; }
+    .doc-preview embed, .doc-preview img { height: 260px; }
+  }
+</style>
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0">Dokumente</h1>
+    {% if configured %}
+    <div class="view-toggle" style="margin-left:auto" role="tablist">
+      <button type="button" class="vt-btn active" data-layout="tiles">▦ Kacheln</button>
+      <button type="button" class="vt-btn" data-layout="list">☰ Liste</button>
+    </div>
+    <button type="button" class="btn" id="uploadBtn">+ Dokument hochladen</button>
+    {% endif %}
+  </div>
+
+  {% if not configured %}
+  <p class="muted">Dieses Modul legt seine Dokumente in <strong>Paperless-ngx</strong> ab.
+    Hinterlege im <a href="/profile#paperless">Profil</a> die Adresse deiner Paperless-Instanz
+    und einen API-Token — dort wählst du auch, welche <strong>Tags</strong> hier angezeigt
+    werden und welchen Tag samt <strong>Speicherpfad</strong> deine Uploads bekommen.</p>
+  {% else %}
+
+  <p class="muted">
+    {% if has_view_filter %}Angezeigt werden nur Dokumente mit den in deinem Profil
+    gewählten Tags.{% else %}Es ist noch kein Anzeige-Tag gewählt — hier stehen daher
+    <strong>alle</strong> Dokumente aus Paperless. Im <a href="/profile#paperless">Profil</a>
+    kannst du das einschränken.{% endif %}
+  </p>
+
+  <div class="doc-bar">
+    <input type="search" id="docSearch" placeholder="Suchen in Titel und Inhalt …">
+    <select id="docOrder">
+      {% for wert, label in orderings.items() %}
+      <option value="{{ wert }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="btn-sec" id="docReload">Aktualisieren</button>
+  </div>
+  <div class="doc-chips" id="docChips"></div>
+
+  <div id="docResult"><p class="muted" style="margin-top:1.2rem">lädt …</p></div>
+  <div style="text-align:center;margin-top:1rem">
+    <button type="button" class="btn-sec" id="docMore" hidden>Mehr laden</button>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if configured %}
+<script src="/static/dokumente.js?v={{ static_version() }}"></script>
+{% endif %}
+{% endblock %}

@@ -247,6 +247,16 @@ def create_task(user: User, title: str, due_date: str = "",
     return task
 
 
+def get_task(user: User, task_id: int) -> dict:
+    """Eine einzelne Aufgabe. Gebraucht, um den Erledigt-Status einer aus einem
+    Vorgang angelegten Aufgabe zurückzuspiegeln."""
+    cfg = _require_cfg(user, need_project=False)
+    raw, _ = _call(cfg, "GET", f"/api/v1/tasks/{task_id}")
+    if not raw:
+        raise VikunjaError("Aufgabe nicht gefunden.", 404)
+    return _normalize(raw)
+
+
 def set_done(user: User, task_id: int, done: bool = True) -> dict:
     """Vikunjas Task-Update ersetzt das ganze Modell — darum erst den Roh-Task
     laden, `done` setzen und alles zurückschreiben, sonst würden nicht

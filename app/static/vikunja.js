@@ -101,6 +101,22 @@
     }
   }
 
+  // Die „Erledigt"-Spalte wächst endlos und interessiert im Alltag selten —
+  // deshalb ist sie standardmäßig aus und wird nur bei Bedarf zugeschaltet
+  // (Wahl bleibt im localStorage). BUCKETS bleibt vollständig, damit der
+  // Anlege-Dialog und das Verschieben weiter alle Spalten kennen.
+  let showDone = false;
+  try { showDone = localStorage.getItem('aufgabenDoneCol') === '1'; } catch (_) { /* egal */ }
+  const doneToggle = document.getElementById('showDoneCol');
+  if (doneToggle) {
+    doneToggle.checked = showDone;
+    doneToggle.addEventListener('change', () => {
+      showDone = doneToggle.checked;
+      try { localStorage.setItem('aufgabenDoneCol', showDone ? '1' : '0'); } catch (_) { /* egal */ }
+      if (boardLoaded) renderBoard(BUCKETS);
+    });
+  }
+
   function renderBoard(buckets) {
     boardEl.innerHTML = '';
     if (!buckets.length) {
@@ -108,7 +124,7 @@
         + 'Kanban-Spalten. Leg sie in Vikunja an.</div>';
       return;
     }
-    buckets.forEach((b) => {
+    buckets.filter((b) => showDone || !b.is_done_bucket).forEach((b) => {
       const cards = el('div', { class: 'board-cards' });
       (b.tasks || []).forEach((t) => cards.appendChild(cardEl(t, b.id)));
       const col = el('div', {

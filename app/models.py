@@ -33,6 +33,9 @@ class User(Base):
     # Vikunja-Aufgabenliste. JSON {url, token, project_id}, AES-GCM verschlüsselt.
     # Genau EIN Projekt pro Nutzer — keine Projektauswahl im Alltag.
     vikunja_cfg_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Paperless-ngx als Dokumentenspeicher. JSON {url, token, view_tag_ids,
+    # upload_tag_id, storage_path_id}, AES-GCM verschlüsselt.
+    paperless_cfg_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # Unterschrift (groß, für Einzel-PDFs) und Paraphe (klein, für die
     # Lehrer-Zusammenfassung). PNG/JPG, max ~500 KB.
     signature_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
@@ -934,3 +937,126 @@ class LessonReflection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow)
+
+
+# ── Haushalt ──────────────────────────────────────────────────────────────
+# Geldbeträge liegen überall als **Cent (Integer)** in der DB. Die Router
+# rechnen an der Grenze in Euro um; so kann sich beim Summieren von Budgets
+# und Ausgaben kein Rundungsfehler einschleichen.
+
+class HhPosten(Base):
+    """Ein genehmigter Haushaltsposten in einem Haushaltsjahr.
+
+    Zwei getrennte Töpfe: `verwaltung` (Anschaffungen bis 999 €, ohne Angebot
+    beschaffbar) und `vermoegen` (ab 1000 €, Angebote einzuholen). Nicht
+    verausgabte Mittel **verfallen zum Jahresende** — deshalb steht das
+    Haushaltsjahr am Posten und nicht irgendwo global; ein Posten gilt nur
+    für sein Jahr, einen Übertrag gibt es nicht.
+    """
+    __tablename__ = "hh_posten"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    jahr: Mapped[int] = mapped_column(Integer, index=True)
+    art: Mapped[str] = mapped_column(String(20), default="verwaltung")
+    bezeichnung: Mapped[str] = mapped_column(String(200), default="")
+    betrag_cent: Mapped[int] = mapped_column(Integer, default=0)
+    notiz: Mapped[str] = mapped_column(Text, default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class HhIdee(Base):
+    """Anschaffungsidee fürs kommende Haushaltsjahr.
+
+    Bewusst eine eigene, leichte Entität und kein Vorgang: Wünsche sollen die
+    Vorgangsliste nicht zumüllen. Wird eine Idee bewilligt, erzeugt ein Knopf
+    daraus einen echten Vorgang — `vorgang_id` hält die Spur.
+    """
+    __tablename__ = "hh_ideen"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    zieljahr: Mapped[int] = mapped_column(Integer, index=True)
+    art: Mapped[str] = mapped_column(String(20), default="verwaltung")
+    titel: Mapped[str] = mapped_column(String(200), default="")
+    betrag_cent: Mapped[int] = mapped_column(Integer, default=0)
+    begruendung: Mapped[str] = mapped_column(Text, default="")
+    prioritaet: Mapped[int] = mapped_column(Integer, default=2)   # 1 hoch … 3 niedrig
+    status: Mapped[str] = mapped_column(String(20), default="offen")
+    vorgang_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ── Vorgänge & Projekte ───────────────────────────────────────────────────
+
+class Vorgang(Base):
+    """Ein Vorgang oder Projekt — der Behälter für die Zeitleiste.
+
+    Optional an eine **Lerngruppe** gehängt (Klassenführung) und an ein
+    **Haushaltsjahr**. Die Kostenbuchung sitzt bewusst NICHT hier, sondern an
+    den einzelnen Kosten-Einträgen: ein Projekt darf aus beiden Haushalten
+    schöpfen (Kleinteile aus dem Verwaltungs-, die Maschine aus dem
+    Vermögenshaushalt).
+    """
+    __tablename__ = "vorgaenge"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    titel: Mapped[str] = mapped_column(String(250), default="")
+    beschreibung: Mapped[str] = mapped_column(Text, default="")
+    kategorie: Mapped[str] = mapped_column(String(80), default="")
+    status: Mapped[str] = mapped_column(String(20), default="geplant")
+    lerngruppe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    haushaltsjahr: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)
+
+
+class VorgangEintrag(Base):
+    """Ein getippter Eintrag der Zeitleiste.
+
+    Die typ-spezifischen Felder liegen als JSON in `payload_json` — jeder Typ
+    hat andere (ein Angebot einen Anbieter und einen Preis, eine Weiterleitung
+    eine Empfängerliste). Eine Spalte je Typ hätte eine breite, halbleere
+    Tabelle ergeben; ausgewertet wird ohnehin nur über `typ` und `datum`.
+    Ausnahme: `betrag_cent` und `hh_posten_id` stehen als echte Spalten da,
+    weil die Budget-Auswertung über sie summiert.
+    """
+    __tablename__ = "vorgang_eintraege"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vorgang_id: Mapped[int] = mapped_column(
+        ForeignKey("vorgaenge.id", ondelete="CASCADE"), index=True)
+    typ: Mapped[str] = mapped_column(String(30), default="notiz", index=True)
+    datum: Mapped[str] = mapped_column(String(10), default="", index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    betrag_cent: Mapped[int] = mapped_column(Integer, default=0)
+    hh_posten_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    erledigt: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)
+
+
+class VorgangKontakt(Base):
+    """Gedächtnis für die Empfängernamen der Weiterleitungen.
+
+    Die Empfänger sind Freitext (keine Personen-Stammdaten gewünscht); damit
+    man denselben Namen nicht jedes Mal neu tippt, merkt sich die App die
+    bereits benutzten und schlägt sie vor.
+    """
+    __tablename__ = "vorgang_kontakte"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_vorgang_kontakt"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    last_used: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

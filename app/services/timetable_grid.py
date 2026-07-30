@@ -80,10 +80,17 @@ def _iso(d: date, hhmm: str) -> str:
     return f"{d.isoformat()}T{hhmm or '00:00'}:00"
 
 
+def fach_label(fach: TtFach) -> str:
+    """Was im Plan steht: das Kürzel. Fächer ohne Kürzel fallen auf den
+    Anzeigenamen zurück, damit ein leeres Feld nie eine leere Zelle ergibt."""
+    return fach.kuerzel or fach.display_name or fach.subjects_key
+
+
 def _base_lesson(row: TtRow, klasse: TtKlasse, fach: TtFach,
                  d: date, slot_end: str) -> dict:
     kk = klasse.klassen_key
     sk = fach.subjects_key
+    label = fach_label(fach)
     return {
         "id": f"row:{row.id}",
         "start": _iso(d, row.block_start),
@@ -92,7 +99,7 @@ def _base_lesson(row: TtRow, klasse: TtKlasse, fach: TtFach,
         "klassen": kk.split("|"),
         "klassen_long": [klasse.display_name or kk],
         "subjects": sk.split("|"),
-        "subjects_long": [fach.display_name or sk],
+        "subjects_long": [label],
         "rooms": [row.raum] if row.raum else [],
         "rooms_long": [row.raum] if row.raum else [],
         "code": None,
@@ -101,7 +108,7 @@ def _base_lesson(row: TtRow, klasse: TtKlasse, fach: TtFach,
         # Neu: Keys explizit, kein Sort-Join mehr nötig
         "klassen_key": kk,
         "subjects_key": sk,
-        "fach_display": fach.display_name or sk,
+        "fach_display": label,
         "klassen_display": klasse.display_name or kk,
         "status": "regulaer",
         "rhythm": row.rhythm,
@@ -115,13 +122,17 @@ def _base_lesson(row: TtRow, klasse: TtKlasse, fach: TtFach,
 
 
 def _exception_lesson(exc: TtException, d: date, block_start: str,
-                      slot_end: str, status: str) -> dict:
+                      slot_end: str, status: str,
+                      fach_map: dict[str, str] | None = None) -> dict:
     """Lesson-Dict allein aus einer Ausnahme — für Zusatzstunden und für das
     Ziel einer Verschiebung. Nutzt die Snapshot-Felder, funktioniert also auch,
     wenn die zugrundeliegende Zeile inzwischen aus dem Plan verschwunden ist."""
     kk = exc.klassen_key
     sk = exc.subjects_key
-    fach_disp = exc.snap_fach_display or exc.fach_text or sk
+    # Das Kürzel aus den Stammdaten gewinnt vor dem Snapshot — sonst zeigten
+    # Ausnahmen, die vor der Umstellung angelegt wurden, weiter den langen Namen.
+    fach_disp = ((fach_map or {}).get(sk)
+                 or exc.snap_fach_display or exc.fach_text or sk)
     raum = exc.raum or exc.snap_raum
     return {
         "id": f"exc:{exc.id}",
@@ -219,8 +230,10 @@ def get_week_grid(db: Session, user: User, ref: date | None = None,
                 ),
             )
         ).all()
+        fach_map = {f.subjects_key: fach_label(f) for f in db.scalars(
+            select(TtFach).where(TtFach.user_id == user.id)).all()}
         for exc in excs:
-            _apply_exception(exc, cells, days, monday, slot_end)
+            _apply_exception(exc, cells, days, monday, slot_end, fach_map)
 
     result = {
         "monday": monday, "friday": friday,
@@ -251,7 +264,8 @@ def _find_lesson(cells: dict, key: tuple[str, int],
 
 
 def _apply_exception(exc: TtException, cells: dict, days: list[dict],
-                     monday: date, slot_end: dict) -> None:
+                     monday: date, slot_end: dict,
+                     fach_map: dict[str, str] | None = None) -> None:
     """Eine Ausnahme auf die Zellen anwenden.
 
     Findet sich die Basisstunde nicht (Zeile inzwischen aus dem Plan entfernt,
@@ -270,7 +284,7 @@ def _apply_exception(exc: TtException, cells: dict, days: list[dict],
         if in_woche and not days[q_idx]["free"]:
             cells.setdefault(q_key, []).append(_exception_lesson(
                 exc, quelle, exc.block_start,
-                slot_end.get(exc.block_start, ""), "zusatz"))
+                slot_end.get(exc.block_start, ""), "zusatz", fach_map))
         return
 
     basis = _find_lesson(cells, q_key, exc.klassen_key, exc.subjects_key) \
@@ -314,7 +328,7 @@ def _apply_exception(exc: TtException, cells: dict, days: list[dict],
             return
         l = _exception_lesson(exc, ziel, exc.target_block_start,
                               slot_end.get(exc.target_block_start, ""),
-                              "verlegt_hier")
+                              "verlegt_hier", fach_map)
         cells.setdefault((exc.target_block_start, z_idx), []).append(l)
 
 

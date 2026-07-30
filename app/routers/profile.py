@@ -12,6 +12,7 @@ from app.crypto import decrypt_secret, encrypt_secret, mask_key
 from app.db import get_db
 from app.models import IcalCalendar, User
 from app.services import smb_client
+from app.services import paperless_client as pl
 from app.services import vikunja_client as vk
 from app.services.ical_client import test_url as ical_test_url
 from app.services.webuntis_client import test_connection as untis_test
@@ -61,6 +62,14 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
         "project_id": vk_cfg.project_id if vk_cfg else 0,
         "token_set": bool(vk_cfg and vk_cfg.token),
     }
+    pl_cfg = pl.load_config(user)
+    paperless_view = {
+        "url": pl_cfg.url if pl_cfg else "",
+        "view_tag_ids": pl_cfg.view_tag_ids if pl_cfg else [],
+        "upload_tag_id": pl_cfg.upload_tag_id if pl_cfg else 0,
+        "storage_path_id": pl_cfg.storage_path_id if pl_cfg else 0,
+        "token_set": bool(pl_cfg and pl_cfg.token),
+    }
     return {
         "user": user,
         "anthropic_masked": mask_key(anth) if anth else "",
@@ -69,6 +78,7 @@ def _view_ctx(user: User, db: Session, flash: str | None = None, flash_kind: str
         "untis_pw_set": bool(untis.get("password")),
         "smb": smb_view,
         "vikunja": vikunja_view,
+        "paperless": paperless_view,
         "ical_calendars": cal_views,
         "signature_set": bool(user.signature_data),
         "paraphe_set": bool(user.paraphe_data),
@@ -330,6 +340,70 @@ def profile_vikunja_projects(
     try:
         return JSONResponse({"ok": True, "projects": vk.list_projects(user)})
     except vk.VikunjaError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+# ── Paperless (Dokumente) ─────────────────────────────────────────────────
+
+@router.post("/profile/paperless")
+def profile_paperless(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    url: str = Form(""),
+    token: str = Form(""),
+    view_tag_ids: list[str] = Form(default=[]),
+    upload_tag_id: int = Form(0),
+    storage_path_id: int = Form(0),
+    clear: str = Form(""),
+):
+    if clear:
+        pl.clear_config(user)
+        audit(db, "paperless_cfg_cleared", actor=user, request=request)
+    else:
+        # Leeres Token-Feld lässt das gespeicherte unangetastet — so lassen sich
+        # Tags oder Pfad ändern, ohne den Token neu einzutippen.
+        existing = pl.load_config(user)
+        cfg = pl.PaperlessConfig(
+            url=url.strip() or (existing.url if existing else ""),
+            token=token.strip() or (existing.token if existing else ""),
+            view_tag_ids=view_tag_ids,
+            upload_tag_id=upload_tag_id,
+            storage_path_id=storage_path_id,
+        )
+        if not cfg.url or not cfg.token:
+            return RedirectResponse("/profile?paperless_err=1#paperless",
+                                    status_code=303)
+        pl.save_config(user, cfg)
+        audit(db, "paperless_cfg_set", actor=user,
+              detail=f"tags={len(cfg.view_tag_ids)}", request=request)
+    db.commit()
+    return RedirectResponse("/profile#paperless", status_code=303)
+
+
+@router.post("/profile/paperless/test")
+def profile_paperless_test(
+    request: Request,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    ok, msg = pl.test_connection(user)
+    audit(db, "paperless_test", actor=user,
+          detail=("ok" if ok else "fail") + f": {msg}", request=request)
+    db.commit()
+    return JSONResponse({"ok": ok, "message": msg})
+
+
+@router.get("/profile/paperless/listen")
+def profile_paperless_listen(user: Annotated[User, Depends(require_user)]):
+    """Tags und Speicherpfade für die Auswahlfelder. Nur beim Einrichten nötig."""
+    try:
+        return JSONResponse({
+            "ok": True,
+            "tags": pl.list_tags(user),
+            "storage_paths": pl.list_storage_paths(user),
+        })
+    except pl.PaperlessError as e:
         return JSONResponse({"ok": False, "error": str(e)})
 
 
