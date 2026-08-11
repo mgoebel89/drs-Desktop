@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-07-30 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-08-11 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -82,7 +82,24 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   Haushaltsposten — ein Projekt darf aus beiden Töpfen schöpfen. Ein Vorgang
   ist optional an eine **Lerngruppe** gehängt (Klassenführung).
 
-**Migrations-Stand: 0032.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+- **NEU: Modul „Klassen"** (2026-08-11, Migration **0033**): Eigener Nav-Punkt
+  als tägliche Arbeitssicht — Kachelübersicht der aktiven Klassen (Schülerzahl,
+  Notizen, nächste Prüfung), Klassenansicht mit Schülerliste, Schüler-Detail-
+  seite mit **Notiz-Zeitleiste** (datierte Einträge mit Kategorie) und einer
+  Bewertungstabelle. Abgrenzung zu den Stammdaten: dort wird **gepflegt**,
+  hier wird **gearbeitet**. Neue Tabelle `student_notizen`.
+- **Notenrechnung als Service** (2026-08-11): `_scoring_ctx`/`_item_percent`/
+  `_item_weight`/`_student_total` sind aus `routers/exams.py` nach
+  `services/exam_scoring.py` gewandert (im Router als Aliase). Grund: Die
+  Schülerseite im Klassenmodul zeigt dieselbe Endnote wie der Bewertungsbogen
+  — nachbauen wäre die zweite Wahrheit gewesen.
+- **NEU: Moodle-Ergebnisse in eine bestehende Prüfung** (2026-08-11, keine
+  Migration): Der Gegenweg zum bisherigen Moodle-Import. Auf der Prüfungsseite
+  nimmt „⬆ Moodle-Ergebnisse" eine JSON auf, ordnet die Namen den Schülern der
+  Lerngruppe zu und bucht die Prozentwerte auf einen **wählbaren**
+  Feedbackpunkt. Es entstehen **keine neuen Schüler-Datensätze** mehr.
+
+**Migrations-Stand: 0033.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
 Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
@@ -127,6 +144,7 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 | **MD-Schema v2** | ✓ | Lernsituationsbeschreibung + Phasen der vollständigen Handlung mit Aufgaben + Anmerkungen. v1 bleibt lesbar |
 | **Aufgaben-Sync (DB ⇄ MD)** | ✓ | `ls_aufgaben`-Tabelle als Index, MD ist Quelle. Stale-Aufgaben werden automatisch aus DB entfernt |
 | **Stundenplan-Aufgaben-Picker** | ✓ | Pro Block: LS auswählen, Aufgaben ankreuzen. Lösungsskizzen direkt im Panel sichtbar. Grid-Pille „Aufg. N, M" |
+| **Klassenmodul** | ✓ | Kachelübersicht, Klassenansicht, Schüler-Detailseite mit datierten Notizen (5 Kategorien) und Bewertungstabelle |
 | **Bewertungs-Modul** | ✓ | Schülerverwaltung (Klassen, Moodle-CSV-Import), Prüfungen mit Notenskalen (MSS Schulnoten / MSS Punkte), Bewertungs-Matrix mit Auto-Save, Stufen-Schnellauswahl (3/4/5 Stufen) |
 | **PDF-Export Bewertung** | ✓ | Pro Schüler ein S/W-PDF (Playwright), ZIP aller PDFs einer Klasse |
 | **Prüfungs-MD Export+Import** | ✓ | Brücke zur Offline-App / Obsidian. Bewertungen als Markdown-Tabelle, Stufen als Labels oder Zahlen |
@@ -164,6 +182,10 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
   Kette aus Einzelschritten: `exception_id` (CASCADE), `seq`, `klassen_key`,
   `subjects_key`, `from_date`/`from_block_start` → `to_date`/`to_block_start`,
   plus Snapshot `moved_theme`/`moved_notes`/`moved_material`.
+- **`student_notizen`** (0033) — datierte Notiz zu einem Schüler. `student_id`
+  (CASCADE), `owner_user_id` (steht bewusst daneben, damit die Übersicht ohne
+  Join über `students` filtern kann), `datum` (fachliches Datum, frei änderbar),
+  `kategorie` (Katalog in `services/klassen.py`), `text`.
 - **`lesson_reflections`** (0029) — Selbstreflexion pro Stunde, am key4 verankert
   (Unique über `user_id, lesson_date, klassen_key, subjects_key, block_start`).
   `ratings_json` = Item-ID → `voll|eher|eher_nicht|gar_nicht` (fehlend = k. A.),
@@ -221,7 +243,64 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
-### Dokumente / Haushalt / Vorgänge (2026-07-30, NEU)
+### Klassenmodul + Moodle-Ergebnisimport (2026-08-11, NEU)
+
+Zwei Punkte aus dem Ideen-Backlog (`ideen-drs-lxc`, Punkte 5 und 8).
+
+**Entscheidungen (alle von Matthias per AskUserQuestion bestätigt):**
+- **Klassen wird ein eigener Nav-Punkt**, nicht nur eine erweiterte Stammdaten-
+  Seite. Die Stammdaten bleiben die Pflege (anlegen, importieren, versetzen,
+  austragen), „Klassen" wird die tägliche Arbeitsansicht. Beide lesen dieselben
+  Tabellen; es gibt keine zweite Wahrheit.
+- **Notizen sind datierte Einträge mit Kategorie** (Beobachtung / Gespräch /
+  Positiv / Vereinbarung / Fehlzeit), kein fortgeschriebenes Freitextfeld: Für
+  Elterngespräch und Zeugniskonferenz zählt die Entwicklung über das Schuljahr,
+  nicht der letzte Stand. Katalog in `services/klassen.py` (`KATEGORIEN`).
+- **Moodle-Import zeigt eine Zuordnungstabelle vor dem Schreiben.** Automatisch
+  gematchte Zeilen sind vorbelegt, jede unklare bekommt ein Dropdown mit den
+  Schülern der Lerngruppe plus „nicht zuordnen". Nichts geht still verloren.
+- **Der Ziel-Feedbackpunkt ist wählbar** (vorhandener oder neuer). So kann ein
+  Moodle-Test ein Teil einer größeren Bewertung sein statt immer die ganze.
+
+**Regeln, die im Code stecken:**
+- **`datum` ist das fachliche Datum** der Notiz (wann war die Beobachtung) und
+  frei änderbar; `created_at` hält daneben fest, wann getippt wurde.
+- **Teil-Updates fassen nur an, was mitgeschickt wurde** (`if "text" in payload`)
+  — dieselbe Falle wie im Prüfungsformular, hier von Anfang an vermieden.
+- Die Übersicht baut ihre Kennzahlen in **wenigen Sammelabfragen** statt einer
+  je Klasse; bei zehn Klassen à 25 Schülern wären es sonst dreistellig viele.
+- **Prüfungen hängen über die Lerngruppe an der Klasse**, nicht direkt — eine
+  Kombi-Lerngruppe zählt deshalb für jede beteiligte Klasse
+  (`_naechste_pruefungen`).
+- Namens-Matching (`services/moodle_quiz.py`, `normalisiere` + `matche`):
+  Umlaute und Trennzeichen werden gefaltet („Mueller" trifft „Müller"), aber
+  **„Meyer" trifft nie „Meyer-Schmidt"**. **Voller Name schlägt Nachname, und
+  zwar in zwei Durchgängen** — sonst schnappt ein Nachnamens-Treffer den
+  Schüler weg, den eine spätere Zeile eindeutig beansprucht. **Zwei Schüler
+  gleichen Nachnamens bleiben offen**; raten hieße Noten vertauschen. Jeder
+  Schüler wird höchstens einmal vorgeschlagen (doppelte Moodle-Versuche).
+- Der Import **rechnet den Prozentwert auf die Maximalpunkte des Ziels um**
+  (80 % auf 20 Punkte = 16) und schreibt **nur diese eine Spalte** — die von
+  Hand erfassten Punkte desselben Schülers darf er nicht abräumen. Ziel muss
+  `eval_type='punkte'` und `scope='individual'` sein; für Schulnote oder Stufen
+  gäbe es keine ehrliche Umrechnung (HTTP 400 mit Klartext).
+
+**Verifiziert im Browser** (lokaler Dev-Server, Sitzung direkt in der Dev-DB
+angelegt — kein Passwort angefasst): Übersicht mit korrekter nächster Prüfung
+über die Kombi-Lerngruppe, Klassenansicht, Notiz anlegen/ändern/löschen ohne
+Reload, Teil-Update lässt Datum und Text stehen, Sortierung jüngste zuerst,
+Moodle-Import end-to-end mit allen drei Trefferarten (16 / 13 / 10 Punkte in
+der DB, Schülerzahl unverändert), Endnote auf Schülerseite und im Bewertungs-
+bogen identisch (80 % → 2). Mobil (375 px): kein horizontales Scrollen; die
+Tabellenzeilen lagen zuerst bei 39 px und damit unter der 44-px-Touchnorm —
+korrigiert auf 47 px. Die Testdaten wurden danach wieder entfernt.
+
+**Offen:** Der Test im Container steht noch aus (`drs-update` zieht bis
+Migration 0033). Ideen-Punkt 8 nennt als zweite Ergebnisquelle den
+„Feedbackbogen" — der ist bewusst nicht gebaut, weil die Eingabe am Gerät
+bereits der bestehende Bewertungs-Wizard ist.
+
+### Dokumente / Haushalt / Vorgänge (2026-07-30)
 
 **Reihenfolge und Entscheidungen** stehen im Plan
 `~/.claude/plans/drs-lxc-dokumente-vorgaenge-haushalt.md`. Kurz die tragenden:
@@ -577,9 +656,13 @@ Schüler kommen jetzt aus den Stammdaten/Lerngruppen.
 3. **Unterschriftsbild pro Lehrer** für Bewertungs-PDFs (`signature_data_url`
    ist im Template vorbereitet, aber noch leer — User-Setting fehlt).
 4. **HTTPS im Caddy** standardmäßig (aktuell HTTP auf Port 80).
-5. **Ideen-Backlog** siehe Auto-Memory `ideen-drs-lxc` (Vikunja-Ausbau,
-   Klassen/Lernfelder mit Stundenansatz, Stundenplanänderungs-Formular,
-   Untis-Abgleich, Schüler-Notizen, NocoDB-Backup, lokale Diktierfunktion).
+5. **Ideen-Backlog** siehe Auto-Memory `ideen-drs-lxc`. Offen sind dort noch:
+   **NocoDB-Backup** (Vorbild Gemeindeverwaltung) und die **lokale
+   Diktierfunktion** (Entscheidung steht: server-seitiges faster-whisper auf
+   dem LXC; erster Schritt ist die Ressourcenprüfung von CT 500). Erledigt sind
+   Vikunja, manueller Stundenplan, Stundenplanänderungs-Formular, Klassen +
+   Lernfelder mit Stundenansatz, Schüler-Notizen und die wählbare
+   Ergebnisquelle beim Moodle-Import.
 
 ### Ausgeblendet (Verschlankung Phase 1)
 
@@ -612,15 +695,16 @@ drs-lxc/
 ├── docs/
 │   ├── fobizz-agent-systemprompt.md   # zum 1× Einfügen in den Fobizz-Agent
 │   └── lerninhalt-md-schema.md        # Schema der Inhalts-MD für den Lehrer
-├── tests/                             # pytest: Kaskade + Endpoint-Integration
+├── tests/                             # pytest: Kaskade, Endpoints, Moodle-Matching, Notizen
 └── app/
     ├── main.py
     ├── config.py, db.py, models.py, crypto.py, auth.py, branding.py, cli.py
     ├── templating.py                  # geteilte Jinja-Instanz mit school_name() Global
-    ├── alembic/versions/0001–0029_*.py
+    ├── alembic/versions/0001–0033_*.py
     ├── routers/
     │   ├── auth.py, setup.py, users.py, profile.py     # profile.py: + SMB-Block
     │   ├── worksheets.py, settings.py, help.py, timetable.py
+    │   ├── klassen.py                # Klassenmodul: Übersicht, Klasse, Schüler + Notiz-API
     │   ├── learning_situations.py     # LS-CRUD, Upload, Datei-Löschen
     │   ├── wizard.py                  # 5-Schritt-Flow + done
     │   ├── preview.py                 # PDF/Bild inline, OnlyOffice-Iframe
@@ -629,6 +713,9 @@ drs-lxc/
     │   ├── plan_cascade.py            # Themen-Kaskade: held_blocks, cascade_shift/-revert
     │   ├── timetable_grid.py          # Wochengrid des manuellen Plans (Ersatz für WebUntis)
     │   ├── lerngruppen.py             # aktive Lerngruppen für alle Picker
+    │   ├── klassen.py                 # Kacheldaten, Notiz-Kategorien, Bewertungen je Schüler
+    │   ├── exam_scoring.py            # Notenrechnung (aus exams.py gezogen) — EINE Wahrheit
+    │   ├── moodle_quiz.py             # JSON-Parser + Namens-Matching (normalisiere/matche)
     │   ├── vikunja_client.py          # create_task, ensure_label, Board/Buckets
     │   ├── stundenplanaenderung_pdf.py# AcroForm-Befüllung des Schulformulars
     │   ├── playwright_pdf.py
@@ -640,7 +727,7 @@ drs-lxc/
     │   ├── aufgabe_sync.py            # MD-Aufgaben ⇄ DB-Tabelle ls_aufgaben (idempotent)
     │   ├── material_prompts.py        # 9-Typen-Katalog + Dual-Prompt-Builder (Fobizz + Claude)
     │   └── wizard_helpers.py          # Slug, Folder-Name (übrig nach Refactor)
-    ├── static/{drs.css, default_school_logo.jpg}
+    ├── static/{drs.css, drs.js, klassen.js, exams.js, vikunja.js, …}
     └── templates/
         ├── base.html                  # Nav-Einträge: Lernsituationen, Wizard
         ├── login.html, change_password.html, home.html, setup.html
@@ -648,6 +735,7 @@ drs-lxc/
         ├── preview.html, obsidian_note.html
         ├── learning_situations/{list.html, detail.html, confirm_delete.html}
         ├── wizard/{_layout.html, start.html, step1_md.html, step2_typ.html, step3_prompt.html, step4_output.html, done.html}
+        ├── klassen/{index.html, klasse.html, schueler.html}
         ├── admin/{users.html, settings.html}
         └── worksheets/{list.html, editor.html, revisions.html, export.html}
 ```
@@ -670,12 +758,18 @@ Login: **`mgoebel`** (Admin)
 
 ## 6. Letzte Commits
 
-Alle Stände sind auf GitHub `mgoebel89/drs-Desktop` @ `main` gepusht.
-Migrations-Stand: **0029**.
+Migrations-Stand: **0033**. Der Stand bis `1f84eae` liegt auf GitHub
+`mgoebel89/drs-Desktop` @ `main`; der Klassen-Commit ist noch **nicht gepusht**.
 
 | Commit | Was |
 |---|---|
-| _(dieser)_ | **Unterrichtsplanung**: Thema verteilen, Klassenarbeit, Reflexion, Themen-Kaskade. Migrationen 0028 + 0029, erste Testsuite (`tests/`, 14 Tests) |
+| _(dieser)_ | **Klassenmodul** mit Schüler-Notizen (Migration 0033) + **Moodle-Ergebnisse in bestehende Prüfungen**; Notenrechnung nach `services/exam_scoring.py` gezogen. 25 neue Tests |
+| `1f84eae` | Profil mit Kategorien, Module auf die gemeinsamen UI-Bausteine |
+| `ef4afc1` | Paperless-Upload repariert + UI-Fundament im Gemeindeverwaltungs-Stil |
+| `602f040` | **Dokumente, Haushalt, Vorgänge & Projekte**. Migrationen 0030–0032 |
+| `b9c4818` | Moodle-Test-Import als Overlay wieder erreichbar |
+| `b8cbc27` | **Prüfungsmodul** auf Stammdaten umgestellt (Klasse/Lerngruppe, Assistent, Overlays) |
+| `9d1d990` | **Unterrichtsplanung**: Thema verteilen, Klassenarbeit, Reflexion, Themen-Kaskade. Migrationen 0028 + 0029, erste Testsuite |
 | `48e81e2` | Fix aus dem Browser-Test: Overlays liefen nie (drs.js lädt nach dem content-Block), Race in den Blocklisten, Touch-Flächen 44 px |
 | `056c323` | Unterrichtsplanung — Feature-Commit |
 | `8c09a8d` | Aufgaben-Board: pointercancel räumt auf |
@@ -695,16 +789,19 @@ Migrations-Stand: **0029**.
 letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
-Migration **0029** und gleicht den Playwright-Chromium ab). Die Unterrichtsplanung
-wurde lokal im Browser verifiziert (Desktop + 375-px-Viewport, siehe Abschnitt 3);
-im Container bleiben zu prüfen: die **Vikunja-Aufgabe** bei einer Klassenarbeit gegen
-die echte Instanz und das **Touch-Verhalten am Gerät**.
+Migration **0033** und gleicht den Playwright-Chromium ab). Im Container bleiben
+zu prüfen: **Paperless und Vikunja gegen die echten Instanzen** (aus der
+Dev-Umgebung nicht erreichbar, siehe Abschnitt 3), die **Vikunja-Aufgabe** bei
+einer Klassenarbeit, das **Touch-Verhalten am Gerät** und der Durchlauf des
+neuen **Klassenmoduls** mit echten Klassendaten.
 
 ### Tests
 
-Seit 2026-07-20 gibt es `tests/` (pytest, 14 Tests): Kaskade als Unit-Tests
-(`test_plan_cascade.py`) plus Endpoint-Integration über FastAPI-TestClient mit
-Auth-Override. Ausführen: `.venv/Scripts/python.exe -m pytest tests/ -q`
+Seit 2026-07-20 gibt es `tests/` (pytest, **86 Tests**): Kaskade als Unit-Tests
+(`test_plan_cascade.py`), Namens-Matching und Ergebnis-Buchung des Moodle-Imports
+(`test_moodle_matching.py`), Notiz-Endpoints und Übersichts-Kennzahlen des
+Klassenmoduls (`test_klassen_notizen.py`) plus Endpoint-Integration über
+FastAPI-TestClient mit Auth-Override. Ausführen: `.venv/Scripts/python.exe -m pytest tests/ -q`
 (pytest ist Dev-Werkzeug und steht bewusst nicht in `requirements.txt`).
 Die Fixtures bauen eine In-Memory-DB mit minimalem Stundenplan — **`StaticPool` +
 `check_same_thread=False` sind Pflicht**, sonst sieht der TestClient-Thread die DB nicht.
