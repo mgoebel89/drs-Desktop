@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ k.name }}{% endblock %}
+{% block content %}
+<style>
+  .kl-lg { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+  .kl-lg-chip { font-size: 11px; border-radius: 999px; padding: 2px 9px;
+    background: #f1f4f7; color: #4a5b6d; }
+
+  .kl-tab { width: 100%; border-collapse: collapse; }
+  .kl-tab th, .kl-tab td { padding: .5rem .5rem; border-bottom: 1px solid var(--border);
+    text-align: left; font-size: 13px; }
+  .kl-tab th { color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: .03em; }
+  .kl-row { cursor: pointer; }
+  .kl-row:hover { background: #f6f9fc; }
+  .kl-name { font-weight: 600; }
+  .kl-badge { display: inline-block; font-size: 11px; border-radius: 999px;
+    padding: 2px 9px; background: #e6f0fb; color: #1f6feb; font-weight: 600; }
+  .kl-badge.leer { background: #f1f4f7; color: var(--muted); font-weight: 400; }
+  .kl-austritt { font-size: 11px; border-radius: 999px; padding: 2px 9px;
+    background: #f1f4f7; color: var(--muted); margin-left: .4rem; }
+  .kl-oeffnen { color: var(--blau); font-size: 12px; white-space: nowrap; }
+
+  @media (max-width: 760px) {
+    /* Das Datum der letzten Notiz ist auf dem Handy Beiwerk — die Zeile soll
+       dafür auf 44 px Touch-Höhe kommen. */
+    .kl-spalte-datum { display: none; }
+    .kl-tab td { padding: .75rem .5rem; }
+  }
+</style>
+
+<p class="muted" style="margin-bottom:.3rem">
+  <a href="/klassen">Klassen</a> ›
+</p>
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap">
+  <h1 style="margin:0">{{ k.name }}</h1>
+  <span class="muted">{{ jahrgang.name if jahrgang else '' }}</span>
+  <span style="margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap">
+    <a class="btn-sec" href="/stammdaten/klassen/{{ k.id }}">Klasse verwalten</a>
+  </span>
+</div>
+
+{% if lerngruppen %}
+<div class="card">
+  <h2 style="margin:0 0 .3rem;font-size:15px">Lerngruppen</h2>
+  <p class="muted" style="margin:0">Über diese Lerngruppen hängen Stundenplan und
+    Prüfungen an der Klasse.</p>
+  <div class="kl-lg">
+    {% for lg in lerngruppen %}
+    <span class="kl-lg-chip">{{ lg.display_name or lg.klassen_key }}{% if not lg.active %} · stillgelegt{% endif %}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2 style="margin:0 0 .8rem;font-size:17px">Schüler
+    <span class="muted">({{ zeilen|length }})</span></h2>
+
+  {% if zeilen %}
+  <table class="kl-tab">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Notizen</th>
+        <th class="kl-spalte-datum">Zuletzt</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for z in zeilen %}
+      <tr class="kl-row" data-href="/klassen/schueler/{{ z.s.id }}"
+          {% if not z.s.active %}style="opacity:.55"{% endif %}>
+        <td>
+          <span class="kl-name">{{ z.s.nachname }}{% if z.s.vorname %}, {{ z.s.vorname }}{% endif %}</span>
+          {% if not z.s.active %}
+          <span class="kl-austritt">
+            {%- if z.s.austritt_grund == 'abschluss' %}Abschluss
+            {%- elif z.s.austritt_grund == 'abgang' %}Abgang
+            {%- else %}inaktiv{% endif -%}
+          </span>
+          {% endif %}
+        </td>
+        <td>
+          {% if z.notizen.anzahl %}
+          <span class="kl-badge">{{ z.notizen.anzahl }}</span>
+          {% else %}
+          <span class="kl-badge leer">—</span>
+          {% endif %}
+        </td>
+        <td class="muted kl-spalte-datum">
+          {%- if z.notizen.letzte -%}
+            {{ z.notizen.letzte[8:10] }}.{{ z.notizen.letzte[5:7] }}.{{ z.notizen.letzte[0:4] }}
+          {%- else -%}—{%- endif -%}
+        </td>
+        <td class="kl-oeffnen">öffnen ›</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">In dieser Klasse ist noch kein Schüler erfasst. Import und
+    Anlegen laufen über die
+    <a href="/stammdaten/klassen/{{ k.id }}">Stammdaten</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.kl-row').forEach(function (tr) {
+    tr.addEventListener('click', function () {
+      window.location.href = tr.dataset.href;
+    });
+  });
+</script>
+{% endblock %}

@@ -38,6 +38,7 @@
     <button type="button" class="btn-sec" id="btn-zuordnung">🎓 Zuordnung</button>
     <button type="button" class="btn-sec" data-pane="tab-part">👥 Teilnehmer</button>
     <button type="button" class="btn-sec" data-pane="tab-fps">🧩 Feedbackpunkte</button>
+    <button type="button" class="btn-sec" id="btn-moodle-erg">⬆ Moodle-Ergebnisse</button>
     <button type="button" class="btn-sec ex-del" id="btn-exam-del">🗑 Löschen</button>
   </div>
 
@@ -585,6 +586,9 @@ if(nmBtn)nmBtn.addEventListener('click',()=>{
 
   document.getElementById('btn-zuordnung').addEventListener('click',
     () => DRSExams.zuordnungModal(EXAM_ID));
+
+  document.getElementById('btn-moodle-erg').addEventListener('click',
+    () => DRSExams.moodleErgebnisse(EXAM_ID));
 
   document.getElementById('btn-exam-del').addEventListener('click', async () => {
     let fakten = [];
