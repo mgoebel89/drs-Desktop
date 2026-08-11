@@ -19,7 +19,8 @@ from app.models import (Exam, ExamFeedbackPoint, ExamGroupResult, ExamResult,
                         ExamStudent, FeedbackTemplate, LearningSituation,
                         LessonNote, Student, TtJahrgang, TtKlasse,
                         TtSchulklasse, User)
-from app.services import exam_md, grading, moodle_quiz, obsidian_writer
+from app.services import (exam_md, exam_scoring, grading, moodle_quiz,
+                          obsidian_writer)
 from app.services.lerngruppen import (lerngruppe_der_klasse, lerngruppen,
                                       schueler_der_lerngruppe)
 from app.services.playwright_pdf import render_pdf
@@ -132,118 +133,13 @@ def _exam_participants(db: Session, ex: Exam) -> list[tuple[Student, str]]:
     return [(s, g or "") for s, g in rows]
 
 
-def _scoring_ctx(db: Session, user: User, ex: Exam):
-    """Vorberechnung für Noten: Feedbackpunkte nach Scope, Summen, Stufen,
-    Ergebnis-Maps."""
-    fps = list(ex.feedback_points)
-    indiv_fps = [fp for fp in fps if fp.scope != "group"]
-    group_fps = [fp for fp in fps if fp.scope == "group"]
-    sum_max = sum(float(fp.max_points or 0) for fp in fps)
-    stufen = grading.resolve_stufen(db, user, ex.grading_scale_key)
-    indiv_results = {r.student_id: _loadjson(r.erreicht_json) for r in ex.results}
-    group_results = {gr.group_label or "": _loadjson(gr.erreicht_json)
-                     for gr in ex.group_results}
-    indiv_remarks = {r.student_id: _loadjson(r.feedback_remarks_json or "{}")
-                     for r in ex.results}
-    group_remarks = {gr.group_label or "": _loadjson(gr.feedback_remarks_json or "{}")
-                     for gr in ex.group_results}
-    return {
-        "fps": fps, "indiv_fps": indiv_fps, "group_fps": group_fps,
-        "sum_max": sum_max, "stufen": stufen,
-        "indiv_results": indiv_results, "group_results": group_results,
-        "indiv_remarks": indiv_remarks, "group_remarks": group_remarks,
-        "bewertung_mode": ex.bewertung_mode or "mixed",
-        "grading_scale_ref": ex.grading_scale_key,
-    }
-
-
-def _item_percent(fp, value, stufen) -> float | None:
-    """Prozentwert eines Items je eval_type. None = nicht bewertbar/leer."""
-    if value in (None, ""):
-        return None
-    if fp.eval_type == "note":
-        return grading.percent_for_grade(stufen, str(value))
-    # punkte / stufen → wert / max * 100
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return None
-    mx = float(fp.max_points or 0)
-    if mx <= 0:
-        return None
-    return max(0.0, min(100.0, v / mx * 100.0))
-
-
-def _item_weight(fp) -> float:
-    """Gewicht eines Items für die gewichtete Endnote.
-    - note: vom Lehrer gesetztes weight_pct (Fallback 100, falls 0).
-    - punkte/stufen: max_points (natürliche Gewichtung = Punkte-Pooling)."""
-    if fp.eval_type == "note":
-        w = float(fp.weight_pct or 0)
-        return w if w > 0 else 100.0
-    return float(fp.max_points or 0) or 1.0
-
-
-def _student_total(ctx: dict, student_id: int, group_label: str):
-    """(erfasste_items, pct, note) für einen Schüler.
-
-    Im Punkte-Modus: Endnote = Summe(erreicht) / Summe(max) → Prozent →
-    Note via Notenschlüssel. Sonst (note/mixed): gewichteter Prozent-
-    Schnitt über alle Items je eval_type."""
-    er = ctx["indiv_results"].get(student_id, {})
-    ger = ctx["group_results"].get(group_label or "", {})
-    stufen = ctx["stufen"]
-    mode = ctx.get("bewertung_mode", "mixed")
-
-    if mode == "punkte":
-        sum_erreicht = 0.0
-        sum_max = 0.0
-        n_filled = 0
-        for fp in ctx["indiv_fps"]:
-            raw = er.get(str(fp.id), "")
-            if raw in (None, ""):
-                continue
-            try:
-                sum_erreicht += float(raw)
-            except (TypeError, ValueError):
-                continue
-            sum_max += float(fp.max_points or 0)
-            n_filled += 1
-        for fp in ctx["group_fps"]:
-            raw = ger.get(str(fp.id), "")
-            if raw in (None, ""):
-                continue
-            try:
-                sum_erreicht += float(raw)
-            except (TypeError, ValueError):
-                continue
-            sum_max += float(fp.max_points or 0)
-            n_filled += 1
-        if not n_filled or sum_max <= 0:
-            return 0, 0.0, ""
-        pct = max(0.0, min(100.0, sum_erreicht / sum_max * 100.0))
-        note = grading.grade_from_stufen(stufen, pct)
-        return n_filled, pct, note
-
-    # 'note' und 'mixed' → bestehende gewichtete Logik
-    weighted: list[tuple[float, float]] = []  # (percent, weight)
-    n_filled = 0
-    for fp in ctx["indiv_fps"]:
-        p = _item_percent(fp, er.get(str(fp.id), ""), stufen)
-        if p is not None:
-            weighted.append((p, _item_weight(fp)))
-            n_filled += 1
-    for fp in ctx["group_fps"]:
-        p = _item_percent(fp, ger.get(str(fp.id), ""), stufen)
-        if p is not None:
-            weighted.append((p, _item_weight(fp)))
-            n_filled += 1
-
-    if not weighted:
-        return 0, 0.0, ""
-    pct = grading.weighted_final(weighted)
-    note = grading.grade_from_stufen(stufen, pct)
-    return n_filled, pct, note
+# Die Notenrechnung liegt in app/services/exam_scoring.py — das Klassenmodul
+# zeigt dieselben Endnoten und darf sie nicht nachbauen. Die Aliase halten die
+# bisherigen Namen im Router am Leben.
+_scoring_ctx = exam_scoring.scoring_ctx
+_item_percent = exam_scoring.item_percent
+_item_weight = exam_scoring.item_weight
+_student_total = exam_scoring.student_total
 
 
 @router.get("/exams", response_class=HTMLResponse)
@@ -788,6 +684,147 @@ async def api_moodle_import(
     db.commit()
     return JSONResponse({"ok": True, "id": ex.id, "url": f"/exams/{ex.id}",
                          "anzahl": len(eintraege)})
+
+
+# ── Moodle-Ergebnisse in eine BESTEHENDE Prüfung ──────────────────────────
+#
+# Der Weg oben legt eine neue Prüfung aus der Datei an; die Teilnehmer kommen
+# dort aus der Datei. Hier ist es umgekehrt: Die Prüfung existiert bereits und
+# hängt an einer Lerngruppe — die Namen aus der Datei müssen also auf ihre
+# Schüler treffen, statt Karteileichen anzulegen. Wieder zweistufig: erst
+# Vorschau samt Zuordnungstabelle, dann schreiben.
+
+@router.post("/api/exams/{ex_id}/moodle/vorschau")
+async def api_exam_moodle_vorschau(
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    datei: UploadFile = File(...),
+):
+    ex = _get_exam(db, user, ex_id)
+    try:
+        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
+        eintraege = moodle_quiz.parse_moodle_json(raw)
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
+    if not eintraege:
+        raise HTTPException(400, "Die Datei enthält keine Schüler.")
+
+    # Dieselbe Kandidatenliste wie im Teilnehmer-Schritt: Lerngruppe plus alle,
+    # die bereits an der Prüfung hängen.
+    roster = _exam_roster(db, user, ex)
+    kandidaten = [{"id": r["student"].id,
+                   "nachname": r["student"].nachname or "",
+                   "vorname": r["student"].vorname or ""} for r in roster]
+    zeilen = moodle_quiz.matche(eintraege, kandidaten)
+
+    return JSONResponse({
+        "ok": True,
+        "zeilen": zeilen,
+        "kandidaten": [{"id": k["id"],
+                        "name": f'{k["nachname"]}, {k["vorname"]}'.strip(", ")}
+                       for k in kandidaten],
+        "feedback_points": [
+            {"id": fp.id, "name": fp.name, "max_points": float(fp.max_points or 0),
+             "eval_type": fp.eval_type, "scope": fp.scope}
+            for fp in ex.feedback_points
+        ],
+        "offen": sum(1 for z in zeilen if not z["student_id"]),
+        "ohne_ergebnis": sum(1 for z in zeilen if z["percent"] is None),
+    })
+
+
+@router.post("/api/exams/{ex_id}/moodle/import")
+def api_exam_moodle_import(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    payload: Annotated[dict, Body()],
+):
+    """Bucht die Prozentwerte auf einen Feedbackpunkt der Prüfung.
+
+    `zuordnung`: [{'student_id': int|null, 'percent': float|null}] — genau die
+    Tabelle aus der Vorschau, wie der Lehrer sie bestätigt hat. Zeilen ohne
+    Schüler oder ohne Ergebnis werden übersprungen, nicht geraten.
+    `fp_id` wählt einen vorhandenen Punkt, sonst entsteht ein neuer mit
+    `fp_name` und 100 Punkten."""
+    ex = _get_exam(db, user, ex_id)
+    zuordnung = payload.get("zuordnung") or []
+    if not isinstance(zuordnung, list) or not zuordnung:
+        raise HTTPException(400, "Keine Zuordnung übergeben.")
+
+    fp_id = payload.get("fp_id")
+    if fp_id:
+        fp = next((f for f in ex.feedback_points if f.id == int(fp_id)), None)
+        if fp is None:
+            raise HTTPException(404, "Feedbackpunkt gehört nicht zu dieser Prüfung.")
+        # Ein Prozentwert lässt sich nur auf eine Punkte-Skala umrechnen. Bei
+        # Schulnote oder Stufen gäbe es keine ehrliche Umrechnung — dann lieber
+        # ein eigener Punkt.
+        if fp.eval_type != "punkte":
+            raise HTTPException(
+                400, "Moodle liefert einen Prozentwert — Ziel muss ein "
+                     "Feedbackpunkt vom Typ „Punkte“ sein.")
+        if fp.scope == "group":
+            raise HTTPException(
+                400, "Der Moodle-Wert gilt je Schüler, nicht je Gruppe.")
+        if float(fp.max_points or 0) <= 0:
+            raise HTTPException(400, "Der Feedbackpunkt hat keine Maximalpunkte.")
+    else:
+        name = (payload.get("fp_name") or "Moodle-Test").strip()[:200]
+        position = max([f.position for f in ex.feedback_points], default=-1) + 1
+        fp = ExamFeedbackPoint(
+            exam_id=ex.id, position=position, name=name, max_points=100.0,
+            scope="individual", eval_type="punkte", weight_pct=0.0,
+        )
+        db.add(fp)
+        db.flush()
+
+    mitglieder = {es.student_id: es for es in ex.students}
+    ergebnisse = {r.student_id: r for r in ex.results}
+    max_points = float(fp.max_points or 0) or 100.0
+
+    gebucht = 0
+    neue_teilnehmer = 0
+    for zeile in zuordnung:
+        sid = zeile.get("student_id")
+        prozent = zeile.get("percent")
+        if not sid or prozent is None:
+            continue
+        s = db.get(Student, int(sid))
+        if not s or s.owner_user_id != user.id:
+            raise HTTPException(404, "Unbekannter Schüler in der Zuordnung.")
+        try:
+            wert = round(float(prozent) / 100.0 * max_points, 2)
+        except (TypeError, ValueError):
+            continue
+
+        if s.id not in mitglieder:
+            es = ExamStudent(exam_id=ex.id, student_id=s.id, group_label="")
+            db.add(es)
+            mitglieder[s.id] = es
+            neue_teilnehmer += 1
+
+        res = ergebnisse.get(s.id)
+        if res is None:
+            res = ExamResult(exam_id=ex.id, student_id=s.id, erreicht_json="{}")
+            db.add(res)
+            ergebnisse[s.id] = res
+        # Nur die eine Spalte anfassen — die übrigen Feedbackpunkte dieses
+        # Schülers dürfen ein Import nicht abräumen.
+        werte = _loadjson(res.erreicht_json)
+        werte[str(fp.id)] = wert
+        res.erreicht_json = json.dumps(werte, ensure_ascii=False)
+        gebucht += 1
+
+    audit(db, "exam_moodle_results", actor=user, target=str(ex.id),
+          detail=f"{ex.title} / {gebucht} Ergebnisse auf „{fp.name}“",
+          request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "gebucht": gebucht,
+                         "neue_teilnehmer": neue_teilnehmer,
+                         "fp_id": fp.id, "fp_name": fp.name})
 
 
 @router.get("/exams/{ex_id}", response_class=HTMLResponse)

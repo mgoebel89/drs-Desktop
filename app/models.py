@@ -415,6 +415,30 @@ class Student(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class StudentNotiz(Base):
+    """Eine datierte Notiz zu einem Schüler (Klassenmodul).
+
+    Mehrere Einträge pro Schüler statt eines fortgeschriebenen Freitextfelds:
+    Für Elterngespräch und Zeugniskonferenz zählt die Entwicklung über das
+    Schuljahr, nicht der letzte Stand. `datum` ist das **fachliche** Datum
+    (wann war die Beobachtung) und deshalb frei änderbar — `created_at` hält
+    daneben fest, wann getippt wurde."""
+    __tablename__ = "student_notizen"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    datum: Mapped[str] = mapped_column(String(10), default="", index=True)
+    # siehe KATEGORIEN in app/services/klassen.py
+    kategorie: Mapped[str] = mapped_column(String(20), default="beobachtung")
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow,
+                                                 onupdate=utcnow)
+
+
 class StudentClassMove(Base):
     """Historie der Klassenwechsel. Die `student_id` bleibt beim Versetzen gleich —
     deshalb überleben alle Bewertungen den Wechsel."""

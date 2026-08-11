@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ s.nachname }}{% if s.vorname %}, {{ s.vorname }}{% endif %}{% endblock %}
+{% block content %}
+<style>
+  .ks-kopf { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .ks-kopf h1 { margin: 0; font-size: 22px; }
+  .ks-meta { font-size: 12px; color: var(--muted); }
+  .ks-austritt { font-size: 11px; border-radius: 999px; padding: 2px 9px;
+    background: #f1f4f7; color: var(--muted); }
+
+  /* Zeitleiste — dieselbe Optik wie in den Vorgängen, damit „Verlauf" appweit
+     gleich aussieht. */
+  .ks-hist { position: relative; margin-top: .8rem; padding-left: 1.4rem; }
+  .ks-hist::before { content: ''; position: absolute; left: 5px; top: 4px; bottom: 4px;
+    width: 2px; background: var(--border); }
+  .ks-eintrag { position: relative; padding: .6rem 0;
+    border-bottom: 1px solid var(--border); cursor: pointer; }
+  .ks-eintrag:hover { background: #f6f9fc; }
+  .ks-eintrag::before { content: ''; position: absolute; left: -1.4rem; top: 1rem;
+    width: 12px; height: 12px; border-radius: 50%; background: #fff;
+    border: 2px solid var(--blau); }
+  .ks-e-kopf { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+  .ks-e-datum { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ks-e-body { font-size: 13px; color: #3b4a5a; margin-top: .25rem;
+    white-space: pre-wrap; word-break: break-word; }
+
+  .ks-kat { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 9px;
+    white-space: nowrap; background: #f1f4f7; color: #4a5b6d; }
+  .ks-kat.blau  { background: #e6f0fb; color: #1f6feb; }
+  .ks-kat.gruen { background: #eef4ee; color: #2e7d32; }
+  .ks-kat.gelb  { background: #fdf3e3; color: #9a6b00; }
+  .ks-kat.rot   { background: #fbeaea; color: #c62828; }
+
+  .ks-btab { width: 100%; border-collapse: collapse; }
+  .ks-btab th, .ks-btab td { padding: .4rem .5rem; border-bottom: 1px solid var(--border);
+    font-size: 12px; text-align: left; }
+  .ks-btab th { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+  .ks-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ks-note { font-weight: 700; }
+</style>
+
+<p class="muted" style="margin-bottom:.3rem">
+  <a href="/klassen">Klassen</a>
+  {% if klasse %} › <a href="/klassen/{{ klasse.id }}">{{ klasse.name }}</a>{% endif %} ›
+</p>
+
+<div class="card">
+  <div class="ks-kopf">
+    <div>
+      <h1>{{ s.nachname }}{% if s.vorname %}, {{ s.vorname }}{% endif %}</h1>
+      <div class="ks-meta" style="margin-top:.3rem">
+        {{ klasse.name if klasse else 'ohne Klasse' }}
+        {% if s.email %} · {{ s.email }}{% endif %}
+      </div>
+    </div>
+    <span style="margin-left:auto;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+      {% if not s.active %}
+      <span class="ks-austritt">
+        {%- if s.austritt_grund == 'abschluss' %}Abschluss
+        {%- elif s.austritt_grund == 'abgang' %}Abgang
+        {%- else %}inaktiv{% endif -%}
+        {% if s.austritt_datum %} · {{ s.austritt_datum[8:10] }}.{{ s.austritt_datum[5:7] }}.{{ s.austritt_datum[0:4] }}{% endif %}
+      </span>
+      {% endif %}
+      {% if klasse %}
+      <a class="btn-sec" href="/stammdaten/klassen/{{ klasse.id }}">Stammdaten</a>
+      {% endif %}
+    </span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="toolbar">
+    <h2 style="margin:0;font-size:17px">Notizen</h2>
+    <div class="spacer"></div>
+    <button type="button" class="btn" id="ksNeu">+ Notiz</button>
+  </div>
+  <div id="ksHist" class="ks-hist"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin:0 0 .6rem;font-size:17px">Bewertungen</h2>
+  {% if bewertungen %}
+  <table class="ks-btab">
+    <thead>
+      <tr><th>Prüfung</th><th>Datum</th><th class="ks-num">Prozent</th><th class="ks-num">Note</th></tr>
+    </thead>
+    <tbody>
+      {% for b in bewertungen %}
+      <tr>
+        <td><a href="/exams/{{ b.id }}">{{ b.titel }}</a></td>
+        <td class="muted">
+          {%- if b.datum -%}{{ b.datum[8:10] }}.{{ b.datum[5:7] }}.{{ b.datum[0:4] }}
+          {%- else -%}—{%- endif -%}
+        </td>
+        <td class="ks-num">{% if b.bewertet %}{{ b.prozent }} %{% else %}—{% endif %}</td>
+        <td class="ks-num ks-note">{{ b.note or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Dieser Schüler ist noch an keiner Prüfung beteiligt.</p>
+  {% endif %}
+</div>
+
+<script>
+  window.KLASSEN_SCHUELER = {
+    id: {{ s.id }},
+    heute: {{ heute | tojson }},
+    notizen: {{ notizen | tojson }},
+    kategorien: {{ kategorien | tojson }}
+  };
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/klassen.js?v={{ static_version() }}"></script>
+{% endblock %}
