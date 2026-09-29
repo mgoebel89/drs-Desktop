@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-08-11 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-09-29 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -98,8 +98,22 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   nimmt „⬆ Moodle-Ergebnisse" eine JSON auf, ordnet die Namen den Schülern der
   Lerngruppe zu und bucht die Prozentwerte auf einen **wählbaren**
   Feedbackpunkt. Es entstehen **keine neuen Schüler-Datensätze** mehr.
+- **NEU: Modul „Unterrichtsbesuche" — Stufe 1** (2026-09-29, Migration **0034**,
+  Branch `feat/unterrichtsbesuche`): Hospitationsprotokolle für Anwärter.
+  Anwärter als Stammdatum, Besuch per Assistent (Kopfdaten + vom Anwärter
+  festgelegte Schwerpunkte), **Handy-Erfassung** als eigene Vollbildseite
+  (`/unterrichtsbesuche/{id}/erfassen`: Kategorie-Knöpfe unten, Phase oben,
+  jeder Eintrag sofort gespeichert, Foto wird im Browser auf 1600 px
+  verkleinert) und **chronologisches PDF** (reportlab). Kategorien (Name,
+  Piktogramm, Farbe, Spalte), Phasen und Kriterien frei pflegbar; benutzte
+  Werte nur stilllegbar. Die Piktogramme liegen als Zeichenanweisungen in
+  `services/unterrichtsbesuche.py` und werden daraus als SVG (Browser) UND
+  direkt im PDF gezeichnet — neue Icons nur mit absoluten M/L/H/V/C/Q/Z-Befehlen.
+  **Stufe 2 offen:** Ordnungen nach Kategorie/Kriterium/zweispaltig, ODT,
+  Einträge verknüpfen, Reflexion + Vereinbarungen (mit Anzeige beim nächsten
+  Besuch), Startseiten-Karte. Das Schema dafür steht schon in 0034.
 
-**Migrations-Stand: 0033.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+**Migrations-Stand: 0034.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
 Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
@@ -242,6 +256,15 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 ---
 
 ## 3. Aktuell offene Punkte
+
+### Unterrichtsbesuche Stufe 1 (2026-09-29, NEU)
+
+- Im Container testen: Migration 0034, ein echter Besuch vom Handy über
+  Tailscale/VPN, Foto-Upload (iPhone liefert über `accept="image/*"` JPEG).
+- Bildschirm-wach-halten (Wake Lock) greift nur über HTTPS; der Container
+  läuft über HTTP, dort passiert still nichts.
+- PDF-Schrift ist Helvetica (WinAnsi): Emoji aus der Handy-Tastatur fallen im
+  PDF weg, Pfeile werden zu `->`.
 
 ### Klassenmodul + Moodle-Ergebnisimport (2026-08-11, NEU)
 
@@ -758,12 +781,13 @@ Login: **`mgoebel`** (Admin)
 
 ## 6. Letzte Commits
 
-Migrations-Stand: **0033**. Der Stand bis `1f84eae` liegt auf GitHub
+Migrations-Stand: **0034**. Der Stand bis `1f84eae` liegt auf GitHub
 `mgoebel89/drs-Desktop` @ `main`; der Klassen-Commit ist noch **nicht gepusht**.
 
 | Commit | Was |
 |---|---|
-| _(dieser)_ | **Klassenmodul** mit Schüler-Notizen (Migration 0033) + **Moodle-Ergebnisse in bestehende Prüfungen**; Notenrechnung nach `services/exam_scoring.py` gezogen. 25 neue Tests |
+| _(Branch `feat/unterrichtsbesuche`)_ | **Unterrichtsbesuche Stufe 1** (Migration 0034): Anwärter, Besuch-Assistent, Handy-Erfassung mit Fotos, chronologisches PDF mit Piktogrammen. 19 neue Tests |
+| `c5161b6` | **Klassenmodul** mit Schüler-Notizen (Migration 0033) + **Moodle-Ergebnisse in bestehende Prüfungen**; Notenrechnung nach `services/exam_scoring.py` gezogen. 25 neue Tests |
 | `1f84eae` | Profil mit Kategorien, Module auf die gemeinsamen UI-Bausteine |
 | `ef4afc1` | Paperless-Upload repariert + UI-Fundament im Gemeindeverwaltungs-Stil |
 | `602f040` | **Dokumente, Haushalt, Vorgänge & Projekte**. Migrationen 0030–0032 |
@@ -789,11 +813,11 @@ Migrations-Stand: **0033**. Der Stand bis `1f84eae` liegt auf GitHub
 letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
-Migration **0033** und gleicht den Playwright-Chromium ab). Im Container bleiben
+Migration **0034** und gleicht den Playwright-Chromium ab). Im Container bleiben
 zu prüfen: **Paperless und Vikunja gegen die echten Instanzen** (aus der
 Dev-Umgebung nicht erreichbar, siehe Abschnitt 3), die **Vikunja-Aufgabe** bei
 einer Klassenarbeit, das **Touch-Verhalten am Gerät** und der Durchlauf des
-neuen **Klassenmoduls** mit echten Klassendaten.
+neuen **Klassenmoduls** mit echten Klassendaten und ein **Unterrichtsbesuch vom Handy**.
 
 ### Tests
 

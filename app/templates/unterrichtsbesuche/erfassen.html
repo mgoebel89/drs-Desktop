@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00639C">
+<title>Erfassen · {{ b.anwaerter.name }}</title>
+<link rel="stylesheet" href="/static/drs.css?v={{ static_version() }}">
+<link rel="stylesheet" href="/static/ub.css?v={{ static_version() }}">
+</head>
+{# Eigene Seite ohne App-Shell: Im Unterrichtsbesuch zählt jeder Zentimeter
+   Bildschirm, und ein versehentlich geöffnetes Menü kostet den Moment. #}
+<body class="ube-body">
+<div class="ube-app">
+  <header class="ube-kopf">
+    <div class="ube-kopfzeile">
+      <a class="ube-zurueck" href="/unterrichtsbesuche/{{ b.id }}" aria-label="Zurück">‹</a>
+      <div class="ube-titel">
+        <strong>{{ b.anwaerter.name }}</strong>
+        <small>{{ b.thema or 'ohne Thema' }}{% if b.klasse %} · {{ b.klasse }}{% endif %}</small>
+      </div>
+      <button type="button" class="ube-menue" id="ubeMenue" aria-label="Menü">⋯</button>
+    </div>
+    <button type="button" class="ube-phasenknopf" id="ubePhase">
+      <span id="ubePhaseName">Phase setzen</span><span aria-hidden="true">▾</span>
+      <span class="ube-uhr" id="ubeUhr"></span>
+    </button>
+  </header>
+  <main class="ube-liste" id="ubeListe">
+    <div id="ubeInfo"></div>
+    <div id="ubeVerlauf"></div>
+  </main>
+  <footer class="ube-fuss" id="ubeFuss"></footer>
+</div>
+
+<script>
+  window.UB = {
+    besuch: {{ besuch | tojson }},
+    katalog: {{ katalog | tojson }},
+    icons: {{ icons | tojson }},
+    wertungen: {{ wertungen | tojson }}
+  };
+</script>
+<script src="/static/drs.js?v={{ static_version() }}"></script>
+<script src="/static/ub-common.js?v={{ static_version() }}"></script>
+<script src="/static/ub-erfassen.js?v={{ static_version() }}"></script>
+</body>
+</html>

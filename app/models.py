@@ -1084,3 +1084,140 @@ class VorgangKontakt(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(120), default="")
     last_used: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ── Unterrichtsbesuche (Hospitationsprotokolle für Anwärter) ─────────────
+#
+# Einstellungen (Kategorien, Phasen, Kriterien) sind pro Lehrer frei pflegbar.
+# Sobald ein Eintrag an ihnen hängt, werden sie nicht mehr gelöscht, sondern
+# stillgelegt — sonst verlöre ein altes Protokoll seine Piktogramme.
+
+class UbEinstellung(Base):
+    """Eine Zeile je Lehrer. Existiert sie, sind die Vorgaben einmal angelegt
+    worden — wer danach alle Phasen löscht, bekommt sie nicht zurückgeseedet."""
+    __tablename__ = "ub_einstellungen"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    standard_ordnung: Mapped[str] = mapped_column(String(20), default="chronologisch")
+
+
+class UbKategorie(Base):
+    """Oberpunkt eines Eintrags (Beobachtung, Idee, Anmerkung …).
+    `spalte` steuert die zweispaltige Protokollansicht: verlauf | kommentar."""
+    __tablename__ = "ub_kategorien"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(60), default="")
+    icon: Mapped[str] = mapped_column(String(30), default="auge")
+    farbe: Mapped[str] = mapped_column(String(7), default="#00639C")
+    spalte: Mapped[str] = mapped_column(String(12), default="verlauf")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UbPhase(Base):
+    __tablename__ = "ub_phasen"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(60), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UbKriterium(Base):
+    __tablename__ = "ub_kriterien"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UbAnwaerter(Base):
+    __tablename__ = "ub_anwaerter"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    faecher: Mapped[str] = mapped_column(String(200), default="")
+    seminar: Mapped[str] = mapped_column(String(200), default="")
+    notiz: Mapped[str] = mapped_column(Text, default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class UbBesuch(Base):
+    """Ein Unterrichtsbesuch. Datum und Uhrzeiten als Text (ISO / HH:MM) wie
+    überall in der App. Die Uhrzeit der Einträge kommt vom Handy, nicht vom
+    Server — der Container läuft in UTC."""
+    __tablename__ = "ub_besuche"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    anwaerter_id: Mapped[int] = mapped_column(
+        ForeignKey("ub_anwaerter.id", ondelete="CASCADE"), index=True)
+    datum: Mapped[str] = mapped_column(String(10), default="", index=True)
+    beginn: Mapped[str] = mapped_column(String(5), default="")
+    ende: Mapped[str] = mapped_column(String(5), default="")
+    klasse: Mapped[str] = mapped_column(String(80), default="")
+    raum: Mapped[str] = mapped_column(String(40), default="")
+    thema: Mapped[str] = mapped_column(String(300), default="")
+    lernziele: Mapped[str] = mapped_column(Text, default="")
+    # geplant | laufend | abgeschlossen
+    status: Mapped[str] = mapped_column(String(16), default="geplant")
+    reflexion: Mapped[str] = mapped_column(Text, default="")
+    vereinbarungen: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)
+
+    anwaerter: Mapped["UbAnwaerter"] = relationship()
+
+
+class UbSchwerpunkt(Base):
+    """Vom Anwärter festgelegter Beobachtungsschwerpunkt — zugleich ein
+    Kriterium, dem die Einträge dieses Besuchs zugeordnet werden können."""
+    __tablename__ = "ub_schwerpunkte"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    besuch_id: Mapped[int] = mapped_column(
+        ForeignKey("ub_besuche.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(String(300), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class UbEintrag(Base):
+    """Ein Punkt im Verlauf. `art='phase'` ist eine Trennmarke (Phasenwechsel);
+    ein normaler Eintrag gehört zu der Phase, deren Marke vor ihm steht. Die
+    Phase wird also nicht am Eintrag gespeichert, sondern abgeleitet — so
+    zieht sie beim Umsortieren automatisch mit."""
+    __tablename__ = "ub_eintraege"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    besuch_id: Mapped[int] = mapped_column(
+        ForeignKey("ub_besuche.id", ondelete="CASCADE"), index=True)
+    art: Mapped[str] = mapped_column(String(10), default="eintrag")
+    zeit: Mapped[str] = mapped_column(String(5), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kategorie_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    kriterium_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    schwerpunkt_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # '' | staerke | entwicklung
+    wertung: Mapped[str] = mapped_column(String(12), default="")
+    bezug_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_uuid: Mapped[str] = mapped_column(String(32), default="")
+    filename: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow)
