@@ -38,11 +38,14 @@
     besuch: {{ besuch | tojson }},
     katalog: {{ katalog | tojson }},
     icons: {{ icons | tojson }},
-    wertungen: {{ wertungen | tojson }}
+    wertungen: {{ wertungen | tojson }},
+    ordnungen: {{ ordnungen | tojson }},
+    standardOrdnung: {{ standard_ordnung | tojson }}
   };
 </script>
 <script src="/static/drs.js?v={{ static_version() }}"></script>
 <script src="/static/ub-common.js?v={{ static_version() }}"></script>
+<script src="/static/ub-eintrag.js?v={{ static_version() }}"></script>
 <script src="/static/ub-erfassen.js?v={{ static_version() }}"></script>
 </body>
 </html>

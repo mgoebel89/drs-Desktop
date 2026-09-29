@@ -38,7 +38,8 @@ from app.routers import stammdaten as stammdaten_router
 from app.routers import stammdaten_api as stammdaten_api_router
 from app.routers import timetable_settings as timetable_settings_router
 from app.routers import timetable_exceptions as timetable_exceptions_router
-from app.models import Exam, LessonNote, User
+from app.models import Exam, LessonNote, UbAnwaerter, User
+from app.services import unterrichtsbesuche as ub_service
 from app.templating import templates
 from datetime import date
 
@@ -109,10 +110,18 @@ def root(request: Request, db: Annotated[Session, Depends(get_db)]):
         .limit(6)
         .all()
     )
+    # Unterrichtsbesuche: Karte nur, wenn das Modul benutzt wird (es gibt Anwärter)
+    ub_aktiv = db.query(UbAnwaerter.id).filter(UbAnwaerter.user_id == user.id).first() is not None
+    ub_anstehend = []
+    if ub_aktiv:
+        ub_anstehend = sorted((b for b in ub_service.besuche(db, user) if ub_service.ist_anstehend(b)),
+                              key=lambda b: (b.datum or "9999", b.beginn))[:5]
     return templates.TemplateResponse(request, "home.html", {
         "user": user,
         "upcoming_exams": upcoming_exams,
         "upcoming_notes": upcoming_notes,
+        "ub_aktiv": ub_aktiv,
+        "ub_anstehend": ub_anstehend,
     })
 
 

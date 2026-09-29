@@ -353,3 +353,146 @@ def test_migration_0035_uebernimmt_freitext_schwerpunkte(tmp_path, monkeypatch):
         assert c.execute(sa.text(
             "SELECT count(*) FROM ub_eintraege WHERE schwerpunkt_id IS NOT NULL")).scalar() == 0
     eng.dispose()
+
+
+# ── Stufe 2: Ordnungen, ODT, Bezug, Vereinbarungen ───────────────────────
+
+def _verlauf_aufbauen(client, db, user):
+    """Einstieg: B1 (Beob.), I1 (Idee ohne Bezug) · Erarbeitung: A0 (Anm. vor
+    jeder Beob.), B2, B3, I2 (Idee MIT Bezug auf B2)."""
+    ub.einstellung(db, user)
+    bid = _besuch(client)
+    k = ub.katalog(db, user)
+    kat = {x["name"]: x["id"] for x in k["kategorien"]}
+    ph = [x["id"] for x in k["phasen"]]
+    sp = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]["schwerpunkte"]
+    post = lambda d: client.post(f"/api/ub/besuche/{bid}/eintraege", json=d).json().get("eintrag")
+    post({"art": "phase", "phase_id": ph[0], "zeit": "08:00"})
+    b1 = post({"kategorie_id": kat["Beobachtung"], "text": "B1", "zeit": "08:02",
+               "kriterium_id": sp[0]["id"], "wertung": "staerke"})
+    post({"kategorie_id": kat["Idee"], "text": "I1", "zeit": "08:03"})
+    post({"art": "phase", "phase_id": ph[1], "zeit": "08:10"})
+    post({"kategorie_id": kat["Anmerkung"], "text": "A0", "zeit": "08:11"})
+    b2 = post({"kategorie_id": kat["Beobachtung"], "text": "B2", "zeit": "08:12",
+               "kriterium_id": k["kriterien"][5]["id"]})
+    post({"kategorie_id": kat["Beobachtung"], "text": "B3", "zeit": "08:20"})
+    post({"kategorie_id": kat["Idee"], "text": "I2", "zeit": "08:25", "bezug_id": b2["id"]})
+    return bid, b1, b2
+
+
+def test_zweispaltig_regel(client, db, user):
+    from app.services.ub_protokoll import aufbereiten
+    bid, b1, b2 = _verlauf_aufbauen(client, db, user)
+    pr = aufbereiten(db, user, db.get(UbBesuch, bid), "zweispaltig")
+    kurz = []
+    for blk in pr.bloecke:
+        if blk.typ == "phase":
+            kurz.append(("P", blk.titel))
+        else:
+            kurz.append((blk.links.text if blk.links else None, [a.text for a in blk.rechts]))
+    assert kurz == [
+        ("P", "Einstieg"),
+        ("B1", ["I1"]),                    # ohne Bezug → neben die vorige Beobachtung
+        ("P", "Erarbeitung"),
+        (None, ["A0"]),                    # keine Beobachtung davor in der Phase → eigene Zeile
+        ("B2", ["I2"]),                    # mit Bezug → neben B2, obwohl B3 später kam
+        ("B3", []),
+    ]
+
+
+def test_ordnung_nach_kategorie_und_kriterium(client, db, user):
+    from app.services.ub_protokoll import aufbereiten
+    bid, *_ = _verlauf_aufbauen(client, db, user)
+    b = db.get(UbBesuch, bid)
+    pr = aufbereiten(db, user, b, "kategorie")
+    assert [(g.titel, [a.text for a in g.eintraege]) for g in pr.bloecke] == [
+        ("Beobachtung", ["B1", "B2", "B3"]), ("Idee", ["I1", "I2"]), ("Anmerkung", ["A0"])]
+    assert pr.bloecke[0].eintraege[1].phase == "Erarbeitung"
+
+    pr = aufbereiten(db, user, b, "kriterium")
+    titel = [(g.titel, g.hinweis, [a.text for a in g.eintraege]) for g in pr.bloecke]
+    gewaehlt = ub.VORGABE_KRITERIEN[:2]
+    # gewählte Schwerpunkte zuerst (auch leer), dann weitere benutzte, dann ohne Zuordnung
+    assert titel[0] == (gewaehlt[0], "Schwerpunkt des Anwärters", ["B1"])
+    assert titel[1] == (gewaehlt[1], "Schwerpunkt des Anwärters", [])
+    assert titel[2] == (ub.VORGABE_KRITERIEN[5], "", ["B2"])
+    assert titel[3] == ("Ohne Zuordnung", "", ["I1", "A0", "B3", "I2"])
+
+
+def test_bezug_nur_im_selben_besuch(client, db, user):
+    bid, b1, _ = _verlauf_aufbauen(client, db, user)
+    anderer = _besuch(client)
+    kat = ub.katalog(db, user)["kategorien"][1]["id"]
+    e = client.post(f"/api/ub/besuche/{anderer}/eintraege", json={
+        "kategorie_id": kat, "text": "x", "bezug_id": b1["id"]}).json()["eintrag"]
+    assert e["bezug_id"] is None
+
+
+def test_standard_ordnung(client, db, user):
+    from app.services.ub_protokoll import aufbereiten
+    bid, *_ = _verlauf_aufbauen(client, db, user)
+    assert client.post("/api/ub/einstellungen-allgemein",
+                       json={"standard_ordnung": "quatsch"}).status_code == 400
+    client.post("/api/ub/einstellungen-allgemein", json={"standard_ordnung": "zweispaltig"})
+    assert aufbereiten(db, user, db.get(UbBesuch, bid)).ordnung == "zweispaltig"
+    # ausdrücklich gewählte Ordnung schlägt den Standard
+    assert aufbereiten(db, user, db.get(UbBesuch, bid), "kategorie").ordnung == "kategorie"
+
+
+def test_vereinbarungen_vom_letzten_besuch(client, db, user):
+    erster = _besuch(client, datum="2026-09-01")
+    client.post(f"/api/ub/besuche/{erster}/save", json={
+        "reflexion": "Gutes Gespräch", "vereinbarungen": "Impulse offener formulieren"})
+    aid = db.get(UbBesuch, erster).anwaerter_id
+    zweiter = client.post("/api/ub/besuche", json={
+        "anwaerter_id": aid, "datum": "2026-10-20"}).json()["id"]
+    d = client.get(f"/api/ub/besuche/{zweiter}").json()["besuch"]
+    assert d["vorige"]["vereinbarungen"] == "Impulse offener formulieren"
+    assert d["vorige"]["datum"] == "2026-09-01"
+    # der erste Besuch hat keinen Vorgänger
+    assert client.get(f"/api/ub/besuche/{erster}").json()["besuch"]["vorige"] is None
+
+
+@pytest.mark.parametrize("ordnung", ["chronologisch", "kategorie", "kriterium", "zweispaltig"])
+def test_pdf_und_odt_in_jeder_ordnung(client, db, user, ordnung):
+    import xml.dom.minidom
+    import zipfile
+
+    bid, b1, _ = _verlauf_aufbauen(client, db, user)
+    client.post(f"/api/ub/eintraege/{b1['id']}/foto",
+                files={"file": ("t.jpg", _jpeg(), "image/jpeg")})
+    client.post(f"/api/ub/besuche/{bid}/save", json={
+        "reflexion": "Reflexion <mit> & Sonderzeichen\nzweite  Zeile", "vereinbarungen": "V1"})
+
+    r = client.get(f"/unterrichtsbesuche/{bid}/protokoll.pdf?ordnung={ordnung}")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF")
+    text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(r.content)).pages)
+    for wort in ("B1", "I2", "A0", "Reflexion"):
+        assert wort in text
+
+    r = client.get(f"/unterrichtsbesuche/{bid}/protokoll.odt?ordnung={ordnung}")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["content-disposition"]
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    erste = z.infolist()[0]
+    assert erste.filename == "mimetype" and erste.compress_type == zipfile.ZIP_STORED
+    assert z.read("mimetype") == b"application/vnd.oasis.opendocument.text"
+    for teil in ("content.xml", "styles.xml", "meta.xml", "META-INF/manifest.xml"):
+        xml.dom.minidom.parseString(z.read(teil))          # wohlgeformt?
+    content = z.read("content.xml").decode()
+    for wort in ("B1", "I2", "A0", "Reflexion &lt;mit&gt; &amp; Sonderzeichen"):
+        assert wort in content
+    # jedes referenzierte Bild liegt im Archiv und steht im Manifest
+    manifest = z.read("META-INF/manifest.xml").decode()
+    import re as _re
+    for pfad in set(_re.findall(r'xlink:href="([^"]+)"', content)):
+        assert pfad in z.namelist() and pfad in manifest
+
+
+def test_odt_icons_sind_png():
+    from app.services.ub_protokoll_odt import icon_png
+    for name in ub.ICONS:
+        png = icon_png(name, "#00639C", 48)
+        im = PILImage.open(io.BytesIO(png))
+        assert im.size == (48, 48)
+        assert im.getbbox() is not None          # nicht leer gezeichnet

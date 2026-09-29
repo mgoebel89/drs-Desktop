@@ -53,6 +53,30 @@
     <div class="dash-card-foot"><a href="/exams">Zu den Prüfungen →</a></div>
   </div>
 
+  {% if ub_aktiv %}
+  <div class="card dash-card">
+    <div class="dash-card-head"><span class="dash-icon">👁️</span><h3>Unterrichtsbesuche</h3></div>
+    <div class="dash-card-body">
+      {% if ub_anstehend %}
+      <ul class="dash-list">
+        {% for b in ub_anstehend %}
+        <li>
+          <span class="dash-date">{% if b.datum %}{{ b.datum[8:10] }}.{{ b.datum[5:7] }}.{% endif %}{% if b.beginn %} {{ b.beginn }}{% endif %}</span>
+          <div class="dash-main">
+            <strong><a href="/unterrichtsbesuche/{{ b.id }}{% if b.status == 'laufend' %}/erfassen{% endif %}">{{ b.anwaerter.name }}</a></strong>
+            <div class="muted">{{ b.thema or 'ohne Thema' }}{% if b.klasse %} · {{ b.klasse }}{% endif %}{% if b.status == 'laufend' %} · <span style="color:var(--blau);font-weight:600">läuft</span>{% endif %}</div>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="dash-empty">Kein Besuch geplant.</div>
+      {% endif %}
+    </div>
+    <div class="dash-card-foot"><a href="/unterrichtsbesuche">Zu den Unterrichtsbesuchen →</a></div>
+  </div>
+  {% endif %}
+
   <div class="card dash-card">
     <div class="dash-card-head"><span class="dash-icon">📅</span><h3>Anstehende Termine</h3></div>
     <div class="dash-card-body">

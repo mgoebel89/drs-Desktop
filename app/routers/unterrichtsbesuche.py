@@ -27,7 +27,7 @@ from app.models import (AppFile, UbAnwaerter, UbBesuch, UbEintrag, UbKategorie,
                         UbKriterium, UbPhase, UbSchwerpunkt, User)
 from app.services import file_store
 from app.services import unterrichtsbesuche as ub
-from app.services import ub_protokoll_pdf
+from app.services import ub_protokoll_odt, ub_protokoll_pdf
 from app.templating import templates
 
 router = APIRouter()
@@ -130,6 +130,8 @@ def einstellungen_seite(
         "icons": ub.icon_katalog(),
         "farben": ub.FARBEN,
         "spalten": ub.SPALTEN,
+        "ordnungen": ub.ORDNUNGEN,
+        "standard_ordnung": ub.einstellung(db, user).standard_ordnung,
     })
 
 
@@ -147,6 +149,8 @@ def besuch_seite(
         "katalog": ub.katalog(db, user),
         "icons": ub.icon_katalog(),
         "wertungen": ub.WERTUNGEN,
+        "ordnungen": ub.ORDNUNGEN,
+        "standard_ordnung": ub.einstellung(db, user).standard_ordnung,
         "status": ub.STATUS,
     })
 
@@ -165,24 +169,54 @@ def erfassen_seite(
         "katalog": ub.katalog(db, user),
         "icons": ub.icon_katalog(),
         "wertungen": ub.WERTUNGEN,
+        "ordnungen": ub.ORDNUNGEN,
+        "standard_ordnung": ub.einstellung(db, user).standard_ordnung,
     })
 
 
-@router.get("/unterrichtsbesuche/{bid}/protokoll.pdf")
-def protokoll_pdf(
+_FORMATE = {
+    "pdf": (ub_protokoll_pdf, "application/pdf", "inline"),
+    # ODT als Anhang: Browser zeigen es nicht an, es soll in LibreOffice/Word landen
+    "odt": (ub_protokoll_odt, "application/vnd.oasis.opendocument.text", "attachment"),
+}
+
+
+@router.get("/unterrichtsbesuche/{bid}/protokoll.{fmt}")
+def protokoll(
     bid: int,
+    fmt: str,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
     fotos: int = 1,
+    ordnung: str = "",
 ):
+    if fmt not in _FORMATE:
+        raise HTTPException(404)
+    modul, mime, art = _FORMATE[fmt]
     b = _besuch(db, user, bid)
-    pdf = ub_protokoll_pdf.erzeuge(db, user, b, mit_fotos=bool(fotos))
-    name = f"Unterrichtsbesuch_{b.datum or 'ohne-Datum'}_{file_store.safe_filename(b.anwaerter.name if b.anwaerter else '')}.pdf"
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{name}"'})
+    daten = modul.erzeuge(db, user, b, mit_fotos=bool(fotos), ordnung=ordnung or None)
+    name = (f"Unterrichtsbesuch_{b.datum or 'ohne-Datum'}_"
+            f"{file_store.safe_filename(b.anwaerter.name if b.anwaerter else '')}.{fmt}")
+    return Response(content=daten, media_type=mime,
+                    headers={"Content-Disposition": f'{art}; filename="{name}"'})
 
 
 # ── Einstellungen (API) ──────────────────────────────────────────────────
+
+@router.post("/api/ub/einstellungen-allgemein")
+def einstellungen_allgemein(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    payload: Annotated[dict, Body()],
+):
+    e = ub.einstellung(db, user)
+    if "standard_ordnung" in payload:
+        if payload["standard_ordnung"] not in ub.ORDNUNGEN:
+            raise HTTPException(400, "Unbekannte Ordnung.")
+        e.standard_ordnung = payload["standard_ordnung"]
+    db.commit()
+    return JSONResponse({"ok": True, "standard_ordnung": e.standard_ordnung})
+
 
 @router.get("/api/ub/katalog")
 def katalog_lesen(
