@@ -242,8 +242,8 @@ def _kopfdaten(db: Session, user: User, b: UbBesuch) -> list:
         zeilen.append(("Lernziele", _p(b.lernziele)))
     sp = ub.schwerpunkte(db, b.id)
     if sp:
-        zeilen.append(("Schwerpunkte",
-                       "<br/>".join(f"{i}. {_p(s.text)}" for i, s in enumerate(sp, 1))))
+        zeilen.append(("Beratungs-<br/>schwerpunkte",
+                       "<br/>".join(f"{i}. {_p(k.name)}" for i, k in enumerate(sp, 1))))
     zeilen.append(("Besucht von", _p(user.full_name or user.username)))
 
     t = Table([[Paragraph(k, S_LABEL), Paragraph(v, S_TEXT)] for k, v in zeilen],
@@ -358,7 +358,6 @@ def erzeuge(db: Session, user: User, b: UbBesuch, mit_fotos: bool = True) -> byt
     kat_map = {k.id: k for k in kategorien}
     phasen = {p.id: p for p in ub.liste(db, user, "phasen")}
     kriterien = {k.id: k for k in ub.liste(db, user, "kriterien")}
-    schwerp = {s.id: s for s in ub.schwerpunkte(db, b.id)}
     alle = ub.eintraege(db, b.id)
     normale = [e for e in alle if e.art == "eintrag"]
 
@@ -374,9 +373,7 @@ def erzeuge(db: Session, user: User, b: UbBesuch, mit_fotos: bool = True) -> byt
             story.append(Spacer(1, 2 * mm))
             story.append(_phasen_band(e, phasen.get(e.phase_id)))
             continue
-        if e.schwerpunkt_id and e.schwerpunkt_id in schwerp:
-            zuordnung = "Schwerpunkt: " + schwerp[e.schwerpunkt_id].text
-        elif e.kriterium_id and e.kriterium_id in kriterien:
+        if e.kriterium_id and e.kriterium_id in kriterien:
             zuordnung = kriterien[e.kriterium_id].name
         else:
             zuordnung = ""

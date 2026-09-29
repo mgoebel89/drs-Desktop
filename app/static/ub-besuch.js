@@ -4,7 +4,7 @@
   'use strict';
   if (!window.DRS || !window.UB || !window.UBC) return;
   const { el, feld, modal, toast, confirmDanger, postJSON } = DRS;
-  const { fmtDatum, wochentag, sortiere, verlauf } = UBC;
+  const { fmtDatum, wochentag, sortiere, verlauf, chipWahl } = UBC;
 
   const B = window.UB.besuch;
   const STATUS = window.UB.status;
@@ -30,7 +30,7 @@
       tab.appendChild(el('tr', {}, [el('th', {}, z[0]), el('td', {}, z[1])]));
     });
     tab.appendChild(el('tr', {}, [
-      el('th', {}, 'Schwerpunkte'),
+      el('th', {}, 'Beratungs­schwerpunkte'),
       el('td', {}, B.schwerpunkte.length
         ? el('ol', { style: 'margin:0 0 0 1.1rem;white-space:normal' },
             B.schwerpunkte.map(function (s) { return el('li', {}, s.text); }))
@@ -68,8 +68,7 @@
   function bearbeiten() {
     const e = { datum: B.datum, beginn: B.beginn, ende: B.ende, klasse: B.klasse,
       raum: B.raum, thema: B.thema, lernziele: B.lernziele,
-      // mit ID, damit der Server bestehende Schwerpunkte wiedererkennt
-      schwerpunkte: B.schwerpunkte.map(function (s) { return { id: s.id, text: s.text }; }) };
+      schwerpunkte: B.schwerpunkte.map(function (s) { return s.id; }) };
     function inp(typ, key) {
       const i = el('input', { type: typ, value: e[key] || '' });
       i.addEventListener('input', function () { e[key] = i.value; });
@@ -79,20 +78,13 @@
     lz.value = e.lernziele || '';
     lz.addEventListener('input', function () { e.lernziele = lz.value; });
 
-    const spBox = el('div');
-    function malSp() {
-      spBox.textContent = '';
-      e.schwerpunkte.forEach(function (t, i) {
-        const x = el('input', { type: 'text', value: t.text });
-        x.addEventListener('input', function () { e.schwerpunkte[i].text = x.value; });
-        spBox.appendChild(el('div', { class: 'ub-sp-zeile' }, [x,
-          el('button', { type: 'button', class: 'btn-ghost', 'aria-label': 'Entfernen',
-            onClick: function () { e.schwerpunkte.splice(i, 1); malSp(); } }, '×')]));
-      });
-      spBox.appendChild(el('button', { type: 'button', class: 'chip-add',
-        onClick: function () { e.schwerpunkte.push({ id: null, text: '' }); malSp(); } }, '+ Schwerpunkt'));
-    }
-    malSp();
+    // Aktive Beratungsschwerpunkte plus die schon gewählten (auch wenn stillgelegt)
+    const katalog = window.UB.katalog.kriterien.filter(function (k) {
+      return k.active || e.schwerpunkte.indexOf(k.id) >= 0;
+    });
+    const spBox = katalog.length
+      ? chipWahl(katalog, e.schwerpunkte, true, function (neu) { e.schwerpunkte = neu; })
+      : el('p', { class: 'muted' }, 'Noch keine Beratungsschwerpunkte in den Einstellungen.');
 
     modal({
       title: 'Kopfdaten bearbeiten',
@@ -105,13 +97,13 @@
         ]),
         feld('Thema', inp('text', 'thema')),
         feld('Lernziele', lz),
-        feld('Schwerpunkte', spBox, 'Einträge behalten ihre Zuordnung, auch wenn du den Text änderst.'),
+        feld('Beratungsschwerpunkte des Anwärters', spBox,
+          'Abwählen nimmt keinem Eintrag seine Zuordnung.'),
       ]),
       actions: [
         { label: 'Abbrechen', kind: 'sec', onClick: function (c) { c(); } },
         { label: 'Speichern', kind: 'primary', onClick: async function (c) {
           if (!e.datum) { toast('Bitte ein Datum angeben.'); return; }
-          e.schwerpunkte = e.schwerpunkte.filter(function (s) { return s.text.trim(); });
           try {
             const r = await postJSON('/api/ub/besuche/' + B.id + '/save', e);
             Object.assign(B, r.besuch);

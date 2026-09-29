@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Unterrichtsbesuche{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="/static/ub.css?v={{ static_version() }}">
 <style>
   .ub-grid { display: grid; gap: 14px;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
@@ -33,8 +34,6 @@
     border-radius: var(--r); padding: 10px 12px; cursor: pointer; font: inherit; }
   .ub-wahl button.aktiv { border: 2px solid var(--blau); background: var(--blau-hell); }
   .ub-wahl small { display: block; color: var(--muted); font-size: 11px; }
-  .ub-sp-zeile { display: flex; gap: .5rem; margin-bottom: .5rem; }
-  .ub-sp-zeile input { flex: 1; }
 </style>
 
 <div class="card">
@@ -102,6 +101,7 @@
 <script>
   window.UB = {
     anwaerter: {{ anwaerter | tojson }},
+    schwerpunktKatalog: {{ schwerpunkt_katalog | tojson }},
     heute: {{ heute | tojson }}
   };
 </script>

@@ -1,7 +1,8 @@
 """Unterrichtsbesuche — Hospitationsprotokolle für Anwärter.
 
 Drei Ebenen:
-- **Einstellungen**: Kategorien (mit Piktogramm + Farbe), Phasen, Kriterien —
+- **Einstellungen**: Kategorien (mit Piktogramm + Farbe), Phasen und die
+  Beratungsschwerpunkte (intern `kriterien`) —
   frei pflegbar, mit Vorgaben beim ersten Öffnen.
 - **Anwärter** als Stammdatum, **Besuche** mit Kopfdaten und Schwerpunkten.
 - **Einträge** im Verlauf: vom Handy erfasst, jeder sofort gespeichert —
@@ -108,6 +109,8 @@ def uebersicht(
         "eintrag_zahl": eintrag_zahl,
         "anwaerter": [ub.anwaerter_dict(a, zahlen.get(a.id, 0))
                       for a in ub.anwaerter_liste(db, user)],
+        "schwerpunkt_katalog": [{"id": k.id, "name": k.name}
+                                for k in ub.liste(db, user, "kriterien", nur_aktive=True)],
         "heute": date.today().isoformat(),
     })
 
@@ -180,6 +183,14 @@ def protokoll_pdf(
 
 
 # ── Einstellungen (API) ──────────────────────────────────────────────────
+
+@router.get("/api/ub/katalog")
+def katalog_lesen(
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return JSONResponse(ub.katalog(db, user))
+
 
 def _einstellung_setzen(art: str, o, p: dict) -> None:
     if "name" in p:
@@ -385,7 +396,7 @@ def besuch_anlegen(
         raise HTTPException(400, "Der Besuch braucht ein Datum.")
     db.add(b)
     db.flush()
-    ub.setze_schwerpunkte(db, b, payload.get("schwerpunkte") or [])
+    ub.setze_schwerpunkte(db, user, b, payload.get("schwerpunkte") or [])
     audit(db, "ub_besuch_created", actor=user, target=str(b.id),
           detail=f"{a.name} · {b.datum}", request=request)
     db.commit()
@@ -416,7 +427,7 @@ def besuch_speichern(
     if "datum" in payload and not b.datum:
         raise HTTPException(400, "Der Besuch braucht ein Datum.")
     if "schwerpunkte" in payload:
-        ub.setze_schwerpunkte(db, b, payload.get("schwerpunkte") or [])
+        ub.setze_schwerpunkte(db, user, b, payload.get("schwerpunkte") or [])
     db.commit()
     db.refresh(b)
     return JSONResponse({"ok": True, "besuch": ub.besuch_dict(db, b)})
@@ -444,7 +455,7 @@ def besuch_loeschen(
     for e in ub.eintraege(db, b.id):
         _foto_entfernen(db, e)
         db.delete(e)
-    for s in ub.schwerpunkte(db, b.id):
+    for s in db.scalars(select(UbSchwerpunkt).where(UbSchwerpunkt.besuch_id == b.id)).all():
         db.delete(s)
     audit(db, "ub_besuch_deleted", actor=user, target=str(b.id),
           detail=f"{b.anwaerter.name if b.anwaerter else ''} · {b.datum}", request=request)
@@ -472,16 +483,10 @@ def _eintrag_setzen(db: Session, user: User, b: UbBesuch, e: UbEintrag, p: dict)
         e.kategorie_id = kid
     if "text" in p:
         e.text = ub.text(p.get("text"))
-    # Kriterium ODER Schwerpunkt — ein Eintrag steht in der Gruppierung genau
-    # einmal. Wer eins setzt, löscht das andere.
-    if "kriterium_id" in p or "schwerpunkt_id" in p:
+    # Genau ein Beratungsschwerpunkt (oder keiner) je Eintrag — so steht er
+    # in der Gruppierung des Protokolls genau einmal.
+    if "kriterium_id" in p:
         e.kriterium_id = _eigene_id(db, user, UbKriterium, p.get("kriterium_id"))
-        sid = p.get("schwerpunkt_id")
-        e.schwerpunkt_id = None
-        if sid and not e.kriterium_id:
-            s = db.get(UbSchwerpunkt, int(sid))
-            if s and s.besuch_id == b.id:
-                e.schwerpunkt_id = s.id
     if "wertung" in p:
         e.wertung = ub.wertung(p.get("wertung"))
     if "bezug_id" in p:

@@ -30,13 +30,21 @@
 <p class="muted" style="margin-bottom:.3rem"><a href="/unterrichtsbesuche">Unterrichtsbesuche</a> ›</p>
 <div class="card">
   <h1 style="margin:0 0 .4rem">Einstellungen</h1>
-  <p class="muted">Kategorien erscheinen beim Mitschreiben als große Knöpfe — in der
-    Reihenfolge von oben nach unten. Was schon in einem Protokoll steht, lässt sich
+  <p class="muted">Die Reihenfolge hier ist auch die Reihenfolge der Knöpfe beim
+    Mitschreiben. Was schon in einem Protokoll steht, lässt sich
     nicht mehr löschen, nur stilllegen: Dann verschwindet es aus der Auswahl, alte
     Protokolle behalten ihr Piktogramm.</p>
 </div>
 
 <div class="ube-grid">
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Beratungsschwerpunkte</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="kriterien">+ Neu</button></div>
+    <p class="muted" style="font-size:12px">Die Liste des Seminars, gilt für alle Anwärter.
+      Im Besuch hakst du an, welche der Anwärter gewählt hat — diese stehen beim
+      Mitschreiben vorne, die übrigen hinter „weitere".</p>
+    <div id="ube-kriterien"></div>
+  </div>
   <div class="card">
     <div class="toolbar"><h2 style="margin:0;font-size:17px">Kategorien</h2><div class="spacer"></div>
       <button type="button" class="btn-sec btn-sm" data-neu="kategorien">+ Neu</button></div>
@@ -46,13 +54,6 @@
     <div class="toolbar"><h2 style="margin:0;font-size:17px">Unterrichtsphasen</h2><div class="spacer"></div>
       <button type="button" class="btn-sec btn-sm" data-neu="phasen">+ Neu</button></div>
     <div id="ube-phasen"></div>
-  </div>
-  <div class="card">
-    <div class="toolbar"><h2 style="margin:0;font-size:17px">Kriterien</h2><div class="spacer"></div>
-      <button type="button" class="btn-sec btn-sm" data-neu="kriterien">+ Neu</button></div>
-    <p class="muted" style="font-size:12px">Fester Katalog. Die Schwerpunkte des Anwärters
-      kommen je Besuch dazu.</p>
-    <div id="ube-kriterien"></div>
   </div>
 </div>
 

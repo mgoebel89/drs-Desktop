@@ -94,10 +94,10 @@
       } else {
         const k = kat[e.kategorie_id] || { name: '?', icon: 'auge', farbe: '#5A6B7D' };
         const meta = [el('span', { class: 'ubv-chip', style: 'color:' + k.farbe + ';background:' + hell(k.farbe) }, k.name)];
-        if (e.schwerpunkt_id && sp[e.schwerpunkt_id]) {
-          meta.push(el('span', { class: 'ubv-chip' }, 'Schwerpunkt: ' + sp[e.schwerpunkt_id].text));
-        } else if (e.kriterium_id && krit[e.kriterium_id]) {
-          meta.push(el('span', { class: 'ubv-chip' }, krit[e.kriterium_id].name));
+        if (e.kriterium_id && krit[e.kriterium_id]) {
+          // Gewählte Schwerpunkte des Besuchs hervorheben, andere neutral
+          meta.push(el('span', { class: 'ubv-chip' + (sp[e.kriterium_id] ? ' ubv-chip-sp' : '') },
+            krit[e.kriterium_id].name));
         }
         const w = ctx.wertungen[e.wertung];
         const kreis = el('span', { class: 'ubv-kreis', style: 'background:' + hell(k.farbe, 0.14) + ';color:' + k.farbe });
@@ -126,5 +126,36 @@
 
   function el(tag, attrs, kinder) { return window.DRS.el(tag, attrs, kinder); }
 
-  Object.assign(UBC, { piktogramm, fmtDatum, wochentag, jetzt, heute, sortiere, nachId, hell, verlauf });
+  /* Antippbare Auswahl statt Aufklappmenü.
+   * optionen: [{id, name, icon?, farbe?}] · gewaehlt: Array von IDs
+   * mehrfach=false: ein zweiter Tipp auf den gewählten Knopf hebt die Wahl auf.
+   * onChange(gewaehltNeu) */
+  function chipWahl(optionen, gewaehlt, mehrfach, onChange, icons) {
+    let wahl = (gewaehlt || []).slice();
+    const box = el('div', { class: 'ub-chipwahl' });
+    function mal() {
+      box.textContent = '';
+      optionen.forEach(function (o) {
+        const an = wahl.indexOf(o.id) >= 0;
+        const b = el('button', { type: 'button', class: an ? 'an' : '', 'aria-pressed': an ? 'true' : 'false',
+          onClick: function () {
+            if (mehrfach) wahl = an ? wahl.filter(function (x) { return x !== o.id; }) : wahl.concat([o.id]);
+            else wahl = an ? [] : [o.id];
+            mal();
+            onChange(wahl.slice());
+          } }, [o.icon && icons ? piktogramm(icons, o.icon, 18) : null, el('span', {}, o.name)]);
+        if (o.farbe) {
+          b.style.borderColor = o.farbe;
+          b.style.color = an ? '#fff' : o.farbe;
+          b.style.background = an ? o.farbe : hell(o.farbe, 0.08);
+        }
+        box.appendChild(b);
+      });
+    }
+    mal();
+    box.setzen = function (neu) { wahl = neu.slice(); mal(); };
+    return box;
+  }
+
+  Object.assign(UBC, { piktogramm, fmtDatum, wochentag, jetzt, heute, sortiere, nachId, hell, verlauf, chipWahl });
 })();
