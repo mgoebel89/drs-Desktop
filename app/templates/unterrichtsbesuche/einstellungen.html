@@ -36,6 +36,15 @@
     Protokolle behalten ihr Piktogramm.</p>
 </div>
 
+<div class="card">
+  <div class="toolbar"><h2 style="margin:0;font-size:17px">Protokoll</h2></div>
+  <label class="drs-field" style="max-width:420px;margin:0">
+    <span class="drs-field-label">Standard-Ordnung beim Ausgeben</span>
+    <select id="ubeOrdnung"></select>
+    <span class="muted">Beim Ausgeben lässt sich jedes Mal eine andere wählen.</span>
+  </label>
+</div>
+
 <div class="ube-grid">
   <div class="card">
     <div class="toolbar"><h2 style="margin:0;font-size:17px">Beratungsschwerpunkte</h2><div class="spacer"></div>
@@ -62,7 +71,9 @@
     daten: {{ daten | tojson }},
     icons: {{ icons | tojson }},
     farben: {{ farben | tojson }},
-    spalten: {{ spalten | tojson }}
+    spalten: {{ spalten | tojson }},
+    ordnungen: {{ ordnungen | tojson }},
+    standardOrdnung: {{ standard_ordnung | tojson }}
   };
 </script>
 {% endblock %}

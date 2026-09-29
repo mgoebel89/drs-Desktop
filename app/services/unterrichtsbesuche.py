@@ -384,9 +384,26 @@ def besuch_dict(db: Session, b: UbBesuch, mit_eintraegen: bool = False) -> dict:
         # IDs sind Katalog-IDs (ub_kriterien) — dieselben wie `kriterium_id` am Eintrag
         "schwerpunkte": [{"id": k.id, "text": k.name} for k in schwerpunkte(db, b.id)],
     }
+    vor = vorheriger_besuch(db, b)
+    d["vorige"] = ({"id": vor.id, "datum": vor.datum, "vereinbarungen": vor.vereinbarungen}
+                   if vor and (vor.vereinbarungen or "").strip() else None)
     if mit_eintraegen:
         d["eintraege"] = [eintrag_dict(e) for e in eintraege(db, b.id)]
     return d
+
+
+def vorheriger_besuch(db: Session, b: UbBesuch) -> UbBesuch | None:
+    """Der letzte Besuch desselben Anwärters VOR diesem — nach Datum und
+    Beginn, bei Gleichstand nach ID. Seine Vereinbarungen sind die
+    Erinnerung für diesen Besuch."""
+    kandidaten = [x for x in db.scalars(
+        select(UbBesuch).where(UbBesuch.user_id == b.user_id,
+                               UbBesuch.anwaerter_id == b.anwaerter_id,
+                               UbBesuch.id != b.id)).all()
+        if (x.datum or "", x.beginn or "", x.id) < (b.datum or "", b.beginn or "", b.id)]
+    if not kandidaten:
+        return None
+    return max(kandidaten, key=lambda x: (x.datum or "", x.beginn or "", x.id))
 
 
 def ist_anstehend(b: UbBesuch) -> bool:

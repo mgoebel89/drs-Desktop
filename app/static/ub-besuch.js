@@ -1,8 +1,9 @@
-/* Unterrichtsbesuche — Detailseite eines Besuchs: Kopfdaten, Verlauf
- * (nur lesend), Protokoll-Export, Status und Löschen. */
+/* Unterrichtsbesuche — Detailseite eines Besuchs = Nachbereitung am PC:
+ * Kopfdaten, Verlauf (bearbeitbar, derselbe Editor wie am Handy),
+ * Reflexionsgespräch und Vereinbarungen, Protokoll-Export, Status, Löschen. */
 (function () {
   'use strict';
-  if (!window.DRS || !window.UB || !window.UBC) return;
+  if (!window.DRS || !window.UB || !window.UBC || !window.UBC.editor) return;
   const { el, feld, modal, toast, confirmDanger, postJSON } = DRS;
   const { fmtDatum, wochentag, sortiere, verlauf, chipWahl } = UBC;
 
@@ -38,32 +39,67 @@
     ]));
   }
 
-  function zeichneVerlauf() {
-    verlauf(document.getElementById('ubdVerlauf'), sortiere(B.eintraege.slice()), {
+  // Verlauf: anklickbar, derselbe Editor wie am Handy (ub-eintrag.js)
+  const Z = { eintraege: B.eintraege || [] };
+  const ed = UBC.editor({
+    besuch: B, katalog: window.UB.katalog, icons: window.UB.icons,
+    wertungen: window.UB.wertungen, zustand: Z, zeichne: zeichneVerlauf,
+  });
+
+  function zeichneVerlauf(scrollZuId) {
+    sortiere(Z.eintraege);
+    B.eintraege = Z.eintraege;
+    const box = document.getElementById('ubdVerlauf');
+    verlauf(box, Z.eintraege, {
       katalog: window.UB.katalog, icons: window.UB.icons, wertungen: window.UB.wertungen,
       schwerpunkte: B.schwerpunkte,
       leertext: 'Noch nichts erfasst. „Erfassen" öffnet die Handy-Ansicht zum Mitschreiben.',
+      onClick: function (e) { if (e.art === 'phase') ed.phasenBlatt(e); else ed.eintragBlatt(e, null); },
     });
+    if (scrollZuId) {
+      const n = box.querySelector('[data-id="' + scrollZuId + '"]');
+      if (n) n.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
   }
 
-  function pdfDialog() {
-    const fotos = el('input', { type: 'checkbox', checked: true });
-    modal({
-      title: 'Protokoll ausgeben',
-      body: el('div', {}, [
-        el('p', { class: 'muted' }, 'Chronologisch, mit Phasen und Piktogrammen. '
-          + 'Weitere Ordnungen und ODT folgen in Stufe 2.'),
-        el('label', { class: 'sd-check' }, [fotos, ' Fotos einbinden']),
-      ]),
-      actions: [
-        { label: 'Abbrechen', kind: 'sec', onClick: function (c) { c(); } },
-        { label: 'PDF öffnen', kind: 'primary', onClick: function (c) {
-          window.open('/unterrichtsbesuche/' + B.id + '/protokoll.pdf?fotos=' + (fotos.checked ? 1 : 0), '_blank');
-          c();
-        } },
-      ],
-    });
+  function zeichneVorige() {
+    const box = document.getElementById('ubdVorige');
+    box.textContent = '';
+    if (!B.vorige) return;
+    box.appendChild(el('div', { class: 'card ube-vorige' }, [
+      el('strong', { style: 'color:#8a5a00' }, 'Vereinbarungen vom letzten Besuch ('),
+      el('a', { href: '/unterrichtsbesuche/' + B.vorige.id }, fmtDatum(B.vorige.datum)),
+      el('strong', { style: 'color:#8a5a00' }, ')'),
+      el('div', { style: 'white-space:pre-wrap;margin-top:.3rem' }, B.vorige.vereinbarungen),
+    ]));
   }
+
+  // ── Nachbereitung: Reflexionsgespräch + Vereinbarungen ──────────────
+  const refl = document.getElementById('ubdReflexion');
+  const vereinb = document.getElementById('ubdVereinbarungen');
+  const stand = document.getElementById('ubdNbStand');
+  refl.value = B.reflexion || '';
+  vereinb.value = B.vereinbarungen || '';
+  function nbGeaendert() {
+    return refl.value !== (B.reflexion || '') || vereinb.value !== (B.vereinbarungen || '');
+  }
+  function malStand() { stand.textContent = nbGeaendert() ? 'Nicht gespeicherte Änderungen' : ''; }
+  refl.addEventListener('input', malStand);
+  vereinb.addEventListener('input', malStand);
+  async function nbSpeichern() {
+    try {
+      const r = await postJSON('/api/ub/besuche/' + B.id + '/save',
+        { reflexion: refl.value, vereinbarungen: vereinb.value });
+      B.reflexion = r.besuch.reflexion;
+      B.vereinbarungen = r.besuch.vereinbarungen;
+      malStand();
+      toast('Nachbereitung gespeichert.');
+    } catch (e) { toast(ed.fehlertext(e)); }
+  }
+  // Wer mit ungespeichertem Text die Seite verlässt, wird gefragt
+  window.addEventListener('beforeunload', function (ev) {
+    if (nbGeaendert()) { ev.preventDefault(); ev.returnValue = ''; }
+  });
 
   function bearbeiten() {
     const e = { datum: B.datum, beginn: B.beginn, ende: B.ende, klasse: B.klasse,
@@ -108,6 +144,7 @@
             const r = await postJSON('/api/ub/besuche/' + B.id + '/save', e);
             Object.assign(B, r.besuch);
             zeichneKopf();
+            zeichneVorige();      // neues Datum → ggf. anderer Vorgänger-Besuch
             zeichneVerlauf();
             c();
             toast('Gespeichert.');
@@ -145,7 +182,13 @@
     });
   }
 
-  document.getElementById('ubdPdf').addEventListener('click', pdfDialog);
+  document.getElementById('ubdPdf').addEventListener('click', function () {
+    UBC.exportDialog(B.id, window.UB.ordnungen, window.UB.standardOrdnung);
+  });
+  document.getElementById('ubdNeuEintrag').addEventListener('click', function () { ed.eintragBlatt(null, null); });
+  document.getElementById('ubdNeuPhase').addEventListener('click', function () { ed.phasenBlatt(null); });
+  document.getElementById('ubdNbSpeichern').addEventListener('click', nbSpeichern);
+  zeichneVorige();
   document.getElementById('ubdEdit').addEventListener('click', bearbeiten);
   document.getElementById('ubdStatusBtn').addEventListener('click', statusWechsel);
   document.getElementById('ubdDel').addEventListener('click', loeschen);

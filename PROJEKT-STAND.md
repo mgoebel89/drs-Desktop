@@ -124,6 +124,21 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   Rest hinter „weitere"), Foto über getrennte Knöpfe **Kamera**
   (`capture="environment"`) und **Galerie**, dazu Foto-Schnellknopf im Fuß.
 
+- **Unterrichtsbesuche Stufe 2** (2026-09-29, keine Migration): Protokoll in vier
+  **Ordnungen** (chronologisch, nach Kategorie, nach Beratungsschwerpunkt,
+  zweispaltig Verlauf | Kommentar), Standard-Ordnung in den Einstellungen, als
+  **PDF oder ODT**. Die Entscheidung, was wo steht, fällt EINMAL in
+  `services/ub_protokoll.py`; `ub_protokoll_pdf.py` und `ub_protokoll_odt.py`
+  zeichnen nur. ODT ist ein selbstgebautes ZIP (mimetype zuerst, unkomprimiert),
+  Piktogramme darin als mit Pillow gerasterte PNG. **Einträge verknüpfen**
+  („Bezieht sich auf" für Kommentar-Kategorien; zweispaltig steht der Kommentar
+  dann neben seinem Bezug, sonst neben der vorigen Verlaufs-Zeile derselben
+  Phase). **Nachbereitung am PC** auf der Detailseite: derselbe Editor wie am
+  Handy (`static/ub-eintrag.js`), Reflexionsgespräch + Vereinbarungen; die
+  Vereinbarungen erscheinen beim nächsten Besuch desselben Anwärters in
+  Erfassung, Detailseite und Protokoll. Karte „Unterrichtsbesuche" auf der
+  Startseite (nur, wenn es Anwärter gibt).
+
 **Migrations-Stand: 0035.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
@@ -268,7 +283,13 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 
 ## 3. Aktuell offene Punkte
 
-### Unterrichtsbesuche Stufe 1 (2026-09-29, NEU)
+### Unterrichtsbesuche (2026-09-29, NEU)
+
+- ODT konnte lokal nur strukturell geprüft werden (kein LibreOffice; Word hängt
+  per COM-Automation schon beim Speichern einer eigenen ODT). Erstes echtes
+  Öffnen in LibreOffice/Word steht aus.
+- Direkter Kamerastart (`capture="environment"`) auf iPhone und Android am
+  Gerät prüfen.
 
 - Im Container testen: Migration 0034, ein echter Besuch vom Handy über
   Tailscale/VPN, Foto-Upload (iPhone liefert über `accept="image/*"` JPEG).

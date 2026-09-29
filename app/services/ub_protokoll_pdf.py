@@ -1,8 +1,7 @@
 """Protokoll eines Unterrichtsbesuchs als PDF (reportlab).
 
-Stufe 1 kennt die chronologische Ordnung: Kopfdaten, Schwerpunkte, Legende,
-dann der Verlauf mit den Phasen als Zwischenbänder und dem Piktogramm der
-Kategorie vor jedem Eintrag.
+Zeichnet nur, was `ub_protokoll.aufbereiten()` liefert — die Entscheidung,
+welcher Eintrag in welcher Ordnung wo steht, fällt dort (dieselbe für ODT).
 
 Die Piktogramme zeichnet `IconFlowable` direkt aus den Zeichenanweisungen in
 `app/services/unterrichtsbesuche.py` — dieselben Daten, aus denen der Browser
@@ -15,7 +14,6 @@ der Handy-Tastatur) werden vorher ersetzt, sonst stünden im PDF leere Kästchen
 from __future__ import annotations
 
 import io
-import re
 from xml.sax.saxutils import escape
 
 from PIL import Image as PILImage
@@ -25,17 +23,18 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as rl_canvas
-from reportlab.platypus import (Flowable, Image, Paragraph,
+from reportlab.platypus import (Flowable, Image, KeepTogether, Paragraph,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 from sqlalchemy.orm import Session
 
-from app.branding import get_logo_bytes, get_school_name
+from app.branding import get_logo_bytes
 from app.models import UbBesuch, User
-from app.services import file_store
 from app.services import unterrichtsbesuche as ub
+from app.services.ub_protokoll import EintragAnsicht, Protokoll, aufbereiten, pfad_befehle
 
 BLAU = colors.HexColor("#00639C")
 BLAU_HELL = colors.HexColor("#E6F3FA")
+GELB_HELL = colors.HexColor("#FDF6E6")
 GRAU = colors.HexColor("#666666")
 LINIE = colors.HexColor("#E2E5E9")
 
@@ -49,7 +48,7 @@ NUTZBREITE = _BREITE - 2 * _RAND - 12
 # ── Text ──────────────────────────────────────────────────────────────────
 
 _ERSATZ = {"→": "->", "←": "<-", "⇒": "=>", "✓": "(ok)", "✔": "(ok)",
-           "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "…": "..."}
+           "≤": "<=", "≥": ">=", "≠": "!=", "−": "-"}
 
 
 def _sauber(t: str) -> str:
@@ -74,63 +73,28 @@ S_TITEL = _stil("titel", fontName="Helvetica-Bold", fontSize=16, leading=19, tex
 S_UNTER = _stil("unter", fontSize=9, textColor=GRAU)
 S_H2 = _stil("h2", fontName="Helvetica-Bold", fontSize=11.5, leading=14,
              textColor=BLAU, spaceBefore=8, spaceAfter=4)
+S_H3 = _stil("h3", fontName="Helvetica-Bold", fontSize=10.5, leading=13)
 S_LABEL = _stil("label", fontName="Helvetica-Bold", fontSize=8.5, textColor=GRAU)
 S_TEXT = _stil("text")
 S_KLEIN = _stil("klein", fontSize=8, leading=10, textColor=GRAU)
 S_ZEIT = _stil("zeit", fontSize=8.5, textColor=GRAU)
 S_PHASE = _stil("phase", fontName="Helvetica-Bold", fontSize=10, textColor=BLAU)
+S_SPALTE = _stil("spalte", fontName="Helvetica-Bold", fontSize=9, textColor=GRAU)
 
 
 # ── Piktogramme ───────────────────────────────────────────────────────────
 
-_TOKEN = re.compile(r"[MLHVCQZ]|-?\d*\.?\d+")
-
-
 def _pfad(c, d: str) -> None:
-    """Zeichnet einen SVG-Pfad aus absoluten M/L/H/V/C/Q/Z-Befehlen."""
-    tok = _TOKEN.findall(d)
     p = c.beginPath()
-    i, cmd = 0, None
-    x = y = sx = sy = 0.0
-
-    def zahl():
-        nonlocal i
-        v = float(tok[i])
-        i += 1
-        return v
-
-    while i < len(tok):
-        if tok[i].isalpha():
-            cmd = tok[i]
-            i += 1
-            if cmd == "Z":
-                p.close()
-                x, y = sx, sy
-                continue
-        if cmd == "M":
-            x, y = zahl(), zahl()
-            sx, sy = x, y
-            p.moveTo(x, y)
-            cmd = "L"   # weitere Koordinaten nach M sind Linien
-        elif cmd == "L":
-            x, y = zahl(), zahl()
-            p.lineTo(x, y)
-        elif cmd == "H":
-            x = zahl()
-            p.lineTo(x, y)
-        elif cmd == "V":
-            y = zahl()
-            p.lineTo(x, y)
-        elif cmd == "C":
-            x1, y1, x2, y2, x, y = (zahl() for _ in range(6))
-            p.curveTo(x1, y1, x2, y2, x, y)
-        elif cmd == "Q":
-            qx, qy, nx, ny = (zahl() for _ in range(4))
-            p.curveTo(x + 2 / 3 * (qx - x), y + 2 / 3 * (qy - y),
-                      nx + 2 / 3 * (qx - nx), ny + 2 / 3 * (qy - ny), nx, ny)
-            x, y = nx, ny
-        else:
-            i += 1   # unbekannt — überspringen statt hängen
+    for b in pfad_befehle(d):
+        if b[0] == "M":
+            p.moveTo(b[1], b[2])
+        elif b[0] == "L":
+            p.lineTo(b[1], b[2])
+        elif b[0] == "C":
+            p.curveTo(*b[1:])
+        elif b[0] == "Z":
+            p.close()
     c.drawPath(p, stroke=1, fill=0)
 
 
@@ -196,14 +160,18 @@ class _NummerCanvas(rl_canvas.Canvas):
 
 # ── Bausteine ─────────────────────────────────────────────────────────────
 
-def _fmt_datum(iso: str) -> str:
-    return f"{iso[8:10]}.{iso[5:7]}.{iso[0:4]}" if len(iso or "") == 10 else (iso or "")
+def _tab(daten, breiten, stil, **kw) -> Table:
+    t = Table(daten, colWidths=breiten, **kw)
+    t.setStyle(TableStyle(stil))
+    return t
 
 
-def _kopf(db: Session, user: User, b: UbBesuch) -> list:
+_OHNE_RAND = [("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]
+
+
+def _kopf(db: Session, pr: Protokoll) -> list:
     logo_bytes, _ = get_logo_bytes(db)
-    links = [Paragraph("Protokoll Unterrichtsbesuch", S_TITEL),
-             Paragraph(_p(get_school_name(db)), S_UNTER)]
+    links = [Paragraph("Protokoll Unterrichtsbesuch", S_TITEL), Paragraph(_p(pr.schule), S_UNTER)]
     rechts = ""
     if logo_bytes:
         try:
@@ -213,136 +181,161 @@ def _kopf(db: Session, user: User, b: UbBesuch) -> list:
             rechts = Image(io.BytesIO(logo_bytes), width=hoehe * w / h, height=hoehe)
         except Exception:
             rechts = ""
-    t = Table([[links, rechts]], colWidths=[NUTZBREITE - 45 * mm, 45 * mm])
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("LINEBELOW", (0, 0), (-1, 0), 1.2, BLAU),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
+    t = _tab([[links, rechts]], [NUTZBREITE - 45 * mm, 45 * mm], _OHNE_RAND + [
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.2, BLAU), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)])
     return [t, Spacer(1, 5 * mm)]
 
 
-def _kopfdaten(db: Session, user: User, b: UbBesuch) -> list:
-    a = b.anwaerter
-    anwaerter = _p(a.name if a else "")
-    if a and a.faecher:
-        anwaerter += f' <font color="#666666">· {_p(a.faecher)}</font>'
-    zeit = _fmt_datum(b.datum)
-    if b.beginn:
-        zeit += f", {b.beginn}" + (f" – {b.ende}" if b.ende else "") + " Uhr"
-    zeilen = [
-        ("Anwärter/in", anwaerter),
-        ("Datum", _p(zeit)),
-        ("Klasse / Raum", _p(" / ".join(x for x in (b.klasse, b.raum) if x) or "—")),
-        ("Thema", _p(b.thema or "—")),
-    ]
-    if b.lernziele:
-        zeilen.append(("Lernziele", _p(b.lernziele)))
-    sp = ub.schwerpunkte(db, b.id)
-    if sp:
+def _kopfdaten(pr: Protokoll) -> list:
+    zeilen = [(k, _p(v)) for k, v in pr.kopf]
+    if pr.schwerpunkte:
         zeilen.append(("Beratungs-<br/>schwerpunkte",
-                       "<br/>".join(f"{i}. {_p(k.name)}" for i, k in enumerate(sp, 1))))
-    zeilen.append(("Besucht von", _p(user.full_name or user.username)))
+                       "<br/>".join(f"{i}. {_p(n)}" for i, n in enumerate(pr.schwerpunkte, 1))))
+    zeilen.append(("Besucht von", _p(pr.autor)))
+    t = _tab([[Paragraph(k, S_LABEL), Paragraph(v, S_TEXT)] for k, v in zeilen],
+             [32 * mm, NUTZBREITE - 32 * mm], [
+                 ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                 ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                 ("LINEBELOW", (0, 0), (-1, -2), 0.4, LINIE)])
+    out = [t, Spacer(1, 4 * mm)]
+    if pr.vorige:
+        out.append(_tab([[[Paragraph(f"Vereinbarungen aus dem Besuch am {pr.vorige['datum']}", S_LABEL),
+                           Paragraph(_p(pr.vorige["text"]), S_TEXT)]]], [NUTZBREITE], [
+            ("BACKGROUND", (0, 0), (-1, -1), GELB_HELL),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+        out.append(Spacer(1, 3 * mm))
+    return out
 
-    t = Table([[Paragraph(k, S_LABEL), Paragraph(v, S_TEXT)] for k, v in zeilen],
-              colWidths=[32 * mm, NUTZBREITE - 32 * mm])
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-        ("LINEBELOW", (0, 0), (-1, -2), 0.4, LINIE),
-    ]))
-    return [t, Spacer(1, 4 * mm)]
 
-
-def _legende(kategorien: list, genutzt: set[int], wertungen_genutzt: set[str]) -> list:
-    """Nur was im Protokoll auch vorkommt — sonst erklärt die Legende
-    Symbole, die der Leser nie zu sehen bekommt."""
-    zellen = []
-    for k in kategorien:
-        if k.id in genutzt:
-            zellen.append((k.icon, k.farbe, k.name))
-    for key, w in ub.WERTUNGEN.items():
-        if key in wertungen_genutzt:
-            zellen.append((w["icon"], w["farbe"], w["label"]))
-    if not zellen:
+def _legende(pr: Protokoll) -> list:
+    if not pr.legende:
         return []
-    zeile = []
-    breiten = []
-    for ic, fa, name in zellen:
-        zeile += [IconFlowable(ic, fa, 4 * mm), Paragraph(_p(name), S_KLEIN)]
+    zeile, breiten = [], []
+    for k in pr.legende:
+        zeile += [IconFlowable(k.icon, k.farbe, 4 * mm), Paragraph(_p(k.name), S_KLEIN)]
         breiten += [5.5 * mm, 30 * mm]
-    t = Table([zeile], colWidths=breiten, hAlign="LEFT")
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    return [t, Spacer(1, 3 * mm)]
+    return [_tab([zeile], breiten, _OHNE_RAND + [("VALIGN", (0, 0), (-1, -1), "MIDDLE")],
+                 hAlign="LEFT"), Spacer(1, 3 * mm)]
 
 
-def _foto(e) -> Image | None:
-    if not e.file_uuid:
-        return None
-    pfad = file_store.resolve(e.file_uuid, e.filename)
-    if not pfad:
+def _foto(a: EintragAnsicht, max_breite: float) -> Image | None:
+    if not a.foto:
         return None
     try:
-        with PILImage.open(pfad) as im:
+        with PILImage.open(a.foto) as im:
             w, h = im.size
     except Exception:
         return None
-    breite = min(70 * mm, w)
+    breite = min(max_breite, 70 * mm, w)
     hoehe = breite * h / w
     if hoehe > 60 * mm:           # Hochkant-Fotos nicht seitenfüllend
         hoehe = 60 * mm
         breite = hoehe * w / h
-    img = Image(str(pfad), width=breite, height=hoehe)
+    img = Image(str(a.foto), width=breite, height=hoehe)
     img.hAlign = "LEFT"
     return img
 
 
-def _eintrag_zeile(e, kat, zuordnung: str, mit_fotos: bool) -> Table:
-    inhalt = [Paragraph(_p(e.text), S_TEXT)] if e.text else []
-    meta = []
-    if kat:
-        meta.append(f'<font color="{kat.farbe}"><b>{_p(kat.name)}</b></font>')
-    if zuordnung:
-        meta.append(_p(zuordnung))
-    w = ub.WERTUNGEN.get(e.wertung)
-    if w:
-        meta.append(f'<font color="{w["farbe"]}">{_p(w["label"])}</font>')
-    if meta:
-        inhalt.append(Paragraph(" · ".join(meta), S_KLEIN))
-    if mit_fotos:
-        img = _foto(e)
+def _meta(a: EintragAnsicht, kat=True, zuordnung=True, phase=False) -> str:
+    teile = []
+    if kat and a.kat:
+        teile.append(f'<font color="{a.kat.farbe}"><b>{_p(a.kat.name)}</b></font>')
+    if zuordnung and a.zuordnung:
+        teile.append(_p(a.zuordnung))
+    if phase and a.phase:
+        teile.append(_p(a.phase))
+    if a.wertung:
+        teile.append(f'<font color="{a.wertung["farbe"]}">{_p(a.wertung["label"])}</font>')
+    if a.bezug:
+        teile.append("<i>" + _p(a.bezug) + "</i>")
+    return " · ".join(teile)
+
+
+def _inhalt(a: EintragAnsicht, breite: float, pr: Protokoll, **meta_kw) -> list:
+    out = [Paragraph(_p(a.text), S_TEXT)] if a.text else []
+    m = _meta(a, **meta_kw)
+    if m:
+        out.append(Paragraph(m, S_KLEIN))
+    if pr.mit_fotos:
+        img = _foto(a, breite)
+        if img:
+            out += [Spacer(1, 1.5 * mm), img]
+    return out
+
+
+def _eintrag_zeile(a: EintragAnsicht, pr: Protokoll, **meta_kw) -> Table:
+    textbreite = NUTZBREITE - 27 * mm
+    icon = IconFlowable(a.kat.icon, a.kat.farbe) if a.kat else ""
+    w_icon = IconFlowable(a.wertung["icon"], a.wertung["farbe"], 4 * mm) if a.wertung else ""
+    return _tab([[Paragraph(a.zeit, S_ZEIT), icon, _inhalt(a, textbreite, pr, **meta_kw), w_icon]],
+                [13 * mm, 8 * mm, textbreite, 6 * mm], [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.4, LINIE)])
+
+
+def _phasen_band(zeit: str, name: str) -> Table:
+    return _tab([[Paragraph(zeit, S_ZEIT), Paragraph(_p(name), S_PHASE)]],
+                [13 * mm, NUTZBREITE - 13 * mm], [
+                    ("BACKGROUND", (0, 0), (-1, -1), BLAU_HELL),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (0, 0), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)])
+
+
+def _gruppen_kopf(titel: str, kat, hinweis: str) -> Table:
+    text = _p(titel) + (f'  <font size="8" color="#666666">({_p(hinweis)})</font>' if hinweis else "")
+    # ohne Piktogramm keine leere Symbolspalte — sonst stünde die Überschrift eingerückt
+    zeile, breiten = ([IconFlowable(kat.icon, kat.farbe, 5.5 * mm), Paragraph(text, S_H3)],
+                      [8 * mm, NUTZBREITE - 8 * mm]) if kat else ([Paragraph(text, S_H3)], [NUTZBREITE])
+    return _tab([zeile], breiten, _OHNE_RAND + [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.8, BLAU)])
+
+
+def _mini(a: EintragAnsicht, breite: float, pr: Protokoll) -> Table:
+    """Ein Eintrag in einer Zelle der zweispaltigen Ansicht."""
+    icon = IconFlowable(a.kat.icon, a.kat.farbe, 4.2 * mm) if a.kat else ""
+    kopf = f'<font color="#666666">{_p(a.zeit)}</font>'
+    if a.text:
+        kopf += "  " + _p(a.text)
+    inhalt = [Paragraph(kopf, S_TEXT)]
+    m = _meta(a, kat=True, zuordnung=True)
+    if m:
+        inhalt.append(Paragraph(m, S_KLEIN))
+    if pr.mit_fotos:
+        img = _foto(a, breite - 8 * mm)
         if img:
             inhalt += [Spacer(1, 1.5 * mm), img]
-    icon = IconFlowable(kat.icon, kat.farbe) if kat else ""
-    w_icon = IconFlowable(w["icon"], w["farbe"], 4 * mm) if w else ""
-    t = Table([[Paragraph(e.zeit or "", S_ZEIT), icon, inhalt, w_icon]],
-              colWidths=[13 * mm, 8 * mm, NUTZBREITE - 27 * mm, 6 * mm])
-    t.setStyle(TableStyle([
+    return _tab([[icon, inhalt]], [6 * mm, breite - 6 * mm], _OHNE_RAND + [
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.4, LINIE),
-    ]))
-    return t
+        ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)])
 
 
-def _phasen_band(e, phase) -> Table:
-    name = phase.name if phase else "Phase"
-    t = Table([[Paragraph(e.zeit or "", S_ZEIT), Paragraph(_p(name), S_PHASE)]],
-              colWidths=[13 * mm, NUTZBREITE - 13 * mm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), BLAU_HELL),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (0, 0), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    return t
+def _zweispaltig(bloecke: list, pr: Protokoll) -> list:
+    halb = NUTZBREITE / 2
+    zellbreite = halb - 8
+    daten = [[Paragraph("Verlauf", S_SPALTE), Paragraph("Kommentar", S_SPALTE)]]
+    stil = [("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.8, BLAU),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]
+    for blk in bloecke:
+        r = len(daten)
+        if blk.typ == "phase":
+            daten.append([Paragraph(f'<font color="#666666" size="8.5">{_p(blk.zeit)}</font>  '
+                                    + _p(blk.titel), S_PHASE), ""])
+            stil += [("SPAN", (0, r), (1, r)), ("BACKGROUND", (0, r), (1, r), BLAU_HELL)]
+            continue
+        links = [_mini(blk.links, zellbreite, pr)] if blk.links else ""
+        rechts = [_mini(a, zellbreite, pr) for a in blk.rechts] or ""
+        daten.append([links, rechts])
+        stil += [("LINEBELOW", (0, r), (-1, r), 0.4, LINIE),
+                 ("LINEAFTER", (0, r), (0, r), 0.4, LINIE)]
+    return [_tab(daten, [halb, halb], stil, repeatRows=1)]
 
 
 def _textabschnitt(titel: str, inhalt: str) -> list:
@@ -351,47 +344,57 @@ def _textabschnitt(titel: str, inhalt: str) -> list:
     return [Paragraph(titel, S_H2), Paragraph(_p(inhalt), S_TEXT)]
 
 
+UEBERSCHRIFT = {
+    "chronologisch": "Unterrichtsverlauf",
+    "kategorie": "Einträge nach Kategorie",
+    "kriterium": "Einträge nach Beratungsschwerpunkt",
+    "zweispaltig": "Verlauf und Kommentare",
+}
+
+
 # ── Einstieg ──────────────────────────────────────────────────────────────
 
-def erzeuge(db: Session, user: User, b: UbBesuch, mit_fotos: bool = True) -> bytes:
-    kategorien = ub.liste(db, user, "kategorien")
-    kat_map = {k.id: k for k in kategorien}
-    phasen = {p.id: p for p in ub.liste(db, user, "phasen")}
-    kriterien = {k.id: k for k in ub.liste(db, user, "kriterien")}
-    alle = ub.eintraege(db, b.id)
-    normale = [e for e in alle if e.art == "eintrag"]
+def erzeuge(db: Session, user: User, b: UbBesuch, mit_fotos: bool = True,
+            ordnung: str | None = None) -> bytes:
+    pr = aufbereiten(db, user, b, ordnung, mit_fotos)
 
-    story = _kopf(db, user, b) + _kopfdaten(db, user, b)
-    story.append(Paragraph("Unterrichtsverlauf", S_H2))
-    story += _legende(kategorien, {e.kategorie_id for e in normale},
-                      {e.wertung for e in normale})
+    story = _kopf(db, pr) + _kopfdaten(pr)
+    story.append(Paragraph(UEBERSCHRIFT[pr.ordnung], S_H2))
+    story += _legende(pr)
 
-    if not alle:
+    if not pr.bloecke:
         story.append(Paragraph("Noch keine Einträge erfasst.", S_KLEIN))
-    for e in alle:
-        if e.art == "phase":
-            story.append(Spacer(1, 2 * mm))
-            story.append(_phasen_band(e, phasen.get(e.phase_id)))
-            continue
-        if e.kriterium_id and e.kriterium_id in kriterien:
-            zuordnung = kriterien[e.kriterium_id].name
-        else:
-            zuordnung = ""
-        story.append(_eintrag_zeile(e, kat_map.get(e.kategorie_id), zuordnung, mit_fotos))
+    elif pr.ordnung == "zweispaltig":
+        story += _zweispaltig(pr.bloecke, pr)
+    else:
+        for blk in pr.bloecke:
+            if blk.typ == "phase":
+                story += [Spacer(1, 2 * mm), _phasen_band(blk.zeit, blk.titel)]
+            elif blk.typ == "eintrag":
+                story.append(_eintrag_zeile(blk.eintrag, pr))
+            elif blk.typ == "gruppe":
+                zeilen = [_eintrag_zeile(a, pr, kat=pr.ordnung != "kategorie",
+                                         zuordnung=pr.ordnung != "kriterium", phase=True)
+                          for a in blk.eintraege]
+                if not zeilen:
+                    zeilen = [Paragraph("Dazu wurde nichts notiert.", S_KLEIN)]
+                # Gruppenkopf nie allein am Seitenende
+                story += [Spacer(1, 3 * mm),
+                          KeepTogether([_gruppen_kopf(blk.titel, blk.kat, blk.hinweis), zeilen[0]])]
+                story += zeilen[1:]
 
-    story += _textabschnitt("Reflexionsgespräch", b.reflexion)
-    story += _textabschnitt("Vereinbarungen", b.vereinbarungen)
+    story += _textabschnitt("Reflexionsgespräch", pr.reflexion)
+    story += _textabschnitt("Vereinbarungen", pr.vereinbarungen)
 
     puffer = io.BytesIO()
-    name = b.anwaerter.name if b.anwaerter else ""
     doc = SimpleDocTemplate(
         puffer, pagesize=A4, leftMargin=_RAND, rightMargin=_RAND,
         topMargin=15 * mm, bottomMargin=18 * mm,
-        title=f"Unterrichtsbesuch {name} {_fmt_datum(b.datum)}".strip(),
-        author=user.full_name or user.username)
+        title=_sauber(f"Unterrichtsbesuch {pr.anwaerter} {pr.datum}").strip(),
+        author=_sauber(pr.autor))
 
     class _Canvas(_NummerCanvas):
-        fusstext = _sauber(f"Unterrichtsbesuch · {name} · {_fmt_datum(b.datum)}")
+        fusstext = _sauber(f"Unterrichtsbesuch · {pr.anwaerter} · {pr.datum}")
 
     doc.build(story, canvasmaker=_Canvas)
     return puffer.getvalue()

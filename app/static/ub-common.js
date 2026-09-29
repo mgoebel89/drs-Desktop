@@ -79,6 +79,7 @@
     const sp = nachId(ctx.schwerpunkte);
     box.textContent = '';
     box.classList.add('ubv');
+    verlauf._alle = eintraege;
     if (!eintraege.length) {
       box.appendChild(el('div', { class: 'ubv-leer' }, ctx.leertext || 'Noch keine Einträge.'));
       return;
@@ -109,6 +110,7 @@
           kreis,
           el('div', {}, [
             e.text ? el('div', { class: 'ubv-text' }, e.text) : null,
+            bezugZeile(e),
             el('div', { class: 'ubv-meta' }, meta),
             e.foto ? el('img', { class: 'ubv-foto', src: e.foto, alt: 'Foto', loading: 'lazy' }) : null,
           ]),
@@ -125,6 +127,16 @@
   }
 
   function el(tag, attrs, kinder) { return window.DRS.el(tag, attrs, kinder); }
+
+  // „↳ zu 08:14 · Arbeitsauftrag …" — worauf sich ein Kommentar bezieht
+  function bezugZeile(e) {
+    if (!e.bezug_id || !verlauf._alle) return null;
+    const r = verlauf._alle.find(function (x) { return x.id === e.bezug_id; });
+    if (!r) return null;
+    let t = String(r.text || 'Foto').replace(/\s+/g, ' ').trim();
+    if (t.length > 45) t = t.slice(0, 44) + '…';
+    return el('div', { class: 'ubv-bezug' }, '↳ zu ' + (r.zeit ? r.zeit + ' · ' : '') + t);
+  }
 
   /* Antippbare Auswahl statt Aufklappmenü.
    * optionen: [{id, name, icon?, farbe?}] · gewaehlt: Array von IDs

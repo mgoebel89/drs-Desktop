@@ -192,4 +192,17 @@
     b.addEventListener('click', function () { neu(b.dataset.neu); });
   });
   Object.keys(TITEL).forEach(zeichne);
+
+  // Standard-Ordnung des Protokolls — speichert sofort beim Wechsel
+  const ordSel = document.getElementById('ubeOrdnung');
+  ['chronologisch', 'kategorie', 'kriterium', 'zweispaltig'].forEach(function (k) {
+    ordSel.appendChild(el('option', { value: k }, window.UB.ordnungen[k]));
+  });
+  ordSel.value = window.UB.standardOrdnung;
+  ordSel.addEventListener('change', async function () {
+    try {
+      await postJSON('/api/ub/einstellungen-allgemein', { standard_ordnung: ordSel.value });
+      toast('Standard-Ordnung gespeichert.');
+    } catch (e) { toast(e.message); }
+  });
 })();
