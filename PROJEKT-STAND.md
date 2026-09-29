@@ -781,12 +781,12 @@ Login: **`mgoebel`** (Admin)
 
 ## 6. Letzte Commits
 
-Migrations-Stand: **0034**. Der Stand bis `1f84eae` liegt auf GitHub
-`mgoebel89/drs-Desktop` @ `main`; der Klassen-Commit ist noch **nicht gepusht**.
+Migrations-Stand: **0034**. Der Stand bis `8bf2531` liegt auf GitHub
+`mgoebel89/drs-Desktop` @ `main` — inklusive Klassenmodul und Unterrichtsbesuche Stufe 1.
 
 | Commit | Was |
 |---|---|
-| _(Branch `feat/unterrichtsbesuche`)_ | **Unterrichtsbesuche Stufe 1** (Migration 0034): Anwärter, Besuch-Assistent, Handy-Erfassung mit Fotos, chronologisches PDF mit Piktogrammen. 19 neue Tests |
+| `8627e96` | **Unterrichtsbesuche Stufe 1** (Migration 0034): Anwärter, Besuch-Assistent, Handy-Erfassung mit Fotos, chronologisches PDF mit Piktogrammen. 19 neue Tests |
 | `c5161b6` | **Klassenmodul** mit Schüler-Notizen (Migration 0033) + **Moodle-Ergebnisse in bestehende Prüfungen**; Notenrechnung nach `services/exam_scoring.py` gezogen. 25 neue Tests |
 | `1f84eae` | Profil mit Kategorien, Module auf die gemeinsamen UI-Bausteine |
 | `ef4afc1` | Paperless-Upload repariert + UI-Fundament im Gemeindeverwaltungs-Stil |
