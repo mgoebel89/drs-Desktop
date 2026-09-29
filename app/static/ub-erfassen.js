@@ -13,7 +13,7 @@
   'use strict';
   if (!window.DRS || !window.UB || !window.UBC) return;
   const { el, modal, toast, confirmDanger, postJSON } = DRS;
-  const { piktogramm, jetzt, sortiere, nachId, hell, verlauf } = UBC;
+  const { piktogramm, jetzt, sortiere, nachId, hell, verlauf, chipWahl } = UBC;
 
   const B = window.UB.besuch;
   const KATALOG = window.UB.katalog;
@@ -38,7 +38,7 @@
     sortiere(EINTRAEGE);
     verlauf(verlaufEl, EINTRAEGE, {
       katalog: KATALOG, icons: ICONS, wertungen: WERTUNGEN, schwerpunkte: B.schwerpunkte,
-      leertext: 'Tippe unten auf eine Kategorie, um den ersten Eintrag festzuhalten. '
+      leertext: 'Tippe unten auf „Eintrag“, um etwas festzuhalten — eingeordnet wird danach. '
         + 'Oben setzt du die Unterrichtsphase.',
       onClick: function (e) { if (e.art === 'phase') phasenBlatt(e); else eintragBlatt(e, null); },
     });
@@ -56,13 +56,13 @@
     const teile = [];
     if (B.lernziele) teile.push(el('div', {}, [el('strong', {}, 'Lernziele: '), B.lernziele]));
     if (B.schwerpunkte.length) {
-      teile.push(el('div', { style: 'margin-top:.3rem' }, [el('strong', {}, 'Schwerpunkte'),
+      teile.push(el('div', { style: 'margin-top:.3rem' }, [el('strong', {}, 'Beratungsschwerpunkte'),
         el('ol', {}, B.schwerpunkte.map(function (s) { return el('li', {}, s.text); }))]));
     }
     if (!teile.length) return;
     box.appendChild(el('details', { class: 'ube-info', style: 'margin-top:.5rem' }, [
       el('summary', { style: 'cursor:pointer;font-weight:600;color:var(--blau)' },
-        'Lernziele & Schwerpunkte'),
+        'Lernziele & Beratungsschwerpunkte'),
       el('div', { style: 'margin-top:.4rem;white-space:pre-wrap' }, teile),
     ]));
   }
@@ -70,35 +70,34 @@
   function zeichneKnoepfe() {
     const fuss = document.getElementById('ubeFuss');
     fuss.textContent = '';
-    KATALOG.kategorien.filter(function (k) { return k.active; }).forEach(function (k) {
-      fuss.appendChild(el('button', {
-        type: 'button', class: 'ube-kat', style: 'background:' + k.farbe,
-        onClick: function () { eintragBlatt(null, k); },
-      }, [piktogramm(ICONS, k.icon, 26, 2), el('span', {}, k.name)]));
-    });
-    if (!fuss.children.length) {
-      fuss.appendChild(el('a', { href: '/unterrichtsbesuche/einstellungen', class: 'btn-sec' },
-        'Keine aktive Kategorie — in den Einstellungen anlegen'));
-    }
+    // Schnellweg fürs Tafelbild: erst das Foto, dann einordnen
+    const schnellKamera = fotoWaehler(true, function (blob) { eintragBlatt(null, blob); });
+    fuss.appendChild(el('button', { type: 'button', class: 'ube-neu',
+      onClick: function () { eintragBlatt(null, null); } },
+    [piktogramm(ICONS, 'plus', 26, 2.2), el('span', {}, 'Eintrag')]));
+    fuss.appendChild(el('button', { type: 'button', class: 'ube-foto-schnell', 'aria-label': 'Foto aufnehmen',
+      onClick: function () { schnellKamera.click(); } },
+    [piktogramm(ICONS, 'kamera', 24, 2), el('span', {}, 'Foto')]));
   }
 
-  // ── Blatt von unten ─────────────────────────────────────────────────
+  // ── Blatt (von unten; mit `oben: true` von oben) ────────────────────
 
   function blatt(opts) {
     const fuss = el('div', { class: 'ube-blatt-fuss' });
-    const overlay = el('div', { class: 'ube-blatt-overlay' });
+    const overlay = el('div', { class: 'ube-blatt-overlay' + (opts.oben ? ' oben' : '') });
     function close() {
       overlay.remove();
+      if (opts.onClose) opts.onClose();
       document.removeEventListener('keydown', onKey);
     }
     function onKey(ev) { if (ev.key === 'Escape') (opts.onCancel || close)(); }
     const box = el('div', { class: 'ube-blatt', role: 'dialog', 'aria-modal': 'true' }, [
-      el('div', { class: 'ube-blatt-kopf' }, [].concat(opts.kopf || [], [
+      el('div', { class: 'ube-blatt-kopf' }, [].concat(opts.kopf || [], opts.oben ? [] : [
         el('button', { type: 'button', class: 'drs-x', 'aria-label': 'Schließen',
           onClick: function () { (opts.onCancel || close)(); } }, '×'),
       ])),
       el('div', { class: 'ube-blatt-inhalt' }, opts.inhalt),
-      fuss,
+      (opts.fuss || []).length ? fuss : null,
     ]);
     (opts.fuss || []).forEach(function (n) { fuss.appendChild(n); });
     overlay.appendChild(box);
@@ -175,120 +174,151 @@
 
   // ── Eintrag anlegen / bearbeiten ────────────────────────────────────
 
-  function zuordnungsWahl(e) {
-    const s = el('select', {}, [el('option', { value: '' }, '— keine Zuordnung —')]);
-    if (B.schwerpunkte.length) {
-      s.appendChild(el('optgroup', { label: 'Schwerpunkte des Anwärters' },
-        B.schwerpunkte.map(function (x) { return el('option', { value: 's:' + x.id }, x.text); })));
-    }
-    const krit = KATALOG.kriterien.filter(function (k) {
-      return k.active || (e && e.kriterium_id === k.id);
+  // Foto-Auswahl: zwei getrennte Wege, weil iPhone und Android ohne
+  // `capture` unterschiedlich fragen. `capture="environment"` öffnet auf
+  // beiden direkt die Rückkamera; ohne `capture` kommt die Galerie.
+  function fotoWaehler(mitKamera, onDatei) {
+    const input = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+    if (mitKamera) input.setAttribute('capture', 'environment');
+    input.addEventListener('change', async function () {
+      const f = input.files && input.files[0];
+      input.value = '';
+      if (!f) return;
+      try {
+        onDatei(await verkleinere(f));
+      } catch (_) {
+        toast('Das Foto konnte nicht gelesen werden (Format?). Bitte als JPEG aufnehmen.', 4500);
+      }
     });
-    if (krit.length) {
-      s.appendChild(el('optgroup', { label: 'Kriterien' },
-        krit.map(function (k) { return el('option', { value: 'k:' + k.id }, k.name); })));
-    }
-    s.value = e && e.schwerpunkt_id ? 's:' + e.schwerpunkt_id
-      : (e && e.kriterium_id ? 'k:' + e.kriterium_id : '');
-    return s;
+    document.body.appendChild(input);   // iOS öffnet nur Inputs, die im DOM hängen
+    return input;
   }
 
-  function eintragBlatt(e, kat) {
+  // ── Eintrag anlegen / bearbeiten ────────────────────────────────────
+  //
+  // Erst schreiben, dann einordnen: Text oben, darunter „Was ist es?"
+  // (Kategorie, PFLICHT, keine Vorbelegung — Ereignisse kommen in beliebiger
+  // Folge) und „Wozu?" (Beratungsschwerpunkt, optional). Das Blatt kommt von
+  // OBEN, damit Text und Knöpfe über der Handytastatur sichtbar bleiben;
+  // Speichern sitzt deshalb im Kopf.
+
+  function eintragBlatt(e, startFoto) {
     const neu = !e;
     const d = {
-      kategorie_id: neu ? kat.id : e.kategorie_id,
-      zeit: neu ? jetzt() : (e.zeit || ''),
+      kategorie_id: neu ? null : e.kategorie_id,
+      kriterium_id: neu ? null : e.kriterium_id,
       wertung: neu ? '' : (e.wertung || ''),
-      fotoNeu: null, fotoWeg: false,
+      fotoNeu: startFoto || null, fotoWeg: false,
     };
     let busy = false;
 
-    const titel = el('h3');
-    const kreis = el('span', { class: 'ubv-kreis' });
-    function malKopf() {
-      const k = KAT[d.kategorie_id] || { name: '?', icon: 'auge', farbe: '#5A6B7D' };
-      titel.textContent = k.name;
-      kreis.textContent = '';
-      kreis.style.background = hell(k.farbe, 0.14);
-      kreis.style.color = k.farbe;
-      kreis.appendChild(piktogramm(ICONS, k.icon, 20));
-    }
-    malKopf();
-    const zeit = el('input', { type: 'time', value: d.zeit, 'aria-label': 'Uhrzeit' });
-
-    const text = el('textarea', { placeholder: 'Was passiert gerade?', rows: '4' });
+    const zeit = el('input', { type: 'time', value: neu ? jetzt() : (e.zeit || ''), 'aria-label': 'Uhrzeit' });
+    const text = el('textarea', { placeholder: 'Was passiert gerade?', rows: '3' });
     text.value = neu ? '' : (e.text || '');
-    const zuordnung = zuordnungsWahl(e);
 
-    const inhalt = [];
-    if (!neu) {
-      const wahl = KATALOG.kategorien.filter(function (k) { return k.active || k.id === d.kategorie_id; });
-      inhalt.push(feldReihe('Kategorie', el('div', { class: 'ube-katwahl' }, [seg(
-        wahl.map(function (k) { return { wert: k.id, label: k.name, icon: k.icon, farbe: k.farbe }; }),
-        d.kategorie_id, function (v) { d.kategorie_id = v; malKopf(); }, true)])));
-      inhalt[0].style.marginTop = '0';
-    }
-    inhalt.push(text);
-    inhalt.push(feldReihe('Zuordnung', zuordnung));
-    const wKeys = Object.keys(WERTUNGEN).sort(function (a, b) { return WERTUNGEN[a].pos - WERTUNGEN[b].pos; });
-    const wOpt = [{ wert: '', label: 'Keine' }].concat(wKeys.map(function (k) {
-      return { wert: k, label: WERTUNGEN[k].label, icon: WERTUNGEN[k].icon, farbe: WERTUNGEN[k].farbe };
-    }));
-    inhalt.push(feldReihe('Wertung', seg(wOpt, d.wertung, function (v) { d.wertung = v; })));
+    // Was ist es? — Kategorie
+    const kats = KATALOG.kategorien.filter(function (k) { return k.active || k.id === d.kategorie_id; });
+    const katReihe = feldReihe('Was ist es?', chipWahl(
+      kats.map(function (k) { return { id: k.id, name: k.name, icon: k.icon, farbe: k.farbe }; }),
+      d.kategorie_id ? [d.kategorie_id] : [], false,
+      function (w) { d.kategorie_id = w[0] || null; katReihe.classList.remove('fehlt'); }, ICONS));
 
-    // Foto: ohne `capture`, damit das Handy Kamera ODER Galerie anbietet.
-    const fotoInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
-    const fotoBox = el('div', { class: 'ube-foto-box' });
-    let vorschauUrl = neu ? '' : (e.foto || '');
-    function malFoto() {
-      fotoBox.textContent = '';
-      if (vorschauUrl) {
-        fotoBox.appendChild(el('img', { src: vorschauUrl, alt: 'Foto' }));
-        fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec btn-sm',
-          onClick: function () { fotoInput.click(); } }, 'Ersetzen'));
-        fotoBox.appendChild(el('button', { type: 'button', class: 'btn-ghost btn-sm',
-          onClick: function () { d.fotoNeu = null; d.fotoWeg = true; vorschauUrl = ''; malFoto(); } }, 'Entfernen'));
-      } else {
-        fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec',
-          onClick: function () { fotoInput.click(); } }, [piktogramm(ICONS, 'tafel', 18), ' Foto hinzufügen']));
+    // Wozu? — Beratungsschwerpunkt: die gewählten des Besuchs vorn, der Rest hinter „weitere"
+    const gewaehlt = B.schwerpunkte.map(function (s) { return s.id; });
+    const alle = KATALOG.kriterien.filter(function (k) { return k.active || k.id === d.kriterium_id; });
+    const vorn = alle.filter(function (k) { return gewaehlt.indexOf(k.id) >= 0; });
+    const rest = alle.filter(function (k) { return gewaehlt.indexOf(k.id) < 0; });
+    let restOffen = !vorn.length || !!(d.kriterium_id && gewaehlt.indexOf(d.kriterium_id) < 0);
+    const wozuBox = el('div');
+    function malWozu() {
+      wozuBox.textContent = '';
+      const zeigen = restOffen ? vorn.concat(rest) : vorn;
+      if (!alle.length) {
+        wozuBox.appendChild(el('span', { class: 'muted' }, 'Keine Beratungsschwerpunkte angelegt.'));
+        return;
+      }
+      wozuBox.appendChild(chipWahl(zeigen.map(function (k) { return { id: k.id, name: k.name }; }),
+        d.kriterium_id ? [d.kriterium_id] : [], false,
+        function (w) { d.kriterium_id = w[0] || null; }));
+      if (vorn.length && rest.length) {
+        wozuBox.appendChild(el('button', { type: 'button', class: 'ub-weitere',
+          onClick: function () { restOffen = !restOffen; malWozu(); } },
+        restOffen ? 'weniger ▴' : 'weitere (' + rest.length + ') ▾'));
       }
     }
-    fotoInput.addEventListener('change', async function () {
-      const f = fotoInput.files && fotoInput.files[0];
-      fotoInput.value = '';
-      if (!f) return;
-      try {
-        d.fotoNeu = await verkleinere(f);
-        d.fotoWeg = false;
-        vorschauUrl = URL.createObjectURL(d.fotoNeu);
-        malFoto();
-      } catch (_) { toast('Das Foto konnte nicht gelesen werden.'); }
-    });
+    malWozu();
+
+    const wKeys = Object.keys(WERTUNGEN).sort(function (a, b) { return WERTUNGEN[a].pos - WERTUNGEN[b].pos; });
+    const wertung = seg([{ wert: '', label: 'Keine' }].concat(wKeys.map(function (k) {
+      return { wert: k, label: WERTUNGEN[k].label, icon: WERTUNGEN[k].icon, farbe: WERTUNGEN[k].farbe };
+    })), d.wertung, function (v) { d.wertung = v; });
+
+    // Foto
+    const fotoBox = el('div', { class: 'ube-foto-box' });
+    let vorschauUrl = d.fotoNeu ? URL.createObjectURL(d.fotoNeu) : (neu ? '' : (e.foto || ''));
+    function nimmFoto(blob) {
+      d.fotoNeu = blob; d.fotoWeg = false;
+      vorschauUrl = URL.createObjectURL(blob);
+      malFoto();
+    }
+    const kamera = fotoWaehler(true, nimmFoto);
+    const galerie = fotoWaehler(false, nimmFoto);
+    function malFoto() {
+      fotoBox.textContent = '';
+      if (vorschauUrl) fotoBox.appendChild(el('img', { src: vorschauUrl, alt: 'Foto' }));
+      fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec',
+        onClick: function () { kamera.click(); } },
+      [piktogramm(ICONS, 'kamera', 18), vorschauUrl ? ' Neu aufnehmen' : ' Kamera']));
+      fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec',
+        onClick: function () { galerie.click(); } }, [piktogramm(ICONS, 'bild', 18), ' Galerie']));
+      if (vorschauUrl) {
+        fotoBox.appendChild(el('button', { type: 'button', class: 'btn-ghost btn-sm',
+          onClick: function () { d.fotoNeu = null; d.fotoWeg = true; vorschauUrl = ''; malFoto(); } }, 'Entfernen'));
+      }
+    }
     malFoto();
-    inhalt.push(feldReihe('Foto', el('div', {}, [fotoBox, fotoInput])));
+
+    const inhalt = [
+      text,
+      katReihe,
+      feldReihe('Wozu? (Beratungsschwerpunkt)', wozuBox),
+      feldReihe('Wertung', wertung),
+      feldReihe('Foto', fotoBox),
+    ];
+    if (!neu) {
+      inhalt.push(el('div', { style: 'margin-top:1.2rem;padding-top:.8rem;border-top:1px solid var(--border)' }, [
+        el('button', { type: 'button', class: 'btn-danger', onClick: loeschen }, 'Eintrag löschen')]));
+    }
 
     const speichernBtn = el('button', { type: 'button', class: 'btn', onClick: speichern }, 'Speichern');
-    const fuss = [];
-    if (!neu) {
-      fuss.push(el('button', { type: 'button', class: 'btn-danger', onClick: loeschen }, 'Löschen'));
-    }
-    fuss.push(el('span', { class: 'spacer' }));
-    fuss.push(el('button', { type: 'button', class: 'btn-sec', onClick: abbrechen }, 'Abbrechen'));
-    fuss.push(speichernBtn);
-
-    const bl = blatt({ kopf: [kreis, titel, zeit], inhalt: inhalt, fuss: fuss, onCancel: abbrechen });
+    const bl = blatt({
+      oben: true,
+      kopf: [
+        el('button', { type: 'button', class: 'btn-ghost', onClick: abbrechen }, 'Abbrechen'),
+        el('h3', {}, neu ? 'Neu' : 'Eintrag'),
+        zeit,
+        speichernBtn,
+      ],
+      inhalt: inhalt,
+      onCancel: abbrechen,
+      onClose: function () { kamera.remove(); galerie.remove(); },
+    });
     // Im selben Tipp fokussieren — nur dann öffnet iOS die Tastatur.
-    if (neu) text.focus();
+    // Kommt der Eintrag über die Kamera, bleibt die Tastatur zu.
+    if (neu && !startFoto) text.focus();
 
     function geaendert() {
-      return text.value.trim() !== (neu ? '' : (e.text || '')) || d.fotoNeu || d.fotoWeg;
+      if (neu) return !!(text.value.trim() || d.fotoNeu || d.kategorie_id || d.kriterium_id);
+      return text.value.trim() !== (e.text || '') || !!d.fotoNeu || d.fotoWeg
+        || d.kategorie_id !== e.kategorie_id || d.kriterium_id !== e.kriterium_id
+        || d.wertung !== (e.wertung || '');
     }
 
     function abbrechen() {
       if (!geaendert()) { bl.close(); return; }
       confirmDanger({
         title: 'Änderungen verwerfen?',
-        text: 'Der getippte Text geht verloren.',
+        text: 'Was du eingegeben hast, geht verloren.',
         safe: 'Weiter bearbeiten', onSafe: function (c) { c(); },
         danger: 'Verwerfen', onDanger: function (c) { c(); bl.close(); },
       });
@@ -298,12 +328,16 @@
       if (busy) return;
       const t = text.value.trim();
       const hatFoto = d.fotoNeu || (!neu && e.foto && !d.fotoWeg);
+      if (!d.kategorie_id) {
+        katReihe.classList.add('fehlt');
+        katReihe.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        toast('Bitte wählen: Was ist es?');
+        return;
+      }
       if (!t && !hatFoto) { toast('Bitte einen Text eingeben oder ein Foto anhängen.'); return; }
-      const z = zuordnung.value;
       const daten = {
-        kategorie_id: d.kategorie_id, zeit: zeit.value || jetzt(), text: t, wertung: d.wertung,
-        kriterium_id: z.indexOf('k:') === 0 ? Number(z.slice(2)) : null,
-        schwerpunkt_id: z.indexOf('s:') === 0 ? Number(z.slice(2)) : null,
+        kategorie_id: d.kategorie_id, kriterium_id: d.kriterium_id,
+        zeit: zeit.value || jetzt(), text: t, wertung: d.wertung,
       };
       busy = true;
       speichernBtn.disabled = true;
@@ -322,7 +356,7 @@
           Object.assign(e, eintrag);
         }
       } catch (err) {
-        // Nichts gespeichert: Blatt bleibt offen, Text bleibt stehen.
+        // Nichts gespeichert: Blatt bleibt offen, alles bleibt stehen.
         busy = false;
         speichernBtn.disabled = false;
         speichernBtn.textContent = 'Speichern';
@@ -347,7 +381,7 @@
         }
         toast('Gespeichert.');
       } catch (err) {
-        toast('Eintrag gespeichert, aber das Foto nicht: ' + err.message, 5000);
+        toast('Eintrag gespeichert, aber das Foto nicht: ' + fehlertext(err), 5000);
       }
     }
 
@@ -365,7 +399,7 @@
             bl.close();
             zeichne();
             toast('Gelöscht.');
-          } catch (err) { toast(err.message); }
+          } catch (err) { toast(fehlertext(err)); }
         },
       });
     }

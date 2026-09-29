@@ -113,7 +113,18 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   Einträge verknüpfen, Reflexion + Vereinbarungen (mit Anzeige beim nächsten
   Besuch), Startseiten-Karte. Das Schema dafür steht schon in 0034.
 
-**Migrations-Stand: 0034.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+- **Unterrichtsbesuche: Bedienung überarbeitet** (2026-09-29, Migration **0035**):
+  Schwerpunkte sind jetzt **Beratungsschwerpunkte** — EINE Liste in den
+  Einstellungen (intern weiter `ub_kriterien`, ersetzt den Kriterienkatalog), je
+  Besuch hakt man die Auswahl des Anwärters an (`ub_schwerpunkte.kriterium_id`).
+  0035 übernimmt Freitext-Schwerpunkte aus Stufe 1 in den Katalog (gleicher Name
+  = derselbe Eintrag). Erfassung: **erst schreiben, dann einordnen** — ein Knopf
+  „+ Eintrag", Blatt von OBEN (bleibt über der Handytastatur), Kategorie PFLICHT
+  ohne Vorbelegung, Beratungsschwerpunkt als antippbare Knöpfe (gewählte vorn,
+  Rest hinter „weitere"), Foto über getrennte Knöpfe **Kamera**
+  (`capture="environment"`) und **Galerie**, dazu Foto-Schnellknopf im Fuß.
+
+**Migrations-Stand: 0035.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
 Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
@@ -781,7 +792,7 @@ Login: **`mgoebel`** (Admin)
 
 ## 6. Letzte Commits
 
-Migrations-Stand: **0034**. Der Stand bis `8bf2531` liegt auf GitHub
+Migrations-Stand: **0035**. Der Stand bis `9fd4e65` liegt auf GitHub
 `mgoebel89/drs-Desktop` @ `main` — inklusive Klassenmodul und Unterrichtsbesuche Stufe 1.
 
 | Commit | Was |
@@ -813,7 +824,7 @@ Migrations-Stand: **0034**. Der Stand bis `8bf2531` liegt auf GitHub
 letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
-Migration **0034** und gleicht den Playwright-Chromium ab). Im Container bleiben
+Migration **0035** und gleicht den Playwright-Chromium ab). Im Container bleiben
 zu prüfen: **Paperless und Vikunja gegen die echten Instanzen** (aus der
 Dev-Umgebung nicht erreichbar, siehe Abschnitt 3), die **Vikunja-Aufgabe** bei
 einer Klassenarbeit, das **Touch-Verhalten am Gerät** und der Durchlauf des

@@ -3,6 +3,7 @@ Fotos und das PDF-Protokoll."""
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -39,12 +40,14 @@ def client(db, user, tmp_path, monkeypatch):
 
 
 def _besuch(client, **extra) -> int:
+    kat = client.get("/api/ub/katalog").json()["kriterien"]
     daten = {
         "neuer_anwaerter": {"name": "Anna Beispiel", "faecher": "Mechatronik"},
         "datum": "2026-10-05", "beginn": "08:00", "ende": "09:30",
         "klasse": "BSMT 26a", "raum": "B112", "thema": "Pneumatik: Wegeventile",
         "lernziele": "Die SuS unterscheiden 3/2- und 5/2-Wegeventile.",
-        "schwerpunkte": ["Impulse", "  ", "Sicherung der Ergebnisse"],
+        # Auswahl aus dem Katalog: 2. und 1. Beratungsschwerpunkt, dazu Müll
+        "schwerpunkte": [kat[1]["id"], kat[0]["id"], "x", 99999, kat[1]["id"]],
     }
     daten.update(extra)
     r = client.post("/api/ub/besuche", json=daten)
@@ -53,6 +56,14 @@ def _besuch(client, **extra) -> int:
 
 
 # ── Vorgaben & Einstellungen ─────────────────────────────────────────────
+
+def test_eintrag_ohne_kategorie_wird_abgewiesen(client, db, user):
+    """Keine Vorbelegung: Ereignisse kommen in beliebiger Folge, jeder Eintrag
+    wird bewusst eingeordnet."""
+    bid = _besuch(client)
+    assert client.post(f"/api/ub/besuche/{bid}/eintraege",
+                       json={"text": "ohne Kategorie"}).status_code == 400
+
 
 def test_vorgaben_werden_genau_einmal_angelegt(db, user):
     k = ub.katalog(db, user)
@@ -106,7 +117,8 @@ def test_besuch_mit_neuem_anwaerter_in_einem_request(client, db):
     assert b.anwaerter.name == "Anna Beispiel"
     assert b.status == "geplant"
     d = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]
-    assert [s["text"] for s in d["schwerpunkte"]] == ["Impulse", "Sicherung der Ergebnisse"]
+    # Katalog-Reihenfolge, doppelte/fremde/ungültige IDs fallen heraus
+    assert [s["text"] for s in d["schwerpunkte"]] == ub.VORGABE_KRITERIEN[:2]
 
 
 def test_besuch_ohne_datum_hinterlaesst_keinen_anwaerter(client, db):
@@ -116,25 +128,23 @@ def test_besuch_ohne_datum_hinterlaesst_keinen_anwaerter(client, db):
     assert db.query(UbAnwaerter).count() == 0
 
 
-def test_schwerpunkt_loeschen_verschiebt_keine_zuordnung(client, db, user):
-    """Wird der ERSTE Schwerpunkt gelöscht, muss der zweite seine ID behalten —
-    sonst hingen dessen Einträge plötzlich am falschen Text."""
+def test_abwaehlen_nimmt_eintraegen_nicht_die_zuordnung(client, db, user):
     bid = _besuch(client)
-    kat = ub.katalog(db, user)["kategorien"][0]["id"]
-    alt = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]["schwerpunkte"]
+    kat = ub.katalog(db, user)
+    sp = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]["schwerpunkte"]
     e = client.post(f"/api/ub/besuche/{bid}/eintraege", json={
-        "kategorie_id": kat, "text": "x", "schwerpunkt_id": alt[1]["id"]}).json()["eintrag"]
-    e0 = client.post(f"/api/ub/besuche/{bid}/eintraege", json={
-        "kategorie_id": kat, "text": "y", "schwerpunkt_id": alt[0]["id"]}).json()["eintrag"]
-
-    client.post(f"/api/ub/besuche/{bid}/save", json={"schwerpunkte": [
-        {"id": alt[1]["id"], "text": "Sicherung (geschärft)"}, "Ganz neu"]})
+        "kategorie_id": kat["kategorien"][0]["id"], "text": "x",
+        "kriterium_id": sp[0]["id"]}).json()["eintrag"]
+    client.post(f"/api/ub/besuche/{bid}/save", json={"schwerpunkte": [sp[1]["id"]]})
     neu = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]
-    assert neu["schwerpunkte"][0] == {"id": alt[1]["id"], "text": "Sicherung (geschärft)"}
-    assert neu["schwerpunkte"][1]["text"] == "Ganz neu"
-    nach = {x["id"]: x for x in neu["eintraege"]}
-    assert nach[e["id"]]["schwerpunkt_id"] == alt[1]["id"]
-    assert nach[e0["id"]]["schwerpunkt_id"] is None
+    assert [s["id"] for s in neu["schwerpunkte"]] == [sp[1]["id"]]
+    assert neu["eintraege"][0]["kriterium_id"] == sp[0]["id"]
+
+
+def test_gewaehlter_schwerpunkt_zaehlt_als_nutzung(client, db, user):
+    bid = _besuch(client)
+    kid = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]["schwerpunkte"][0]["id"]
+    assert client.post(f"/api/ub/einstellungen/kriterien/{kid}/delete").status_code == 409
 
 
 def test_anwaerter_mit_besuchen_nicht_loeschbar(client, db):
@@ -163,18 +173,16 @@ def test_eintraege_chronologisch_mit_phasen(client, db, user):
         ("P", erarbeitung)]
 
 
-def test_kriterium_oder_schwerpunkt_nie_beides(client, db, user):
+def test_zuordnung_setzen_und_aufheben(client, db, user):
     bid = _besuch(client)
     k = ub.katalog(db, user)
-    sp = client.get(f"/api/ub/besuche/{bid}").json()["besuch"]["schwerpunkte"][0]["id"]
     e = client.post(f"/api/ub/besuche/{bid}/eintraege", json={
         "kategorie_id": k["kategorien"][0]["id"], "text": "x",
-        "kriterium_id": k["kriterien"][0]["id"], "schwerpunkt_id": sp,
-    }).json()["eintrag"]
-    assert e["kriterium_id"] and e["schwerpunkt_id"] is None
+        "kriterium_id": k["kriterien"][3]["id"]}).json()["eintrag"]
+    assert e["kriterium_id"] == k["kriterien"][3]["id"]
     e = client.post(f"/api/ub/eintraege/{e['id']}/save",
-                    json={"kriterium_id": None, "schwerpunkt_id": sp}).json()["eintrag"]
-    assert e["kriterium_id"] is None and e["schwerpunkt_id"] == sp
+                    json={"kriterium_id": None}).json()["eintrag"]
+    assert e["kriterium_id"] is None and e["text"] == "x"
 
 
 def test_teil_update_und_wertung(client, db, user):
@@ -304,3 +312,44 @@ def test_pfad_parser_kennt_alle_befehle():
     f = Fake()
     ub_protokoll_pdf._pfad(f, "M1 2 L3 4 5 6 H7 V8 C1 1 2 2 3 3 Q4 4 5 5 Z")
     assert f.ops == ["M", "L", "L", "L", "L", "C", "C", "Z"]
+
+
+# ── Migration 0035: Freitext-Schwerpunkte → Katalog ──────────────────────
+
+def test_migration_0035_uebernimmt_freitext_schwerpunkte(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    import sqlalchemy as sa
+
+    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+    url = f"sqlite:///{tmp_path / 'm.sqlite'}"
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "0034")
+
+    eng = sa.create_engine(url)
+    with eng.begin() as c:
+        c.execute(sa.text("INSERT INTO users (id, username, password_hash, role, full_name, active, "
+                          "must_change_pw, failed_attempts) VALUES (1,'u','x','teacher','',1,0,0)"))
+        c.execute(sa.text("INSERT INTO ub_kriterien (id, user_id, name, position, active) "
+                          "VALUES (7, 1, 'Ergebnissicherung', 0, 1)"))
+        c.execute(sa.text("INSERT INTO ub_anwaerter (id, user_id, name) VALUES (1, 1, 'A')"))
+        c.execute(sa.text("INSERT INTO ub_besuche (id, user_id, anwaerter_id, datum) "
+                          "VALUES (1, 1, 1, '2026-09-29')"))
+        c.execute(sa.text("INSERT INTO ub_schwerpunkte (id, besuch_id, text, position) VALUES "
+                          "(1, 1, '  ergebnissicherung ', 0), (2, 1, 'Impulsgebung', 1), "
+                          "(3, 1, 'Impulsgebung', 2)"))
+        c.execute(sa.text("INSERT INTO ub_eintraege (id, besuch_id, art, schwerpunkt_id) VALUES "
+                          "(1, 1, 'eintrag', 1), (2, 1, 'eintrag', 2), (3, 1, 'eintrag', 3)"))
+
+    command.upgrade(cfg, "0035")
+    with eng.connect() as c:
+        krit = dict(c.execute(sa.text("SELECT name, id FROM ub_kriterien")).fetchall())
+        assert set(krit) == {"Ergebnissicherung", "Impulsgebung"}   # gleicher Name → derselbe
+        sp = c.execute(sa.text("SELECT kriterium_id FROM ub_schwerpunkte ORDER BY position")).fetchall()
+        assert [r[0] for r in sp] == [7, krit["Impulsgebung"]]       # Dublette entfernt
+        e = dict(c.execute(sa.text("SELECT id, kriterium_id FROM ub_eintraege")).fetchall())
+        assert e == {1: 7, 2: krit["Impulsgebung"], 3: krit["Impulsgebung"]}
+        assert c.execute(sa.text(
+            "SELECT count(*) FROM ub_eintraege WHERE schwerpunkt_id IS NOT NULL")).scalar() == 0
+    eng.dispose()

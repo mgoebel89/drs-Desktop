@@ -14,8 +14,8 @@
   const ICONS = window.UB.icons;
   const FARBEN = window.UB.farben;
   const SPALTEN = window.UB.spalten;
-  const TITEL = { kategorien: 'Kategorie', phasen: 'Phase', kriterien: 'Kriterium' };
-  const NEU_TITEL = { kategorien: 'Neue Kategorie', phasen: 'Neue Phase', kriterien: 'Neues Kriterium' };
+  const TITEL = { kategorien: 'Kategorie', phasen: 'Phase', kriterien: 'Beratungsschwerpunkt' };
+  const NEU_TITEL = { kategorien: 'Neue Kategorie', phasen: 'Neue Phase', kriterien: 'Neuer Beratungsschwerpunkt' };
 
   function kreis(o) {
     const k = el('span', { class: 'ube-kreis', style: 'background:' + hell(o.farbe, 0.14) + ';color:' + o.farbe });
@@ -145,7 +145,7 @@
     const benutzt = o.nutzung > 0;
     confirmDanger({
       title: o.name + ' entfernen?',
-      facts: [{ wert: o.nutzung || 0, label: 'Einträge verwenden das' }],
+      facts: [{ wert: o.nutzung || 0, label: art === 'kriterien' ? 'Verwendungen (Einträge oder Auswahl in Besuchen)' : 'Einträge verwenden das' }],
       text: benutzt
         ? 'Weil Einträge daran hängen, geht nur Stilllegen. Es verschwindet dann aus der Auswahl, '
           + 'alte Protokolle bleiben unverändert.'

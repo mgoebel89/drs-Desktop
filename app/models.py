@@ -1184,13 +1184,15 @@ class UbBesuch(Base):
 
 
 class UbSchwerpunkt(Base):
-    """Vom Anwärter festgelegter Beobachtungsschwerpunkt — zugleich ein
-    Kriterium, dem die Einträge dieses Besuchs zugeordnet werden können."""
+    """Welche Beratungsschwerpunkte der Anwärter für DIESEN Besuch gewählt hat
+    — eine Auswahl aus dem Katalog `ub_kriterien` (seit Migration 0035).
+    `text` stammt aus Stufe 1 (Freitext) und bleibt nur als Altbestand stehen."""
     __tablename__ = "ub_schwerpunkte"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     besuch_id: Mapped[int] = mapped_column(
         ForeignKey("ub_besuche.id", ondelete="CASCADE"), index=True)
+    kriterium_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     text: Mapped[str] = mapped_column(String(300), default="")
     position: Mapped[int] = mapped_column(Integer, default=0)
 

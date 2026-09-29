@@ -111,6 +111,20 @@ ICONS: dict[str, tuple[str, list[tuple]]] = {
         ("path", "M3 17 L9 11 L13 15 L21 7"),
         ("path", "M15 7 H21 V13"),
     ]),
+    "kamera": ("Kamera", [
+        ("path", "M23 19 C23 20.1 22.1 21 21 21 H3 C1.9 21 1 20.1 1 19 V8 "
+                 "C1 6.9 1.9 6 3 6 H7 L9 3 H15 L17 6 H21 C22.1 6 23 6.9 23 8 Z"),
+        ("circle", 12, 13, 4),
+    ]),
+    "bild": ("Bild", [
+        ("rect", 3, 3, 18, 18, 2),
+        ("circle", 8.5, 8.5, 1.5),
+        ("path", "M21 15 L16 10 L5 21"),
+    ]),
+    "plus": ("Plus", [
+        ("path", "M12 5 V19"),
+        ("path", "M5 12 H19"),
+    ]),
 }
 STANDARD_ICON = "auge"
 
@@ -142,7 +156,7 @@ STATUS = {"geplant": "Geplant", "laufend": "Läuft", "abgeschlossen": "Abgeschlo
 ORDNUNGEN = {
     "chronologisch": "Chronologisch",
     "kategorie": "Nach Kategorie",
-    "kriterium": "Nach Kriterium",
+    "kriterium": "Nach Beratungsschwerpunkt",
     "zweispaltig": "Zweispaltig (Verlauf | Kommentar)",
 }
 
@@ -153,6 +167,9 @@ VORGABE_KATEGORIEN = [
     ("Anmerkung", "sprechblase", "#6A3FA0", "kommentar"),
 ]
 VORGABE_PHASEN = ["Einstieg", "Erarbeitung", "Sicherung", "Übung / Transfer", "Abschluss"]
+# Die „Kriterien" heißen in der Oberfläche **Beratungsschwerpunkte**: EIN Katalog
+# für alle Anwärter (Liste des Seminars). Je Besuch wählt der Anwärter daraus
+# aus (`ub_schwerpunkte`). Intern bleibt der Name `kriterien`/`kriterium_id`.
 VORGABE_KRITERIEN = [
     "Klassenführung", "Strukturierung", "Aktivierung der Lernenden",
     "Lehrersprache & Impulse", "Medien & Material", "Lernatmosphäre",
@@ -257,9 +274,15 @@ def eintrag_spalte(art: str) -> str:
 
 
 def nutzung(db: Session, art: str, obj_id: int) -> int:
-    """Wie viele Einträge hängen an diesem Einstellungswert?"""
+    """Wie oft wird dieser Einstellungswert verwendet? Bei Beratungsschwerpunkten
+    zählt auch die Auswahl in einem Besuch — sonst ließe sich ein Schwerpunkt
+    löschen, den ein Protokoll im Kopf aufführt."""
     spalte_ = getattr(UbEintrag, eintrag_spalte(art))
-    return db.scalar(select(func.count(UbEintrag.id)).where(spalte_ == obj_id)) or 0
+    n = db.scalar(select(func.count(UbEintrag.id)).where(spalte_ == obj_id)) or 0
+    if art == "kriterien":
+        n += db.scalar(select(func.count(UbSchwerpunkt.id))
+                       .where(UbSchwerpunkt.kriterium_id == obj_id)) or 0
+    return n
 
 
 def einstellung_dict(art: str, o, nutzung_: int | None = None) -> dict:
@@ -313,41 +336,40 @@ def besuche(db: Session, user: User, anwaerter_id: int | None = None) -> list[Ub
                                       UbBesuch.beginn.desc())).all())
 
 
-def schwerpunkte(db: Session, besuch_id: int) -> list[UbSchwerpunkt]:
+def schwerpunkte(db: Session, besuch_id: int) -> list[UbKriterium]:
+    """Die für diesen Besuch gewählten Beratungsschwerpunkte, in Katalog-
+    Reihenfolge (so stehen sie im Handy und im Protokoll immer gleich)."""
     return list(db.scalars(
-        select(UbSchwerpunkt).where(UbSchwerpunkt.besuch_id == besuch_id)
-        .order_by(UbSchwerpunkt.position, UbSchwerpunkt.id)
+        select(UbKriterium)
+        .join(UbSchwerpunkt, UbSchwerpunkt.kriterium_id == UbKriterium.id)
+        .where(UbSchwerpunkt.besuch_id == besuch_id)
+        .order_by(UbKriterium.position, UbKriterium.id)
     ).all())
 
 
-def setze_schwerpunkte(db: Session, besuch: UbBesuch, liste: list) -> None:
-    """Gleicht die Schwerpunkte ab. Elemente sind Strings (neu) oder
-    {id, text} (bestehend). Abgeglichen wird über die ID, NICHT über die
-    Position: Löscht man den ersten Schwerpunkt, darf der zweite nicht dessen
-    ID erben — sonst hingen dessen Einträge plötzlich am falschen Text.
-    Entfernte verschwinden, ihre Einträge verlieren nur die Zuordnung."""
-    alt = {s.id: s for s in schwerpunkte(db, besuch.id)}
-    behalten: set[int] = set()
-    pos = 0
-    for item in liste or []:
-        sid = item.get("id") if isinstance(item, dict) else None
-        t = text(item.get("text") if isinstance(item, dict) else item, 300)
-        if not t:
+def setze_schwerpunkte(db: Session, user: User, besuch: UbBesuch, ids: list) -> None:
+    """Setzt die Auswahl auf genau diese Katalog-IDs. Fremde oder unbekannte
+    IDs fallen still heraus. Einträge hängen direkt am Katalog, nicht an der
+    Auswahl — abwählen nimmt also keinem Eintrag seine Zuordnung."""
+    gueltig = []
+    for x in ids or []:
+        try:
+            kid = int(x)
+        except (TypeError, ValueError):
             continue
-        s = alt.get(int(sid)) if sid else None
-        if s:
-            s.text, s.position = t, pos
-            behalten.add(s.id)
+        k = db.get(UbKriterium, kid)
+        if k and k.user_id == user.id and kid not in gueltig:
+            gueltig.append(kid)
+    alt = {s.kriterium_id: s for s in db.scalars(
+        select(UbSchwerpunkt).where(UbSchwerpunkt.besuch_id == besuch.id)).all()}
+    for kid, zeile in alt.items():
+        if kid not in gueltig:
+            db.delete(zeile)
+    for pos, kid in enumerate(gueltig):
+        if kid in alt:
+            alt[kid].position = pos
         else:
-            db.add(UbSchwerpunkt(besuch_id=besuch.id, text=t, position=pos))
-        pos += 1
-    for sid, weg in alt.items():
-        if sid in behalten:
-            continue
-        for e in db.scalars(select(UbEintrag).where(
-                UbEintrag.schwerpunkt_id == sid)).all():
-            e.schwerpunkt_id = None
-        db.delete(weg)
+            db.add(UbSchwerpunkt(besuch_id=besuch.id, kriterium_id=kid, position=pos))
 
 
 def besuch_dict(db: Session, b: UbBesuch, mit_eintraegen: bool = False) -> dict:
@@ -359,7 +381,8 @@ def besuch_dict(db: Session, b: UbBesuch, mit_eintraegen: bool = False) -> dict:
         "lernziele": b.lernziele, "status": b.status,
         "status_label": STATUS.get(b.status, b.status),
         "reflexion": b.reflexion, "vereinbarungen": b.vereinbarungen,
-        "schwerpunkte": [{"id": s.id, "text": s.text} for s in schwerpunkte(db, b.id)],
+        # IDs sind Katalog-IDs (ub_kriterien) — dieselben wie `kriterium_id` am Eintrag
+        "schwerpunkte": [{"id": k.id, "text": k.name} for k in schwerpunkte(db, b.id)],
     }
     if mit_eintraegen:
         d["eintraege"] = [eintrag_dict(e) for e in eintraege(db, b.id)]
@@ -395,7 +418,7 @@ def eintrag_dict(e: UbEintrag) -> dict:
     return {
         "id": e.id, "art": e.art, "zeit": e.zeit, "position": e.position,
         "phase_id": e.phase_id, "kategorie_id": e.kategorie_id, "text": e.text,
-        "kriterium_id": e.kriterium_id, "schwerpunkt_id": e.schwerpunkt_id,
+        "kriterium_id": e.kriterium_id,
         "wertung": e.wertung, "bezug_id": e.bezug_id,
         "foto": (f"/api/files/{e.file_uuid}/{e.filename}" if e.file_uuid else ""),
     }

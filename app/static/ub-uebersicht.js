@@ -8,7 +8,7 @@
   'use strict';
   if (!window.DRS || !window.UB || !window.UBC) return;
   const { el, feld, modal, toast, confirmDanger, wizard, postJSON, getJSON } = DRS;
-  const { fmtDatum } = UBC;
+  const { fmtDatum, chipWahl } = UBC;
 
   let ANWAERTER = window.UB.anwaerter || [];
   const grid = document.getElementById('ubAnwGrid');
@@ -162,7 +162,7 @@
       neuer: { name: '', faecher: '', seminar: '' },
       datum: window.UB.heute, beginn: '', ende: '', klasse: '', raum: '',
       thema: '', lernziele: '',
-      schwerpunkte: ['', ''],
+      schwerpunkte: [],   // IDs aus dem Katalog der Beratungsschwerpunkte
     };
 
     function binde(input, key, ziel) {
@@ -231,28 +231,18 @@
         {
           key: 'schwerpunkte', label: 'Schwerpunkte',
           render: function (ctx, body) {
-            const liste = el('div');
-            function zeichne() {
-              liste.textContent = '';
-              ctx.schwerpunkte.forEach(function (t, i) {
-                const inp = el('input', { type: 'text', value: t,
-                  placeholder: 'z. B. Impulsgebung, Ergebnissicherung …' });
-                inp.addEventListener('input', function () { ctx.schwerpunkte[i] = inp.value; });
-                liste.appendChild(el('div', { class: 'ub-sp-zeile' }, [
-                  el('span', { class: 'muted', style: 'align-self:center;width:1.4rem' }, (i + 1) + '.'),
-                  inp,
-                  el('button', { type: 'button', class: 'btn-ghost', 'aria-label': 'Entfernen',
-                    onClick: function () { ctx.schwerpunkte.splice(i, 1); zeichne(); } }, '×'),
-                ]));
-              });
-            }
+            const katalog = window.UB.schwerpunktKatalog || [];
             body.appendChild(el('p', { class: 'muted' },
-              'Die Beobachtungsschwerpunkte, die der Anwärter für diese Stunde festgelegt hat. '
-              + 'Beim Mitschreiben kannst du Einträge direkt einem Schwerpunkt zuordnen. Optional.'));
-            body.appendChild(liste);
-            body.appendChild(el('button', { type: 'button', class: 'chip-add',
-              onClick: function () { ctx.schwerpunkte.push(''); zeichne(); } }, '+ Schwerpunkt'));
-            zeichne();
+              'Welche Beratungsschwerpunkte hat der Anwärter für diese Stunde gewählt? '
+              + 'Sie stehen beim Mitschreiben vorne als Knöpfe. Optional.'));
+            if (!katalog.length) {
+              body.appendChild(el('p', {}, [
+                'Noch keine Beratungsschwerpunkte angelegt — das geht in den ',
+                el('a', { href: '/unterrichtsbesuche/einstellungen' }, 'Einstellungen'), '.']));
+              return;
+            }
+            body.appendChild(chipWahl(katalog, ctx.schwerpunkte, true,
+              function (neu) { ctx.schwerpunkte = neu; }));
           },
         },
       ],
@@ -260,7 +250,7 @@
         const daten = {
           datum: ctx.datum, beginn: ctx.beginn, ende: ctx.ende, klasse: ctx.klasse,
           raum: ctx.raum, thema: ctx.thema, lernziele: ctx.lernziele,
-          schwerpunkte: ctx.schwerpunkte.filter(function (s) { return s.trim(); }),
+          schwerpunkte: ctx.schwerpunkte,
         };
         if (ctx.neu) daten.neuer_anwaerter = ctx.neuer;
         else daten.anwaerter_id = ctx.anwaerter_id;
