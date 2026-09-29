@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen · Unterrichtsbesuche{% endblock %}
+{% block content %}
+<style>
+  .ube-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    align-items: start; }
+  .ube-zeile { display: flex; align-items: center; gap: .5rem; padding: .45rem .2rem;
+    border-bottom: 1px solid var(--border); }
+  .ube-zeile.still { opacity: .5; }
+  .ube-name { flex: 1; cursor: pointer; font-size: 14px; }
+  .ube-name:hover { color: var(--blau); }
+  .ube-name small { color: var(--muted); font-size: 11px; margin-left: .3rem; }
+  .ube-pfeil { border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+    width: 28px; height: 28px; cursor: pointer; color: var(--muted); font-size: 13px; line-height: 1; }
+  .ube-pfeil:disabled { opacity: .3; cursor: default; }
+  .ube-kreis { width: 32px; height: 32px; border-radius: 50%; display: inline-flex;
+    align-items: center; justify-content: center; flex: none; }
+  .ube-icons { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); }
+  .ube-icons button, .ube-farben button { border: 1px solid var(--border); background: var(--surface);
+    border-radius: 8px; height: 44px; cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center; color: #34495e; }
+  .ube-icons button.aktiv { border: 2px solid var(--blau); background: var(--blau-hell); color: var(--blau); }
+  .ube-farben { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ube-farben button { width: 44px; border: 3px solid transparent; }
+  .ube-farben button.aktiv { border-color: #1a1a1a; }
+  .ube-vorschau { display: inline-flex; align-items: center; gap: .6rem; padding: .6rem 1rem;
+    border-radius: 12px; color: #fff; font-weight: 600; }
+</style>
+
+<p class="muted" style="margin-bottom:.3rem"><a href="/unterrichtsbesuche">Unterrichtsbesuche</a> ›</p>
+<div class="card">
+  <h1 style="margin:0 0 .4rem">Einstellungen</h1>
+  <p class="muted">Kategorien erscheinen beim Mitschreiben als große Knöpfe — in der
+    Reihenfolge von oben nach unten. Was schon in einem Protokoll steht, lässt sich
+    nicht mehr löschen, nur stilllegen: Dann verschwindet es aus der Auswahl, alte
+    Protokolle behalten ihr Piktogramm.</p>
+</div>
+
+<div class="ube-grid">
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Kategorien</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="kategorien">+ Neu</button></div>
+    <div id="ube-kategorien"></div>
+  </div>
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Unterrichtsphasen</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="phasen">+ Neu</button></div>
+    <div id="ube-phasen"></div>
+  </div>
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Kriterien</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="kriterien">+ Neu</button></div>
+    <p class="muted" style="font-size:12px">Fester Katalog. Die Schwerpunkte des Anwärters
+      kommen je Besuch dazu.</p>
+    <div id="ube-kriterien"></div>
+  </div>
+</div>
+
+<script>
+  window.UB = {
+    daten: {{ daten | tojson }},
+    icons: {{ icons | tojson }},
+    farben: {{ farben | tojson }},
+    spalten: {{ spalten | tojson }}
+  };
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/ub-common.js?v={{ static_version() }}"></script>
+<script src="/static/ub-einstellungen.js?v={{ static_version() }}"></script>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ b.anwaerter.name }} · {{ b.datum[8:10] }}.{{ b.datum[5:7] }}.{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/ub.css?v={{ static_version() }}">
+<style>
+  .ubd-kopf { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .ubd-kopf h1 { margin: 0; font-size: 22px; }
+  .ubd-meta { font-size: 13px; color: var(--muted); margin-top: .2rem; }
+  .ubd-daten { width: 100%; border-collapse: collapse; }
+  .ubd-daten th { text-align: left; vertical-align: top; width: 9rem; font-size: 12px;
+    color: var(--muted); font-weight: 600; padding: .45rem .4rem .45rem 0; }
+  .ubd-daten td { padding: .45rem 0; font-size: 14px; white-space: pre-wrap; }
+  .ubd-daten tr + tr { border-top: 1px solid var(--border); }
+  .ub-status { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 10px;
+    background: #f1f4f7; color: #4a5b6d; }
+  .ub-status.laufend { background: var(--blau); color: #fff; }
+  .ub-status.abgeschlossen { background: #eef4ee; color: #2e7d32; }
+  .ub-sp-zeile { display: flex; gap: .5rem; margin-bottom: .5rem; }
+  .ub-sp-zeile input { flex: 1; }
+  @media (max-width: 760px) { .ubd-daten th { width: 6.5rem; } }
+</style>
+
+<p class="muted" style="margin-bottom:.3rem"><a href="/unterrichtsbesuche">Unterrichtsbesuche</a> ›</p>
+
+<div class="card">
+  <div class="ubd-kopf">
+    <div>
+      <h1 id="ubdName">{{ b.anwaerter.name }}</h1>
+      <div class="ubd-meta" id="ubdMeta"></div>
+    </div>
+    <span style="margin-left:auto" class="ub-status {{ b.status }}" id="ubdStatus">{{ status[b.status] }}</span>
+  </div>
+  <div class="toolbar" style="margin-top:1rem;flex-wrap:wrap">
+    <a class="btn" href="/unterrichtsbesuche/{{ b.id }}/erfassen">Erfassen</a>
+    <button type="button" class="btn-sec" id="ubdPdf">Protokoll (PDF)</button>
+    <button type="button" class="btn-sec" id="ubdEdit">Kopfdaten bearbeiten</button>
+    <button type="button" class="btn-sec" id="ubdStatusBtn"></button>
+    <div class="spacer"></div>
+    <button type="button" class="btn-danger" id="ubdDel">Löschen</button>
+  </div>
+</div>
+
+<div class="card">
+  <table class="ubd-daten" id="ubdDaten"></table>
+</div>
+
+<div class="card">
+  <div class="toolbar"><h2 style="margin:0;font-size:17px">Verlauf</h2><div class="spacer"></div>
+    <span class="muted" style="font-size:12px">Bearbeiten in der Erfassung</span></div>
+  <div id="ubdVerlauf"></div>
+</div>
+
+<script>
+  window.UB = {
+    besuch: {{ besuch | tojson }},
+    katalog: {{ katalog | tojson }},
+    icons: {{ icons | tojson }},
+    wertungen: {{ wertungen | tojson }},
+    status: {{ status | tojson }}
+  };
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/ub-common.js?v={{ static_version() }}"></script>
+<script src="/static/ub-besuch.js?v={{ static_version() }}"></script>
+{% endblock %}

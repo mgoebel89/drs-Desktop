@@ -33,6 +33,7 @@ from app.routers import vikunja as vikunja_router
 from app.routers import dokumente as dokumente_router
 from app.routers import haushalt as haushalt_router
 from app.routers import vorgaenge as vorgaenge_router
+from app.routers import unterrichtsbesuche as unterrichtsbesuche_router
 from app.routers import stammdaten as stammdaten_router
 from app.routers import stammdaten_api as stammdaten_api_router
 from app.routers import timetable_settings as timetable_settings_router
@@ -69,6 +70,7 @@ app.include_router(vikunja_router.router)
 app.include_router(dokumente_router.router)
 app.include_router(haushalt_router.router)
 app.include_router(vorgaenge_router.router)
+app.include_router(unterrichtsbesuche_router.router)
 app.include_router(stammdaten_router.router)
 app.include_router(stammdaten_api_router.router)
 app.include_router(timetable_settings_router.router)

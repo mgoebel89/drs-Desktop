@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Unterrichtsbesuche{% endblock %}
+{% block content %}
+<style>
+  .ub-grid { display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .ub-card { border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--surface); box-shadow: var(--shadow); padding: 14px;
+    display: flex; flex-direction: column; gap: .3rem; }
+  .ub-card.laufend { border: 2px solid var(--blau); }
+  .ub-card-kopf { display: flex; align-items: baseline; gap: .6rem; }
+  .ub-card-datum { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ub-card-zeit { font-size: 12px; color: var(--muted); }
+  .ub-card-name { font-weight: 600; font-size: 15px; color: var(--text); text-decoration: none; }
+  .ub-card-name:hover { color: var(--blau); }
+  .ub-card-thema { font-size: 13px; color: #3b4a5a; }
+  .ub-card-meta { font-size: 11px; color: var(--muted); }
+  .ub-card-fuss { display: flex; gap: .5rem; margin-top: .5rem; padding-top: .6rem;
+    border-top: 1px solid var(--border); }
+  .ub-card-fuss .btn, .ub-card-fuss .btn-sec { flex: 1; justify-content: center; text-align: center; }
+  .ub-status { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 9px;
+    margin-left: auto; background: #f1f4f7; color: #4a5b6d; white-space: nowrap; }
+  .ub-status.laufend { background: var(--blau); color: #fff; }
+  .ub-status.abgeschlossen { background: #eef4ee; color: #2e7d32; }
+  .ub-h2 { font-size: 17px; margin: 1.4rem 0 .7rem; }
+  .ub-liste { width: 100%; border-collapse: collapse; }
+  .ub-liste td { padding: .5rem .4rem; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .ub-liste tr { cursor: pointer; }
+  .ub-liste tr:hover td { background: #f6f9fc; }
+  .ub-still { opacity: .55; }
+  .ub-wahl { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .ub-wahl button { text-align: left; border: 1px solid var(--border); background: var(--surface);
+    border-radius: var(--r); padding: 10px 12px; cursor: pointer; font: inherit; }
+  .ub-wahl button.aktiv { border: 2px solid var(--blau); background: var(--blau-hell); }
+  .ub-wahl small { display: block; color: var(--muted); font-size: 11px; }
+  .ub-sp-zeile { display: flex; gap: .5rem; margin-bottom: .5rem; }
+  .ub-sp-zeile input { flex: 1; }
+</style>
+
+<div class="card">
+  <div class="toolbar">
+    <h1 style="margin:0">Unterrichtsbesuche</h1>
+    <div class="spacer"></div>
+    <a class="btn-sec" href="/unterrichtsbesuche/einstellungen">Einstellungen</a>
+    <button type="button" class="btn-sec" id="ubNeuAnw">+ Anwärter</button>
+    <button type="button" class="btn" id="ubNeuBesuch">+ Besuch</button>
+  </div>
+  <p class="muted">Verlauf im Unterrichtsbesuch vom Handy mitschreiben, danach als
+    Protokoll ausgeben. Kategorien, Phasen und Kriterien legst du in den
+    <a href="/unterrichtsbesuche/einstellungen">Einstellungen</a> fest.</p>
+</div>
+
+<h2 class="ub-h2">Anstehend &amp; laufend</h2>
+{% if anstehend %}
+<div class="ub-grid">
+  {% for b in anstehend %}
+  <div class="ub-card{% if b.status == 'laufend' %} laufend{% endif %}">
+    <div class="ub-card-kopf">
+      <span class="ub-card-datum">{{ b.datum[8:10] }}.{{ b.datum[5:7] }}.</span>
+      <span class="ub-card-zeit">{{ b.beginn }}{% if b.ende %}–{{ b.ende }}{% endif %}</span>
+      <span class="ub-status {{ b.status }}">{{ 'Läuft' if b.status == 'laufend' else 'Geplant' }}</span>
+    </div>
+    <a class="ub-card-name" href="/unterrichtsbesuche/{{ b.id }}">{{ b.anwaerter.name }}</a>
+    <span class="ub-card-thema">{{ b.thema or 'ohne Thema' }}</span>
+    <span class="ub-card-meta">
+      {{ b.klasse or '—' }}{% if b.raum %} · {{ b.raum }}{% endif %}
+      {% if eintrag_zahl.get(b.id) %} · {{ eintrag_zahl.get(b.id) }} Einträge{% endif %}
+    </span>
+    <div class="ub-card-fuss">
+      <a class="btn-sec" href="/unterrichtsbesuche/{{ b.id }}">Details</a>
+      <a class="btn" href="/unterrichtsbesuche/{{ b.id }}/erfassen">Erfassen</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><p class="muted">Kein Besuch geplant. „+ Besuch" legt einen an.</p></div>
+{% endif %}
+
+<h2 class="ub-h2">Anwärter</h2>
+<div class="card-grid" id="ubAnwGrid"></div>
+
+{% if vergangen %}
+<h2 class="ub-h2">Vergangene Besuche</h2>
+<div class="card" style="padding:8px 14px">
+  <table class="ub-liste">
+    {% for b in vergangen %}
+    <tr onclick="location.href='/unterrichtsbesuche/{{ b.id }}'">
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">
+        {{ b.datum[8:10] }}.{{ b.datum[5:7] }}.{{ b.datum[0:4] }}</td>
+      <td><strong>{{ b.anwaerter.name }}</strong></td>
+      <td>{{ b.thema }}</td>
+      <td class="muted">{{ b.klasse }}</td>
+      <td style="text-align:right"><span class="ub-status {{ b.status }}">
+        {{ 'Abgeschlossen' if b.status == 'abgeschlossen' else ('Läuft' if b.status == 'laufend' else 'Geplant') }}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<script>
+  window.UB = {
+    anwaerter: {{ anwaerter | tojson }},
+    heute: {{ heute | tojson }}
+  };
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/ub-common.js?v={{ static_version() }}"></script>
+<script src="/static/ub-uebersicht.js?v={{ static_version() }}"></script>
+{% endblock %}
