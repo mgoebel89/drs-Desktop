@@ -175,8 +175,11 @@ def _foto(dok: _Dok, a: EintragAnsicht, max_cm: float) -> str:
     if hoehe > 6.0:
         hoehe = 6.0
         breite = hoehe * w / h
-    return f'<text:p text:style-name="PFoto">{dok.bild(daten, "png" if png else "jpg", "image/png" if png else "image/jpeg",
-                    breite, hoehe, schluessel=f"foto_{a.id}")}</text:p>'
+    # Rahmen vorher bauen: Ein über Zeilen umbrochener Ausdruck IN einem
+    # f-String geht erst ab Python 3.12 — der Container läuft auf 3.11.
+    rahmen = dok.bild(daten, "png" if png else "jpg", "image/png" if png else "image/jpeg",
+                      breite, hoehe, schluessel=f"foto_{a.id}")
+    return f'<text:p text:style-name="PFoto">{rahmen}</text:p>'
 
 
 def _inhalt(dok: _Dok, a: EintragAnsicht, pr: Protokoll, max_cm: float, **meta_kw) -> str:
