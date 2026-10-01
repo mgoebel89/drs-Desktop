@@ -137,6 +137,17 @@
       return d.eintrag;
     }
 
+    async function ladeSkizzeHoch(eid, sk) {
+      const fd = new FormData();
+      fd.append('file', sk.bild, sk.bild.type === 'image/jpeg' ? 'skizze.jpg' : 'skizze.png');
+      fd.append('striche', JSON.stringify(sk.daten));
+      const r = await fetch('/api/ub/eintraege/' + eid + '/skizze', { method: 'POST', body: fd });
+      let d = null;
+      try { d = await r.json(); } catch (_) { /* kein JSON */ }
+      if (!r.ok) throw new Error((d && d.detail) || 'Skizze konnte nicht gespeichert werden');
+      return d.eintrag;
+    }
+
     // Zwei getrennte Wege, weil iPhone und Android ohne `capture`
     // unterschiedlich fragen. `capture="environment"` öffnet auf beiden direkt
     // die Rückkamera; ohne `capture` kommt die Galerie.
@@ -159,7 +170,7 @@
 
     // ── Eintrag anlegen / bearbeiten ──────────────────────────────────
 
-    function eintragBlatt(e, startFoto) {
+    function eintragBlatt(e, startFoto, startSkizze) {
       const neu = !e;
       const d = {
         kategorie_id: neu ? null : e.kategorie_id,
@@ -167,6 +178,7 @@
         bezug_id: neu ? null : (e.bezug_id || null),
         wertung: neu ? '' : (e.wertung || ''),
         fotoNeu: startFoto || null, fotoWeg: false,
+        skizzeNeu: startSkizze || null, skizzeWeg: false,
       };
       let busy = false;
 
@@ -245,27 +257,60 @@
         return { wert: k, label: WERTUNGEN[k].label, icon: WERTUNGEN[k].icon, farbe: WERTUNGEN[k].farbe };
       })), d.wertung, function (v) { d.wertung = v; });
 
-      // Foto
+      // Foto & Skizze — eine Zeile, weil beides „das Bild zum Eintrag" ist
       const fotoBox = el('div', { class: 'ube-foto-box' });
-      let vorschauUrl = d.fotoNeu ? URL.createObjectURL(d.fotoNeu) : (neu ? '' : (e.foto || ''));
+      function hatFotoJetzt() { return !!d.fotoNeu || (!neu && !!e.foto && !d.fotoWeg); }
+      function hatSkizzeJetzt() { return !!d.skizzeNeu || (!neu && !!e.skizze && !d.skizzeWeg); }
+      function vorschau() {
+        if (d.skizzeNeu) return URL.createObjectURL(d.skizzeNeu.bild);
+        if (d.fotoNeu) return URL.createObjectURL(d.fotoNeu);
+        if (!neu && e.skizze && !d.skizzeWeg) return e.skizze;
+        if (!neu && e.foto && !d.fotoWeg) return e.foto;
+        return '';
+      }
       function nimmFoto(blob) {
+        // Eine auf dem alten Foto gezeichnete Skizze passt nicht mehr zum neuen
+        if (d.skizzeNeu && d.skizzeNeu.daten.hintergrund === 'foto') d.skizzeNeu = null;
         d.fotoNeu = blob; d.fotoWeg = false;
-        vorschauUrl = URL.createObjectURL(blob);
         malFoto();
       }
       const kamera = fotoWaehler(true, nimmFoto);
       const galerie = fotoWaehler(false, nimmFoto);
+      async function zeichnen() {
+        let alt = d.skizzeNeu ? d.skizzeNeu.daten : null;
+        if (!alt && !neu && e.skizze && !d.skizzeWeg) {
+          try {
+            alt = (await window.DRS.getJSON('/api/ub/eintraege/' + e.id + '/skizze')).skizze;
+          } catch (err) { toast('Skizze konnte nicht geladen werden: ' + fehlertext(err)); return; }
+        }
+        // Hintergrund ist das Foto — außer eine bestehende Skizze war ein leeres Blatt
+        let hg = null;
+        if (!(alt && alt.hintergrund === 'leer')) {
+          hg = d.fotoNeu || (!neu && e.foto && !d.fotoWeg ? e.foto : null);
+        }
+        if (alt && alt.hintergrund === 'foto' && !hg) alt = null;   // Foto inzwischen weg
+        const r = await UBC.zeichnen({ hintergrund: hg, skizze: alt });
+        if (!r) return;
+        if (r.loeschen) { d.skizzeNeu = null; d.skizzeWeg = true; } else { d.skizzeNeu = r; d.skizzeWeg = false; }
+        malFoto();
+      }
       function malFoto() {
         fotoBox.textContent = '';
-        if (vorschauUrl) fotoBox.appendChild(el('img', { src: vorschauUrl, alt: 'Foto' }));
+        const url = vorschau();
+        if (url) fotoBox.appendChild(el('img', { src: url, alt: 'Bild zum Eintrag' }));
         fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec',
           onClick: function () { kamera.click(); } },
-        [piktogramm(ICONS, 'kamera', 18), vorschauUrl ? ' Neu aufnehmen' : ' Kamera']));
+        [piktogramm(ICONS, 'kamera', 18), hatFotoJetzt() ? ' Neues Foto' : ' Kamera']));
         fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec',
           onClick: function () { galerie.click(); } }, [piktogramm(ICONS, 'bild', 18), ' Galerie']));
-        if (vorschauUrl) {
+        fotoBox.appendChild(el('button', { type: 'button', class: 'btn-sec', onClick: zeichnen },
+          [piktogramm(ICONS, 'stift', 18),
+            hatSkizzeJetzt() ? ' Skizze bearbeiten' : (hatFotoJetzt() ? ' Auf Foto zeichnen' : ' Zeichnen')]));
+        if (url) {
           fotoBox.appendChild(el('button', { type: 'button', class: 'btn-ghost btn-sm',
-            onClick: function () { d.fotoNeu = null; d.fotoWeg = true; vorschauUrl = ''; malFoto(); } }, 'Entfernen'));
+            onClick: function () {
+              d.fotoNeu = null; d.fotoWeg = true; d.skizzeNeu = null; d.skizzeWeg = true; malFoto();
+            } }, 'Entfernen'));
         }
       }
       malFoto();
@@ -276,7 +321,7 @@
         bezugReihe,
         feldReihe('Wozu? (Beratungsschwerpunkt)', wozuBox),
         feldReihe('Wertung', wertung),
-        feldReihe('Foto', fotoBox),
+        feldReihe('Foto / Skizze', fotoBox),
       ];
       malBezug();
       if (!neu) {
@@ -298,12 +343,13 @@
         onClose: function () { kamera.remove(); galerie.remove(); },
       });
       // Im selben Tipp fokussieren — nur dann öffnet iOS die Tastatur.
-      // Kommt der Eintrag über die Kamera, bleibt die Tastatur zu.
-      if (neu && !startFoto) text.focus();
+      // Kommt der Eintrag über Kamera oder Skizze, bleibt die Tastatur zu.
+      if (neu && !startFoto && !startSkizze) text.focus();
 
       function geaendert() {
-        if (neu) return !!(text.value.trim() || d.fotoNeu || d.kategorie_id || d.kriterium_id);
+        if (neu) return !!(text.value.trim() || d.fotoNeu || d.skizzeNeu || d.kategorie_id || d.kriterium_id);
         return text.value.trim() !== (e.text || '') || !!d.fotoNeu || d.fotoWeg
+          || !!d.skizzeNeu || d.skizzeWeg
           || d.kategorie_id !== e.kategorie_id || d.kriterium_id !== e.kriterium_id
           || d.wertung !== (e.wertung || '') || d.bezug_id !== (e.bezug_id || null)
           || zeit.value !== (e.zeit || '');
@@ -322,14 +368,16 @@
       async function speichern() {
         if (busy) return;
         const t = text.value.trim();
-        const hatFoto = d.fotoNeu || (!neu && e.foto && !d.fotoWeg);
         if (!d.kategorie_id) {
           katReihe.classList.add('fehlt');
           katReihe.scrollIntoView({ block: 'center', behavior: 'smooth' });
           toast('Bitte wählen: Was ist es?');
           return;
         }
-        if (!t && !hatFoto) { toast('Bitte einen Text eingeben oder ein Foto anhängen.'); return; }
+        if (!t && !hatFotoJetzt() && !hatSkizzeJetzt()) {
+          toast('Bitte einen Text eingeben, ein Foto anhängen oder etwas zeichnen.');
+          return;
+        }
         const daten = {
           kategorie_id: d.kategorie_id, kriterium_id: d.kriterium_id,
           bezug_id: istKommentar() ? d.bezug_id : null,
@@ -341,7 +389,7 @@
         let eintrag;
         try {
           if (neu) {
-            daten.foto_folgt = !!d.fotoNeu;
+            daten.foto_folgt = !!(d.fotoNeu || d.skizzeNeu);
             const r = await postJSON('/api/ub/besuche/' + B.id + '/eintraege', daten);
             eintrag = r.eintrag;
             if (r.status) B.status = r.status;
@@ -363,12 +411,19 @@
         opt.zeichne(eintrag.id);
         // Der Text ist sicher; das Foto kommt hinterher.
         try {
+          // Reihenfolge zählt: erst das Foto (der Server verwirft dabei eine
+          // Skizze, die auf dem alten Foto lag), dann die neue Skizze.
           let neuStand = null;
           if (d.fotoNeu) {
-            toast('Foto wird hochgeladen …');
+            toast('Bild wird hochgeladen …');
             neuStand = await ladeFotoHoch(eintrag.id, d.fotoNeu);
-          } else if (d.fotoWeg && !neu) {
+          } else if (d.fotoWeg && !neu && e.foto) {
             neuStand = (await postJSON('/api/ub/eintraege/' + eintrag.id + '/foto/delete', {})).eintrag;
+          }
+          if (d.skizzeNeu) {
+            neuStand = await ladeSkizzeHoch(eintrag.id, d.skizzeNeu);
+          } else if (d.skizzeWeg && !neu && e.skizze) {
+            neuStand = (await postJSON('/api/ub/eintraege/' + eintrag.id + '/skizze/delete', {})).eintrag;
           }
           if (neuStand) {
             const ziel = Z.eintraege.find(function (x) { return x.id === eintrag.id; });
@@ -377,14 +432,14 @@
           }
           toast('Gespeichert.');
         } catch (err) {
-          toast('Eintrag gespeichert, aber das Foto nicht: ' + fehlertext(err), 5000);
+          toast('Eintrag gespeichert, aber das Bild nicht: ' + fehlertext(err), 5000);
         }
       }
 
       function loeschen() {
         confirmDanger({
           title: 'Eintrag löschen?',
-          text: e.foto ? 'Der Eintrag und sein Foto werden entfernt.' : 'Der Eintrag wird entfernt.',
+          text: (e.foto || e.skizze) ? 'Der Eintrag und sein Bild werden entfernt.' : 'Der Eintrag wird entfernt.',
           danger: 'Löschen',
           onDanger: async function (c) {
             try {

@@ -496,3 +496,100 @@ def test_odt_icons_sind_png():
         im = PILImage.open(io.BytesIO(png))
         assert im.size == (48, 48)
         assert im.getbbox() is not None          # nicht leer gezeichnet
+
+
+# ── Skizzen / Handschrift ────────────────────────────────────────────────
+
+def _png(breite=400, hoehe=300) -> bytes:
+    buf = io.BytesIO()
+    PILImage.new("RGB", (breite, hoehe), (255, 255, 255)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _striche(hintergrund="leer") -> str:
+    import json as _json
+    return _json.dumps({"v": 1, "w": 1600, "h": 1200, "hintergrund": hintergrund,
+                        "striche": [{"f": "#1a1a1a", "b": "mittel", "p": [[10, 10, .5], [50, 60, .7]]}]})
+
+
+def _eintrag_neu(client, db, user, **extra):
+    bid = _besuch(client)
+    kat = ub.katalog(db, user)["kategorien"][0]["id"]
+    daten = {"kategorie_id": kat, "text": "", "foto_folgt": True}
+    daten.update(extra)
+    return bid, client.post(f"/api/ub/besuche/{bid}/eintraege", json=daten).json()["eintrag"]
+
+
+def test_skizze_speichern_lesen_ersetzen_loeschen(client, db, user):
+    _, e = _eintrag_neu(client, db, user)
+    url = f"/api/ub/eintraege/{e['id']}/skizze"
+    r = client.post(url, files={"file": ("skizze.png", _png(), "image/png")},
+                    data={"striche": _striche()})
+    assert r.status_code == 200, r.text
+    erste = r.json()["eintrag"]["skizze"]
+    assert erste.endswith("skizze.png")
+    assert client.get(url).json()["skizze"]["striche"][0]["p"][1] == [50, 60, .7]
+
+    r = client.post(url, files={"file": ("skizze.png", _png(), "image/png")},
+                    data={"striche": _striche()})
+    assert r.json()["eintrag"]["skizze"] != erste
+    assert db.query(AppFile).count() == 1            # alte Datei weg
+
+    client.post(url + "/delete")
+    assert db.query(AppFile).count() == 0
+    assert client.get(url).json()["skizze"] is None
+
+
+def test_skizze_wird_geprueft(client, db, user):
+    _, e = _eintrag_neu(client, db, user)
+    url = f"/api/ub/eintraege/{e['id']}/skizze"
+    datei = {"file": ("skizze.png", _png(), "image/png")}
+    assert client.post(url, files=datei, data={"striche": "kein json"}).status_code == 400
+    assert client.post(url, files=datei, data={"striche": '{"striche": [], "hintergrund": "x"}'}).status_code == 400
+    # Skizze „auf Foto", aber der Eintrag hat gar kein Foto
+    assert client.post(url, files=datei, data={"striche": _striche("foto")}).status_code == 400
+    assert client.post(url, files={"file": ("s.pdf", b"%PDF", "application/pdf")},
+                       data={"striche": _striche()}).status_code == 400
+
+
+def test_neues_foto_verwirft_skizze_auf_dem_alten(client, db, user):
+    _, e = _eintrag_neu(client, db, user)
+    eid = e["id"]
+    client.post(f"/api/ub/eintraege/{eid}/foto", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    client.post(f"/api/ub/eintraege/{eid}/skizze", files={"file": ("s.jpg", _jpeg(), "image/jpeg")},
+                data={"striche": _striche("foto")})
+    r = client.post(f"/api/ub/eintraege/{eid}/foto", files={"file": ("b.jpg", _jpeg(), "image/jpeg")})
+    assert r.json()["eintrag"]["skizze"] == ""
+    assert db.query(AppFile).count() == 1
+
+
+def test_skizze_auf_leerem_blatt_ueberlebt_fotowechsel(client, db, user):
+    _, e = _eintrag_neu(client, db, user)
+    eid = e["id"]
+    client.post(f"/api/ub/eintraege/{eid}/skizze", files={"file": ("s.png", _png(), "image/png")},
+                data={"striche": _striche("leer")})
+    r = client.post(f"/api/ub/eintraege/{eid}/foto", files={"file": ("b.jpg", _jpeg(), "image/jpeg")})
+    assert r.json()["eintrag"]["skizze"] != ""
+
+
+def test_reine_skizze_ist_ein_gueltiger_eintrag(client, db, user):
+    _, e = _eintrag_neu(client, db, user)
+    eid = e["id"]
+    client.post(f"/api/ub/eintraege/{eid}/skizze", files={"file": ("s.png", _png(), "image/png")},
+                data={"striche": _striche()})
+    # Text leeren ist erlaubt, solange die Skizze da ist
+    assert client.post(f"/api/ub/eintraege/{eid}/save", json={"text": ""}).status_code == 200
+
+
+def test_skizze_kommt_ins_protokoll_und_wird_mit_dem_eintrag_geloescht(client, db, user):
+    import zipfile
+    bid, e = _eintrag_neu(client, db, user, text="Sitzordnung")
+    client.post(f"/api/ub/eintraege/{e['id']}/skizze", files={"file": ("s.png", _png(), "image/png")},
+                data={"striche": _striche()})
+    for fmt in ("pdf", "odt"):
+        r = client.get(f"/unterrichtsbesuche/{bid}/protokoll.{fmt}")
+        assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    assert any(n.startswith("Pictures/foto_") and n.endswith(".png") for n in z.namelist())
+    client.post(f"/api/ub/eintraege/{e['id']}/delete")
+    assert db.query(AppFile).count() == 0

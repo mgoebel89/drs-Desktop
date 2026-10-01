@@ -74,6 +74,13 @@
     fuss.appendChild(el('button', { type: 'button', class: 'ube-neu',
       onClick: function () { ed.eintragBlatt(null, null); } },
     [piktogramm(ICONS, 'plus', 26, 2.2), el('span', {}, 'Eintrag')]));
+    // Schnellweg für Handschrift/Skizze: erst zeichnen, dann einordnen
+    fuss.appendChild(el('button', { type: 'button', class: 'ube-foto-schnell', 'aria-label': 'Skizze zeichnen',
+      onClick: async function () {
+        const r = await UBC.zeichnen({ hintergrund: null, skizze: null });
+        if (r && !r.loeschen) ed.eintragBlatt(null, null, r);
+      } },
+    [piktogramm(ICONS, 'stift', 24, 2), el('span', {}, 'Skizze')]));
     fuss.appendChild(el('button', { type: 'button', class: 'ube-foto-schnell', 'aria-label': 'Foto aufnehmen',
       onClick: function () { schnellKamera.click(); } },
     [piktogramm(ICONS, 'kamera', 24, 2), el('span', {}, 'Foto')]));

@@ -12,11 +12,12 @@ Seiten unter `/unterrichtsbesuche`, JSON-Endpunkte unter `/api/ub`.
 """
 from __future__ import annotations
 
+import json
 import mimetypes
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -33,6 +34,7 @@ from app.templating import templates
 router = APIRouter()
 
 _FOTO_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+_SKIZZE_MAX = 3 * 1024 * 1024     # Striche als JSON — reicht für sehr volle Seiten
 
 
 # ── Zugriff nur auf Eigenes ──────────────────────────────────────────────
@@ -467,15 +469,42 @@ def besuch_speichern(
     return JSONResponse({"ok": True, "besuch": ub.besuch_dict(db, b)})
 
 
-def _foto_entfernen(db: Session, e: UbEintrag) -> None:
-    if not e.file_uuid:
+def _datei_weg(db: Session, file_uuid: str) -> None:
+    if not file_uuid:
         return
-    file_store.delete(e.file_uuid)
-    af = db.scalar(select(AppFile).where(AppFile.file_uuid == e.file_uuid))
+    file_store.delete(file_uuid)
+    af = db.scalar(select(AppFile).where(AppFile.file_uuid == file_uuid))
     if af:
         db.delete(af)
+
+
+def _skizze_entfernen(db: Session, e: UbEintrag) -> None:
+    _datei_weg(db, e.skizze_uuid)
+    e.skizze_uuid = e.skizze_filename = e.skizze_json = ""
+
+
+def _skizze_auf_foto(e: UbEintrag) -> bool:
+    try:
+        return json.loads(e.skizze_json or "{}").get("hintergrund") == "foto"
+    except ValueError:
+        return False
+
+
+def _foto_entfernen(db: Session, e: UbEintrag) -> None:
+    """Entfernt das Foto — und eine darauf gezeichnete Skizze gleich mit,
+    die läge sonst über dem falschen (oder keinem) Bild."""
+    if _skizze_auf_foto(e):
+        _skizze_entfernen(db, e)
+    if not e.file_uuid:
+        return
+    _datei_weg(db, e.file_uuid)
     e.file_uuid = ""
     e.filename = ""
+
+
+def _anhaenge_entfernen(db: Session, e: UbEintrag) -> None:
+    _skizze_entfernen(db, e)
+    _foto_entfernen(db, e)
 
 
 @router.post("/api/ub/besuche/{bid}/delete")
@@ -487,7 +516,7 @@ def besuch_loeschen(
 ):
     b = _besuch(db, user, bid)
     for e in ub.eintraege(db, b.id):
-        _foto_entfernen(db, e)
+        _anhaenge_entfernen(db, e)
         db.delete(e)
     for s in db.scalars(select(UbSchwerpunkt).where(UbSchwerpunkt.besuch_id == b.id)).all():
         db.delete(s)
@@ -548,8 +577,8 @@ def eintrag_anlegen(
     if art == "eintrag" and "kategorie_id" not in payload:
         raise HTTPException(400, "Unbekannte Kategorie.")
     _eintrag_setzen(db, user, b, e, payload)
-    # Ein reines Foto ist erlaubt: dann schickt die Oberfläche `foto_folgt`
-    # und lädt das Bild direkt danach hoch.
+    # Ein reines Foto oder eine reine Skizze ist erlaubt: dann schickt die
+    # Oberfläche `foto_folgt` und lädt das Bild direkt danach hoch.
     if art == "eintrag" and not e.text and not payload.get("foto_folgt"):
         raise HTTPException(400, "Der Eintrag braucht einen Text.")
     db.add(e)
@@ -570,7 +599,8 @@ def eintrag_speichern(
 ):
     e, b = _eintrag(db, user, eid)
     _eintrag_setzen(db, user, b, e, payload)
-    if e.art == "eintrag" and "text" in payload and not e.text and not e.file_uuid:
+    if (e.art == "eintrag" and "text" in payload and not e.text
+            and not e.file_uuid and not e.skizze_uuid):
         raise HTTPException(400, "Der Eintrag braucht einen Text.")
     db.commit()
     return JSONResponse({"ok": True, "eintrag": ub.eintrag_dict(e)})
@@ -583,7 +613,7 @@ def eintrag_loeschen(
     db: Annotated[Session, Depends(get_db)],
 ):
     e, b = _eintrag(db, user, eid)
-    _foto_entfernen(db, e)
+    _anhaenge_entfernen(db, e)
     # Wer sich auf diesen Eintrag bezog, verliert nur den Bezug.
     for r in db.scalars(select(UbEintrag).where(UbEintrag.bezug_id == e.id)).all():
         r.bezug_id = None
@@ -628,5 +658,81 @@ def eintrag_foto_loeschen(
 ):
     e, b = _eintrag(db, user, eid)
     _foto_entfernen(db, e)
+    db.commit()
+    return JSONResponse({"ok": True, "eintrag": ub.eintrag_dict(e)})
+
+
+# ── Skizzen / Handschrift ────────────────────────────────────────────────
+
+def _pruefe_striche(roh: str) -> dict:
+    """Grobe Plausibilitätsprüfung — die Striche zeichnet nur der Browser,
+    der Server muss sie lediglich unverändert zurückgeben können."""
+    if len(roh.encode("utf-8")) > _SKIZZE_MAX:
+        raise HTTPException(400, "Die Skizze ist zu groß.")
+    try:
+        d = json.loads(roh)
+    except ValueError:
+        raise HTTPException(400, "Ungültige Skizze.")
+    if (not isinstance(d, dict) or not isinstance(d.get("striche"), list)
+            or d.get("hintergrund") not in ("leer", "foto")):
+        raise HTTPException(400, "Ungültige Skizze.")
+    return d
+
+
+@router.get("/api/ub/eintraege/{eid}/skizze")
+def skizze_lesen(
+    eid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    e, _ = _eintrag(db, user, eid)
+    return JSONResponse({"ok": True,
+                         "skizze": json.loads(e.skizze_json) if e.skizze_json else None})
+
+
+@router.post("/api/ub/eintraege/{eid}/skizze")
+async def skizze_speichern(
+    eid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(...),
+    striche: str = Form(...),
+):
+    """Nimmt die Striche (JSON) und das im Browser gerenderte Bild entgegen.
+    Das Bild ist das, was Verlauf und Protokoll zeigen; die Striche braucht
+    nur das Weiterzeichnen."""
+    e, _ = _eintrag(db, user, eid)
+    if e.art != "eintrag":
+        raise HTTPException(400, "Nur Einträge können eine Skizze haben.")
+    d = _pruefe_striche(striche)
+    if d["hintergrund"] == "foto" and not e.file_uuid:
+        raise HTTPException(400, "Die Skizze gehört zu einem Foto, der Eintrag hat aber keins.")
+    name = file.filename or "skizze.png"
+    ext = ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+    if ext not in (".png", ".jpg", ".jpeg"):
+        raise HTTPException(400, "Die Skizze muss als PNG oder JPG kommen.")
+    payload = await file.read()
+    try:
+        file_uuid, fname = file_store.store(payload, name)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    _skizze_entfernen(db, e)          # eine Skizze je Eintrag
+    db.add(AppFile(file_uuid=file_uuid, owner_user_id=user.id, filename=fname,
+                   mime=file.content_type or mimetypes.guess_type(fname)[0] or "image/png",
+                   size=len(payload)))
+    e.skizze_uuid, e.skizze_filename = file_uuid, fname
+    e.skizze_json = striche
+    db.commit()
+    return JSONResponse({"ok": True, "eintrag": ub.eintrag_dict(e)})
+
+
+@router.post("/api/ub/eintraege/{eid}/skizze/delete")
+def skizze_loeschen(
+    eid: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    e, _ = _eintrag(db, user, eid)
+    _skizze_entfernen(db, e)
     db.commit()
     return JSONResponse({"ok": True, "eintrag": ub.eintrag_dict(e)})

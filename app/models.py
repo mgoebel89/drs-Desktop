@@ -1220,6 +1220,13 @@ class UbEintrag(Base):
     bezug_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_uuid: Mapped[str] = mapped_column(String(32), default="")
     filename: Mapped[str] = mapped_column(String(255), default="")
+    # Handschrift/Skizze (Migration 0036): die einzelnen Striche als JSON —
+    # damit man später weiterzeichnen und radieren kann — plus das fertig
+    # gerenderte Bild für Verlauf und Protokoll. Wurde auf einem Foto
+    # gezeichnet, bleibt das Original in file_uuid unverändert erhalten.
+    skizze_json: Mapped[str] = mapped_column(Text, default="")
+    skizze_uuid: Mapped[str] = mapped_column(String(32), default="")
+    skizze_filename: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow)

@@ -139,7 +139,18 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   Erfassung, Detailseite und Protokoll. Karte „Unterrichtsbesuche" auf der
   Startseite (nur, wenn es Anwärter gibt).
 
-**Migrations-Stand: 0035.** Achtung: Die Abschnitte 1–2 unten beschreiben in
+- **Unterrichtsbesuche: Handschrift & Skizzen** (2026-10-01, Migration **0036**):
+  Zeichenfläche (`static/ub-zeichnen.js`) für Apple Pencil / Finger — Knopf
+  „Zeichnen" bzw. „Auf Foto zeichnen" im Eintragsblatt und „Skizze" im Fuß der
+  Erfassung. Striche als JSON in `ub_eintraege.skizze_json` (Weiterzeichnen,
+  Radieren), gerendertes Bild in `skizze_uuid`; bei Zeichnung auf einem Foto
+  bleibt das Original erhalten, ein neues Foto verwirft die darauf liegende
+  Skizze. Stift erkannt → nur noch der Stift zeichnet (Handballen), Wahl per
+  localStorage `ub.nurStift`. Leeres Blatt folgt der Gerätehaltung
+  (1600×1200 / hochkant 1200×1600). Handschrift → Text läuft über iPadOS-Scribble
+  im Textfeld, dafür ist nichts gebaut.
+
+**Migrations-Stand: 0036.** Achtung: Die Abschnitte 1–2 unten beschreiben in
 Teilen noch den **alten** Wizard-/WebUntis-Fokus — sie gelten architektonisch
 (Sicherheit, SMB, OnlyOffice) weiter, aber die dort als „live" markierten
 Wizard-/LS-/Arbeitsblatt-Module sind aktuell **ausgeblendet**.
@@ -290,6 +301,8 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
   Öffnen in LibreOffice/Word steht aus.
 - Direkter Kamerastart (`capture="environment"`) auf iPhone und Android am
   Gerät prüfen.
+- Zeichnen mit echtem Apple Pencil (Andruck, Handballen-Sperre) und Scribble im
+  Textfeld auf dem iPad prüfen — lokal nur mit simulierten Stift-Ereignissen getestet.
 
 - Im Container testen: Migration 0034, ein echter Besuch vom Handy über
   Tailscale/VPN, Foto-Upload (iPhone liefert über `accept="image/*"` JPEG).
@@ -813,7 +826,7 @@ Login: **`mgoebel`** (Admin)
 
 ## 6. Letzte Commits
 
-Migrations-Stand: **0035**. Der Stand bis `9fd4e65` liegt auf GitHub
+Migrations-Stand: **0036**. Der Stand bis `9fd4e65` liegt auf GitHub
 `mgoebel89/drs-Desktop` @ `main` — inklusive Klassenmodul und Unterrichtsbesuche Stufe 1.
 
 | Commit | Was |
@@ -845,7 +858,7 @@ Migrations-Stand: **0035**. Der Stand bis `9fd4e65` liegt auf GitHub
 letzter Commit `616ae01` — Prüfungs-MD-Import/-Export für die USB-Stick-Brücke.
 
 **Vor der nächsten Session:** Im Container `drs-update` ausführen (zieht bis
-Migration **0035** und gleicht den Playwright-Chromium ab). Im Container bleiben
+Migration **0036** und gleicht den Playwright-Chromium ab). Im Container bleiben
 zu prüfen: **Paperless und Vikunja gegen die echten Instanzen** (aus der
 Dev-Umgebung nicht erreichbar, siehe Abschnitt 3), die **Vikunja-Aufgabe** bei
 einer Klassenarbeit, das **Touch-Verhalten am Gerät** und der Durchlauf des

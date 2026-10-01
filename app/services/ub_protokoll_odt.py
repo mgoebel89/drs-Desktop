@@ -166,6 +166,7 @@ def _foto(dok: _Dok, a: EintragAnsicht, max_cm: float) -> str:
     try:
         with PILImage.open(a.foto) as im:
             w, h = im.size
+            png = im.format == "PNG"      # Skizzen kommen als PNG
         daten = a.foto.read_bytes()
     except Exception:
         return ""
@@ -174,7 +175,8 @@ def _foto(dok: _Dok, a: EintragAnsicht, max_cm: float) -> str:
     if hoehe > 6.0:
         hoehe = 6.0
         breite = hoehe * w / h
-    return f'<text:p text:style-name="PFoto">{dok.bild(daten, "jpg", "image/jpeg", breite, hoehe, schluessel=f"foto_{a.id}")}</text:p>'
+    return f'<text:p text:style-name="PFoto">{dok.bild(daten, "png" if png else "jpg", "image/png" if png else "image/jpeg",
+                    breite, hoehe, schluessel=f"foto_{a.id}")}</text:p>'
 
 
 def _inhalt(dok: _Dok, a: EintragAnsicht, pr: Protokoll, max_cm: float, **meta_kw) -> str:
