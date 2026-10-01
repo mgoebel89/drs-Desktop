@@ -438,6 +438,9 @@ def eintrag_dict(e: UbEintrag) -> dict:
         "kriterium_id": e.kriterium_id,
         "wertung": e.wertung, "bezug_id": e.bezug_id,
         "foto": (f"/api/files/{e.file_uuid}/{e.filename}" if e.file_uuid else ""),
+        # Gerendertes Bild der Skizze (bei Zeichnung auf Foto: Foto + Striche).
+        # Die Striche selbst kommen nur auf Anfrage (/skizze), sie können groß sein.
+        "skizze": (f"/api/files/{e.skizze_uuid}/{e.skizze_filename}" if e.skizze_uuid else ""),
     }
 
 

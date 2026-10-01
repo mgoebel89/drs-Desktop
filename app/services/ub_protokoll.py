@@ -116,8 +116,12 @@ def aufbereiten(db: Session, user: User, b: UbBesuch, ordnung: str | None = None
 
     def ansicht(e, phase_name: str) -> EintragAnsicht:
         k = kat_map.get(e.kategorie_id)
+        # Bild im Protokoll: die Skizze, wenn es eine gibt (bei Zeichnung auf
+        # einem Foto enthält sie das Foto schon), sonst das Foto.
         foto = None
-        if mit_fotos and e.file_uuid:
+        if mit_fotos and e.skizze_uuid:
+            foto = file_store.resolve(e.skizze_uuid, e.skizze_filename)
+        if mit_fotos and not foto and e.file_uuid:
             foto = file_store.resolve(e.file_uuid, e.filename)
         bez = ""
         if e.bezug_id and e.bezug_id in nach_id:

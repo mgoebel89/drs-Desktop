@@ -112,7 +112,8 @@
             e.text ? el('div', { class: 'ubv-text' }, e.text) : null,
             bezugZeile(e),
             el('div', { class: 'ubv-meta' }, meta),
-            e.foto ? el('img', { class: 'ubv-foto', src: e.foto, alt: 'Foto', loading: 'lazy' }) : null,
+            (e.skizze || e.foto) ? el('img', { class: 'ubv-foto', src: e.skizze || e.foto,
+              alt: e.skizze ? 'Skizze' : 'Foto', loading: 'lazy' }) : null,
           ]),
           wIcon,
         ]);

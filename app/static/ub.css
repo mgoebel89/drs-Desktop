@@ -49,7 +49,7 @@ body.ube-body { background: var(--bg); height: 100dvh; overflow: hidden; }
 .ube-liste { flex: 1; overflow-y: auto; padding: .2rem .6rem 1rem; -webkit-overflow-scrolling: touch; }
 .ube-fuss { flex: none; border-top: 1px solid var(--border); background: var(--surface);
   padding: .55rem .55rem calc(.55rem + env(safe-area-inset-bottom)); display: grid; gap: .5rem;
-  grid-template-columns: 1fr 96px; }
+  grid-template-columns: 1fr 84px 84px; }
 .ube-neu, .ube-foto-schnell { border: 0; border-radius: 12px; font: inherit; font-weight: 600;
   font-size: 16px; min-height: 64px; display: flex; align-items: center; justify-content: center;
   gap: .5rem; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -122,3 +122,34 @@ body.ube-body { background: var(--bg); height: 100dvh; overflow: hidden; }
 .ube-vorige summary { color: #8a5a00; }
 .ub-radios { display: flex; flex-direction: column; gap: .35rem; }
 .ub-radios label { display: flex; align-items: center; gap: .4rem; font-size: 14px; cursor: pointer; }
+
+/* ── Zeichenfläche (Handschrift / Skizze) ─────────────────────────────── */
+.ubz { position: fixed; inset: 0; z-index: 70; background: #2b2f33; display: flex;
+  flex-direction: column; -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none; padding-top: env(safe-area-inset-top); }
+.ubz-leiste { flex: none; display: flex; align-items: center; gap: .5rem; padding: .45rem .6rem;
+  background: #1f2326; color: #fff; }
+.ubz-werkzeuge { flex: 1; display: flex; align-items: center; gap: .3rem; overflow-x: auto;
+  scrollbar-width: none; justify-content: safe center; }
+.ubz-werkzeuge::-webkit-scrollbar { display: none; }
+.ubz-k { flex: none; min-width: 40px; height: 40px; border-radius: 10px; border: 1px solid #4a5157;
+  background: #2b2f33; color: #e8eaec; font: inherit; font-size: 13px; padding: 0 .55rem;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  touch-action: manipulation; }
+.ubz-k.an { border-color: #fff; background: #3d4449; box-shadow: 0 0 0 2px #00639C inset; }
+.ubz-farbe { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; }
+.ubz-punkt { display: block; border-radius: 50%; background: #e8eaec; }
+.ubz-trenner { flex: none; width: 1px; height: 26px; background: #4a5157; margin: 0 .2rem; }
+.ubz-text { flex: none; border: 0; background: none; color: #e8eaec; font: inherit; cursor: pointer;
+  padding: .4rem .3rem; }
+.ubz-buehne { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.ubz-canvas { background: #fff; border-radius: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  touch-action: none; cursor: crosshair; }
+/* Schmal (Handy): Werkzeuge in eine eigene, umbrechende zweite Zeile —
+   eine zentrierte, überlaufende Leiste schneidet links Knöpfe unerreichbar ab. */
+@media (max-width: 700px) {
+  .ubz-leiste { flex-wrap: wrap; justify-content: space-between; }
+  .ubz-werkzeuge { order: 3; flex-basis: 100%; flex-wrap: wrap; overflow: visible;
+    justify-content: center; }
+  .ubz-trenner { display: none; }
+}
