@@ -11,10 +11,9 @@ Moodle exportiert Test-Bewertungen als Liste von Schüler-Objekten:
 Für den Importer ist aktuell nur das Gesamtergebnis relevant; die
 f-Felder werden ignoriert.
 
-Dazu das **Namens-Matching**: Werden die Ergebnisse in eine bestehende, an
-eine Lerngruppe gebundene Prüfung importiert, sollen die Namen aus der Datei
-auf die dort erfassten Schüler treffen — statt wie beim reinen Moodle-Weg
-neue, inaktive Datensätze anzulegen.
+Dazu die **Namens-Zuordnung** (`ordne_zu`): Die Namen aus der Datei sollen
+auf die Schüler der Lerngruppe treffen. Neue Schüler-Datensätze entstehen
+dabei nie von selbst — was unklar ist, entscheidet der Lehrer im Fragedialog.
 """
 from __future__ import annotations
 
@@ -100,61 +99,94 @@ def _schluessel(nachname: str, vorname: str) -> str:
     return normalisiere(nachname) + "|" + normalisiere(vorname)
 
 
-def matche(eintraege: list[dict], kandidaten: list[dict]) -> list[dict]:
-    """Ordnet Moodle-Einträge den Schülern einer Prüfung/Lerngruppe zu.
+def ordne_zu(eintraege: list[dict], kern: list[dict],
+             weitere: list[dict] | None = None) -> list[dict]:
+    """Ordnet Moodle-Einträge Schülern zu — und sagt ehrlich, wo es unsicher ist.
 
-    `kandidaten`: [{'id': int, 'nachname': str, 'vorname': str}, …]
-    Rückgabe: je Moodle-Eintrag ein Dict mit `student_id` (Vorschlag oder None)
-    und `treffer` = 'voll' | 'nachname' | 'keiner'.
+    `kern`: die Schüler, um die es geht (Lerngruppe der Prüfung, ggf. plus
+    bereits erfasste Teilnehmer). `weitere`: die übrigen Schüler derselben
+    Klassen — bei einer Teilgruppe also die andere Hälfte. Beide als
+    [{'id': int, 'nachname': str, 'vorname': str}, …].
 
-    Zwei Stufen, bewusst in dieser Reihenfolge:
-    1. Nachname **und** Vorname — die sichere Bank.
-    2. Nur Nachname, und das auch nur, wenn er in der Klasse **eindeutig** ist.
-       Zwei Schüler gleichen Nachnamens bleiben unzugeordnet; sie zu raten
-       hieße, Noten zu vertauschen.
+    Je Eintrag kommt ein Dict mit `status` zurück:
+    - 'sicher'     voller Name, genau ein Schüler im Kern → still zuordnen
+    - 'teilgruppe' voller Name, aber der Schüler sitzt nur in `weitere`
+    - 'frage'      es gibt Kandidaten, aber keinen eindeutigen (nur der
+                   Nachname passt, Name doppelt in Klasse oder Datei)
+    - 'keiner'     niemand kommt in Frage
+    `student_id` ist der Vorschlag (bei 'frage' nur, wenn genau ein Kandidat),
+    `optionen` die Kandidaten-IDs für den Fragedialog.
 
-    Ein Schüler wird höchstens einmal vorgeschlagen: Steht derselbe Mensch
-    zweimal in der Moodle-Datei (etwa zwei Versuche), bekommt die zweite Zeile
-    keinen Vorschlag und wandert in die Hand des Lehrers."""
-    voll: dict[str, int] = {}
-    nach_zahl: dict[str, int] = {}
-    nach_id: dict[str, int] = {}
-    for k in kandidaten:
-        voll[_schluessel(k["nachname"], k.get("vorname", ""))] = k["id"]
-        n = normalisiere(k["nachname"])
-        nach_zahl[n] = nach_zahl.get(n, 0) + 1
-        nach_id[n] = k["id"]
+    Reihenfolge wie bisher: Erst alle vollen Treffer festnageln, damit ein
+    schwächerer Treffer keinen Schüler wegschnappt, den eine spätere Zeile
+    eindeutig beansprucht. Geraten wird nie — ein nur über den Nachnamen
+    gefundener Schüler ist ein Vorschlag, keine Zuordnung."""
+    weitere = weitere or []
+    kern_ids = {k["id"] for k in kern}
+    weitere = [w for w in weitere if w["id"] not in kern_ids]
 
+    def index(liste: list[dict]) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for k in liste:
+            out.setdefault(_schluessel(k["nachname"], k.get("vorname", "")),
+                           []).append(k["id"])
+        return out
+
+    voll_kern = index(kern)
+    voll_weitere = index(weitere)
+    nach: dict[str, list[int]] = {}
+    for k in kern + weitere:
+        nach.setdefault(normalisiere(k["nachname"]), []).append(k["id"])
+
+    zeilen = [{
+        "nachname": e["nachname"],
+        "vorname": e.get("vorname", ""),
+        "percent": e.get("percent"),
+        "status": "", "student_id": None, "optionen": [], "hinweis": "",
+    } for e in eintraege]
     vergeben: set[int] = set()
-    out: list[dict] = []
-    # Zwei Durchgänge: Erst alle vollen Treffer festnageln, damit ein
-    # Nachnamens-Treffer keinen Schüler wegschnappt, den eine spätere Zeile
-    # eindeutig für sich beansprucht.
-    vorschlag: list[int | None] = [None] * len(eintraege)
-    art: list[str] = ["keiner"] * len(eintraege)
-    for i, e in enumerate(eintraege):
-        sid = voll.get(_schluessel(e["nachname"], e.get("vorname", "")))
-        if sid is not None and sid not in vergeben:
-            vorschlag[i] = sid
-            art[i] = "voll"
-            vergeben.add(sid)
-    for i, e in enumerate(eintraege):
-        if vorschlag[i] is not None:
-            continue
-        n = normalisiere(e["nachname"])
-        if nach_zahl.get(n, 0) == 1:
-            sid = nach_id[n]
-            if sid not in vergeben:
-                vorschlag[i] = sid
-                art[i] = "nachname"
-                vergeben.add(sid)
 
-    for i, e in enumerate(eintraege):
-        out.append({
-            "nachname": e["nachname"],
-            "vorname": e.get("vorname", ""),
-            "percent": e.get("percent"),
-            "student_id": vorschlag[i],
-            "treffer": art[i],
-        })
-    return out
+    def setze(z: dict, status: str, sid: int | None, optionen: list[int],
+              hinweis: str = "") -> None:
+        z.update(status=status, student_id=sid, optionen=optionen, hinweis=hinweis)
+        if status in ("sicher", "teilgruppe") and sid is not None:
+            vergeben.add(sid)
+
+    # 1. Voller Name im Kern
+    for e, z in zip(eintraege, zeilen):
+        ids = voll_kern.get(_schluessel(e["nachname"], e.get("vorname", "")), [])
+        if len(ids) == 1 and ids[0] not in vergeben:
+            setze(z, "sicher", ids[0], ids)
+        elif len(ids) > 1:
+            setze(z, "frage", None, ids,
+                  "Diesen Namen gibt es mehrfach in der Lerngruppe.")
+    # 2. Voller Name in den übrigen Schülern der Klassen
+    for e, z in zip(eintraege, zeilen):
+        if z["status"]:
+            continue
+        ids = voll_weitere.get(_schluessel(e["nachname"], e.get("vorname", "")), [])
+        if len(ids) == 1 and ids[0] not in vergeben:
+            setze(z, "teilgruppe", ids[0], ids)
+        elif len(ids) > 1:
+            setze(z, "frage", None, ids, "Diesen Namen gibt es mehrfach in der Klasse.")
+    # 3. Alles Übrige: Wer käme in Frage?
+    for e, z in zip(eintraege, zeilen):
+        if z["status"]:
+            continue
+        schluessel = _schluessel(e["nachname"], e.get("vorname", ""))
+        doppelt = voll_kern.get(schluessel) or voll_weitere.get(schluessel)
+        if doppelt:
+            # voller Treffer, aber der Schüler ist schon an eine andere Zeile
+            # vergeben: derselbe Mensch steht zweimal in der Datei
+            setze(z, "frage", None, list(doppelt),
+                  "Dieser Name steht mehrfach in der Datei.")
+            continue
+        ids = nach.get(normalisiere(e["nachname"]), [])
+        if len(ids) == 1:
+            setze(z, "frage", ids[0], ids, "Nur der Nachname stimmt überein.")
+        elif ids:
+            setze(z, "frage", None, list(ids),
+                  "Mehrere Schüler haben diesen Nachnamen.")
+        else:
+            setze(z, "keiner", None, [], "Kein Schüler mit diesem Namen gefunden.")
+    return zeilen

@@ -52,44 +52,57 @@ def test_normalisiere_faengt_umlaute_und_trennzeichen():
     assert moodle_quiz.normalisiere("Meyer") != moodle_quiz.normalisiere("Meyer-Schmidt")
 
 
-def test_matche_voll_vor_nachname():
-    kandidaten = [{"id": 1, "nachname": "Ahrens", "vorname": "Ada"},
-                  {"id": 2, "nachname": "Bloch", "vorname": "Ben"}]
-    zeilen = moodle_quiz.matche(
+def test_ordne_zu_voller_name_ist_sicher_nachname_nur_vorschlag():
+    kern = [{"id": 1, "nachname": "Ahrens", "vorname": "Ada"},
+            {"id": 2, "nachname": "Bloch", "vorname": "Ben"}]
+    zeilen = moodle_quiz.ordne_zu(
         [{"nachname": "ahrens", "vorname": "ADA", "percent": 80.0},
-         {"nachname": "Bloch", "vorname": "", "percent": 50.0}], kandidaten)
-    assert (zeilen[0]["student_id"], zeilen[0]["treffer"]) == (1, "voll")
-    # Nur Nachname, aber eindeutig → Vorschlag mit erkennbar schwächerem Treffer
-    assert (zeilen[1]["student_id"], zeilen[1]["treffer"]) == (2, "nachname")
+         {"nachname": "Bloch", "vorname": "", "percent": 50.0}], kern)
+    assert (zeilen[0]["status"], zeilen[0]["student_id"]) == ("sicher", 1)
+    # Nur der Nachname passt → gefragt wird trotzdem, mit Vorschlag
+    assert (zeilen[1]["status"], zeilen[1]["student_id"]) == ("frage", 2)
+    assert zeilen[1]["optionen"] == [2]
 
 
-def test_matche_raet_bei_gleichem_nachnamen_nicht():
-    kandidaten = [{"id": 1, "nachname": "Bloch", "vorname": "Ben"},
-                  {"id": 2, "nachname": "Bloch", "vorname": "Bea"}]
-    zeilen = moodle_quiz.matche(
-        [{"nachname": "Bloch", "vorname": "", "percent": 70.0}], kandidaten)
+def test_ordne_zu_raet_bei_gleichem_nachnamen_nicht():
+    kern = [{"id": 1, "nachname": "Bloch", "vorname": "Ben"},
+            {"id": 2, "nachname": "Bloch", "vorname": "Bea"}]
+    zeilen = moodle_quiz.ordne_zu(
+        [{"nachname": "Bloch", "vorname": "", "percent": 70.0}], kern)
+    assert zeilen[0]["status"] == "frage"
     assert zeilen[0]["student_id"] is None
-    assert zeilen[0]["treffer"] == "keiner"
+    assert sorted(zeilen[0]["optionen"]) == [1, 2]
 
 
-def test_matche_vergibt_einen_schueler_nur_einmal():
-    kandidaten = [{"id": 1, "nachname": "Curt", "vorname": "Cem"}]
-    zeilen = moodle_quiz.matche(
+def test_ordne_zu_vergibt_einen_schueler_nur_einmal():
+    kern = [{"id": 1, "nachname": "Curt", "vorname": "Cem"}]
+    zeilen = moodle_quiz.ordne_zu(
         [{"nachname": "Curt", "vorname": "Cem", "percent": 90.0},
-         {"nachname": "Curt", "vorname": "Cem", "percent": 40.0}], kandidaten)
-    assert zeilen[0]["student_id"] == 1
-    assert zeilen[1]["student_id"] is None
+         {"nachname": "Curt", "vorname": "Cem", "percent": 40.0}], kern)
+    assert zeilen[0]["status"] == "sicher"
+    assert zeilen[1]["status"] == "frage" and zeilen[1]["student_id"] is None
+    assert "mehrfach in der Datei" in zeilen[1]["hinweis"]
 
 
-def test_matche_bevorzugt_den_vollen_treffer_auch_bei_spaeterer_zeile():
+def test_ordne_zu_bevorzugt_den_vollen_treffer_auch_bei_spaeterer_zeile():
     """Der Nachnamens-Treffer der ersten Zeile darf den Schüler nicht
     wegschnappen, den die zweite Zeile mit vollem Namen beansprucht."""
-    kandidaten = [{"id": 1, "nachname": "Curt", "vorname": "Cem"}]
-    zeilen = moodle_quiz.matche(
+    kern = [{"id": 1, "nachname": "Curt", "vorname": "Cem"}]
+    zeilen = moodle_quiz.ordne_zu(
         [{"nachname": "Curt", "vorname": "Falsch", "percent": 10.0},
-         {"nachname": "Curt", "vorname": "Cem", "percent": 90.0}], kandidaten)
-    assert zeilen[1]["student_id"] == 1 and zeilen[1]["treffer"] == "voll"
-    assert zeilen[0]["student_id"] is None
+         {"nachname": "Curt", "vorname": "Cem", "percent": 90.0}], kern)
+    assert (zeilen[1]["status"], zeilen[1]["student_id"]) == ("sicher", 1)
+    assert zeilen[0]["status"] == "frage"
+
+
+def test_ordne_zu_erkennt_die_andere_teilgruppe():
+    kern = [{"id": 1, "nachname": "Ahrens", "vorname": "Ada"}]
+    weitere = [{"id": 2, "nachname": "Bloch", "vorname": "Ben"}]
+    zeilen = moodle_quiz.ordne_zu(
+        [{"nachname": "Bloch", "vorname": "Ben", "percent": 60.0},
+         {"nachname": "Zander", "vorname": "Zoe", "percent": 30.0}], kern, weitere)
+    assert (zeilen[0]["status"], zeilen[0]["student_id"]) == ("teilgruppe", 2)
+    assert zeilen[1]["status"] == "keiner" and zeilen[1]["optionen"] == []
 
 
 # ── Vorschau ──────────────────────────────────────────────────────────────
@@ -100,12 +113,10 @@ def test_vorschau_schlaegt_die_schueler_der_lerngruppe_vor(client, exam):
                                   ("Unbekannt", "Uwe", "40,00")]))
     assert r.status_code == 200, r.text
     d = r.json()
-    assert len(d["zeilen"]) == 2
-    assert d["zeilen"][0]["treffer"] == "voll"
-    assert d["zeilen"][1]["student_id"] is None
-    assert d["offen"] == 1
-    # Die Auswahlliste kennt alle drei Schüler der Lerngruppe
-    assert len(d["kandidaten"]) == 3
+    assert [z["status"] for z in d["zeilen"]] == ["sicher", "keiner"]
+    assert d["zahlen"]["sicher"] == 1 and d["zahlen"]["keiner"] == 1
+    # Neu anlegen darf man in der Klasse der Lerngruppe
+    assert [k["name"] for k in d["klassen"]] == ["BSMT 26 a"]
 
 
 def test_vorschau_schreibt_nichts(client, exam, db):

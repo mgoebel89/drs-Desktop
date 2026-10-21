@@ -239,73 +239,332 @@
     });
   };
 
+  // ---------- Fragedialog: Namen Schülern zuordnen ----------
+
+  /* Ein Baustein für drei Wege: neue Prüfung aus einem Moodle-Test, Ergebnisse
+   * in eine bestehende Prüfung und das Aufräumen der Doppelten aus dem alten
+   * Import. Eindeutiges ordnet der Server still zu (`sicher`); gefragt wird
+   * nur, was unklar ist — eine Karte je Fall. Treffer aus der anderen
+   * Teilgruppe kommen gesammelt in EINE Frage statt in zehn einzelne.
+   * Ein Klick auf eine Antwort springt weiter, „Zurück" korrigiert.
+   * Geschrieben wird erst am Ende über `opts.onFertig(zeilen)` — ein Abbruch
+   * hinterlässt nichts.
+   *
+   * plan: Antwort von _zuordnungs_plan (zeilen, schueler, klassen, lerngruppe).
+   * opts: titel, verb, anlegenLabel, mitProzent, extra (Node für die
+   *       Zusammenfassung), onFertig(zeilen) → Promise.
+   */
+  EX.fragedialog = function (plan, opts) {
+    opts = opts || {};
+    const zeilen = plan.zeilen;
+    const personen = new Map((plan.schueler || []).map((s) => [s.id, s]));
+    const klassen = plan.klassen || [];
+    const lgName = plan.lerngruppe ? plan.lerngruppe.name : 'der Lerngruppe';
+
+    zeilen.forEach((z) => {
+      z.aufnehmen = false;      // nur für 'teilgruppe'
+      z.wahl = null;            // {id} | {neu: klassenId} | {skip: true}
+    });
+
+    const teilgruppe = zeilen.filter((z) => z.status === 'teilgruppe');
+    const fragen = zeilen.filter((z) => z.status === 'frage' || z.status === 'keiner');
+    const schritte = [];
+    if (teilgruppe.length) schritte.push({ art: 'teilgruppe' });
+    fragen.forEach((z) => schritte.push({ art: 'frage', zeile: z }));
+    schritte.push({ art: 'ende' });
+    let pos = 0;
+
+    const nameAus = (z) => (z.nachname || '') + (z.vorname ? ', ' + z.vorname : '');
+    const prozentText = (z) => (opts.mitProzent && z.percent !== null && z.percent !== undefined)
+      ? String(z.percent).replace('.', ',') + ' %' : '';
+
+    function gewaehlteId(z) {
+      if (z.status === 'sicher') return z.student_id;
+      if (z.status === 'teilgruppe') return z.aufnehmen ? z.student_id : null;
+      return z.wahl && z.wahl.id ? z.wahl.id : null;
+    }
+    // Wer ist schon vergeben — außer an die Zeile, um die es gerade geht?
+    function vergebenAn(id, ausser) {
+      return zeilen.find((z) => z !== ausser && gewaehlteId(z) === id) || null;
+    }
+
+    function personKnopf(z, id, vorschlag) {
+      const p = personen.get(id) || { name: '?', klasse: '' };
+      const belegt = vergebenAn(id, z);
+      const aktiv = z.wahl && z.wahl.id === id;
+      const knopf = el('button', {
+        type: 'button',
+        class: 'fz-opt' + (aktiv ? ' fz-aktiv' : ''),
+        disabled: belegt ? true : null,
+        onClick: () => { z.wahl = { id }; weiter(); },
+      }, [
+        el('span', { class: 'fz-opt-name' }, p.name),
+        el('span', { class: 'fz-opt-sub' }, [
+          p.klasse || '',
+          vorschlag ? el('span', { class: 'fz-badge' }, 'Vorschlag') : null,
+          belegt ? ' · schon für „' + nameAus(belegt) + '"' : null,
+        ]),
+      ]);
+      return knopf;
+    }
+
+    function suche(z) {
+      const feld = el('input', { type: 'text', placeholder: 'Anderen Schüler suchen …' });
+      const treffer = el('div', { class: 'fz-suche-treffer' });
+      feld.addEventListener('input', () => {
+        treffer.textContent = '';
+        const q = feld.value.trim().toLowerCase();
+        if (q.length < 2) return;
+        (plan.schueler || [])
+          .filter((s) => (s.name + ' ' + s.klasse).toLowerCase().includes(q)
+                      && !(z.optionen || []).includes(s.id))
+          .slice(0, 8)
+          .forEach((s) => treffer.appendChild(personKnopf(z, s.id, false)));
+        if (!treffer.childNodes.length) {
+          treffer.appendChild(el('div', { class: 'muted' }, 'Niemand gefunden.'));
+        }
+      });
+      return el('div', { class: 'fz-suche' }, [feld, treffer]);
+    }
+
+    function anlegen(z) {
+      if (!klassen.length) return null;
+      const sel = el('select', {}, klassen.map((k) =>
+        el('option', { value: String(k.id) }, k.name)));
+      if (z.wahl && z.wahl.neu) sel.value = String(z.wahl.neu);
+      const knopf = el('button', {
+        type: 'button', class: 'btn-sec',
+        onClick: () => { z.wahl = { neu: parseInt(sel.value, 10) }; weiter(); },
+      }, opts.anlegenLabel || 'Als neuen Schüler anlegen');
+      return el('div', { class: 'fz-anlegen' }, [
+        el('div', { class: 'fz-frage' }, 'Fehlt in den Stammdaten?'),
+        el('div', { class: 'fz-anlegen-zeile' },
+          klassen.length > 1 ? [sel, knopf] : [knopf]),
+      ]);
+    }
+
+    function kopf(text) {
+      const nr = schritte.filter((s) => s.art !== 'ende').length;
+      return el('div', { class: 'fz-kopf' }, [
+        el('span', {}, text),
+        nr ? el('span', { class: 'muted' }, 'Schritt ' + Math.min(pos + 1, nr) + ' von ' + nr) : null,
+      ]);
+    }
+
+    function navigation(extra) {
+      return el('div', { class: 'fz-nav' }, [
+        pos > 0 ? el('button', { type: 'button', class: 'btn-ghost', onClick: () => { pos--; zeichne(); } }, '← Zurück') : el('span'),
+        extra || null,
+      ]);
+    }
+
+    function schrittTeilgruppe() {
+      const liste = el('div', { class: 'fz-liste' }, teilgruppe.map((z) => {
+        const cb = el('input', { type: 'checkbox' });
+        cb.checked = z.aufnehmen;
+        cb.addEventListener('change', () => { z.aufnehmen = cb.checked; });
+        const p = personen.get(z.student_id) || {};
+        return el('label', { class: 'fz-check' }, [
+          cb,
+          el('span', {}, [el('strong', {}, p.name || nameAus(z)), ' ',
+            el('span', { class: 'muted' }, p.klasse || '')]),
+          el('span', { class: 'fz-proz' }, prozentText(z)),
+        ]);
+      }));
+      const alle = el('button', { type: 'button', class: 'btn-ghost btn-sm', onClick: () => {
+        const an = !teilgruppe.every((z) => z.aufnehmen);
+        teilgruppe.forEach((z) => { z.aufnehmen = an; });
+        zeichne();
+      } }, teilgruppe.every((z) => z.aufnehmen) ? 'Alle abwählen' : 'Alle anhaken');
+      return [
+        kopf('Andere Teilgruppe'),
+        el('p', {}, teilgruppe.length + (teilgruppe.length === 1 ? ' Name gehört' : ' Namen gehören')
+          + ' zur Klasse, aber nicht zu „' + lgName + '". Wer soll trotzdem in diese Prüfung?'),
+        el('p', { class: 'muted' }, 'Nicht Angehakte werden ignoriert — es entsteht dabei nichts Neues.'),
+        alle,
+        liste,
+        navigation(el('button', { type: 'button', class: 'btn', onClick: weiter }, 'Weiter →')),
+      ];
+    }
+
+    function schrittFrage(z) {
+      const optionen = (z.optionen || []).map((id) =>
+        personKnopf(z, id, z.student_id === id));
+      return [
+        kopf(z.status === 'keiner' ? 'Kein Treffer' : 'Wer ist gemeint?'),
+        el('div', { class: 'fz-karte' }, [
+          el('div', { class: 'fz-name' }, nameAus(z)),
+          prozentText(z) ? el('div', { class: 'fz-proz' }, prozentText(z)) : null,
+          z.hinweis ? el('div', { class: 'muted' }, z.hinweis) : null,
+        ]),
+        optionen.length ? el('div', { class: 'fz-optionen' }, optionen) : null,
+        suche(z),
+        z.status === 'keiner' ? anlegen(z) : null,
+        navigation(el('button', { type: 'button', class: 'btn-sec',
+          onClick: () => { z.wahl = { skip: true }; weiter(); } }, 'Überspringen')),
+      ];
+    }
+
+    function schrittEnde() {
+      const sicher = zeilen.filter((z) => z.status === 'sicher');
+      const tg = teilgruppe.filter((z) => z.aufnehmen);
+      const gefragt = fragen.filter((z) => z.wahl && z.wahl.id);
+      const neu = fragen.filter((z) => z.wahl && z.wahl.neu);
+      const ohne = zeilen.filter((z) => gewaehlteId(z) === null && !(z.wahl && z.wahl.neu));
+
+      const zeile = (n, text) => n ? el('li', {}, [el('strong', {}, String(n)), ' ' + text]) : null;
+      const zuordnungsListe = (liste) => el('ul', { class: 'fz-mini' }, liste.map((z) => {
+        const id = gewaehlteId(z);
+        return el('li', {}, [nameAus(z),
+          id ? ' → ' + ((personen.get(id) || {}).name || '?') : null,
+          prozentText(z) ? el('span', { class: 'muted' }, ' · ' + prozentText(z)) : null]);
+      }));
+      const details = (titel, liste) => liste.length
+        ? el('details', { class: 'fz-details' }, [el('summary', {}, titel), zuordnungsListe(liste)])
+        : null;
+
+      return [
+        kopf('Zusammenfassung'),
+        el('ul', { class: 'fz-summe' }, [
+          zeile(sicher.length, 'eindeutig zugeordnet'),
+          zeile(tg.length, 'aus der anderen Teilgruppe aufgenommen'),
+          zeile(gefragt.length, 'per Frage zugeordnet'),
+          zeile(neu.length, (opts.anlegenLabel ? 'in die Klasse aufgenommen' : 'werden neu angelegt')),
+          zeile(ohne.length, 'bleiben unberücksichtigt'),
+        ]),
+        details('Eindeutige Zuordnungen ansehen', sicher),
+        details('Unberücksichtigt ansehen', ohne),
+        opts.extra || null,
+        navigation(el('button', { type: 'button', class: 'btn', onClick: fertig },
+          opts.verb || 'Übernehmen')),
+      ];
+    }
+
+    const body = el('div', { class: 'fz' });
+    function zeichne() {
+      body.textContent = '';
+      const s = schritte[pos];
+      const teile = s.art === 'teilgruppe' ? schrittTeilgruppe()
+        : (s.art === 'frage' ? schrittFrage(s.zeile) : schrittEnde());
+      teile.forEach((t) => { if (t) body.appendChild(t); });
+      const f = body.querySelector('.fz-optionen button:not([disabled]), .fz-suche input');
+      if (f && s.art === 'frage') f.focus();
+    }
+    function weiter() { if (pos < schritte.length - 1) pos++; zeichne(); }
+
+    let laeuft = false;
+    async function fertig() {
+      if (laeuft) return;
+      laeuft = true;
+      const ergebnis = zeilen.map((z) => Object.assign({}, z, {
+        student_id: gewaehlteId(z),
+        neu_klasse_id: z.wahl && z.wahl.neu ? z.wahl.neu : null,
+      }));
+      try {
+        await opts.onFertig(ergebnis);
+        dlg.close();
+      } catch (e) {
+        DRS.toast(e.message || 'Speichern fehlgeschlagen.');
+      } finally { laeuft = false; }
+    }
+
+    const dlg = DRS.modal({
+      title: opts.titel || 'Namen zuordnen',
+      body,
+      actions: [{ label: 'Abbrechen', kind: 'sec', onClick: (c) => c() }],
+    });
+    zeichne();
+    return dlg;
+  };
+
   // ---------- Moodle-Test importieren ----------
 
-  EX.moodleImport = function () {
+  /* Neue Prüfung aus einer Moodle-JSON. Erst Grunddaten + Klasse/Lerngruppe +
+   * Datei, dann der Fragedialog; die Prüfung entsteht erst, wenn er durch ist.
+   * Die Klassen müssen VOR dem Öffnen geladen sein — sonst bliebe die Auswahl
+   * leer (dieselbe Falle wie beim Lerngruppen-Assistenten). */
+  EX.moodleImport = async function () {
+    let daten;
+    try {
+      daten = await DRS.getJSON('/api/exams/pickers');
+    } catch (e) {
+      DRS.toast('Klassen konnten nicht geladen werden.');
+      return;
+    }
     const titel = el('input', { type: 'text', placeholder: 'z. B. Moodle-Test Pneumatik' });
-    const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
+    const datum = el('input', { type: 'date', value: daten.heute || new Date().toISOString().slice(0, 10) });
     const datei = el('input', { type: 'file', accept: '.json,application/json' });
-    const info = el('div', { class: 'moodle-info muted' },
-      'Wähle die aus Moodle exportierte JSON-Datei.');
-    let geprueft = null;
-
-    // Erst Vorschau holen — es wird nichts geschrieben, bevor du sie gesehen hast.
-    datei.addEventListener('change', async () => {
-      geprueft = null;
-      if (!datei.files.length) { info.textContent = 'Keine Datei gewählt.'; return; }
-      info.textContent = 'lese Datei …';
-      const fd = new FormData();
-      fd.append('datei', datei.files[0]);
-      try {
-        const r = await fetch('/api/exams/moodle/vorschau', { method: 'POST', body: fd });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || 'Datei nicht lesbar');
-        geprueft = d;
-        info.innerHTML = '';
-        info.appendChild(el('strong', {}, `${d.anzahl} Schüler gefunden`));
-        if (d.abteilungen.length) {
-          info.appendChild(el('div', {}, 'Abteilungen: ' + d.abteilungen.join(', ')));
-        }
-        if (d.ohne_ergebnis) {
-          info.appendChild(el('div', {}, `${d.ohne_ergebnis} davon ohne Ergebnis`));
-        }
-        info.appendChild(el('div', { class: 'muted' },
-          d.namen.join(' · ') + (d.anzahl > d.namen.length ? ' …' : '')));
-      } catch (e) {
-        info.textContent = e.message || 'Datei konnte nicht gelesen werden.';
-      }
-    });
+    const ziel = el('select', {}, [el('option', { value: '' }, 'Bitte wählen …')]);
+    if (daten.klassen.length) {
+      ziel.appendChild(el('optgroup', { label: 'Klassen' }, daten.klassen.map((k) =>
+        el('option', { value: 'klasse:' + k.id, disabled: k.lerngruppe_id ? null : true },
+          k.name + (k.lerngruppe_id ? ' · ' + k.anzahl + ' Schüler' : ' · keine Lerngruppe')))));
+    }
+    if (daten.lerngruppen.length) {
+      ziel.appendChild(el('optgroup', { label: 'Lerngruppen' }, daten.lerngruppen.map((g) =>
+        el('option', { value: 'lerngruppe:' + g.id },
+          g.name + ' · ' + artLabel(g.art) + ' · ' + g.anzahl + ' Schüler'))));
+    }
 
     const body = el('div', {}, [
       el('p', { class: 'muted' },
-        'Die Teilnehmer kommen aus der Datei, nicht aus einer Klasse — eine '
-        + 'Zuordnung zu einer Lerngruppe gibt es hier deshalb nicht. Bewertet '
-        + 'wird über einen Punkt „Gesamtbewertung" mit dem Moodle-Prozentwert.'),
+        'Die Namen aus der Datei werden den Schülern der gewählten Klasse oder '
+        + 'Lerngruppe zugeordnet — es entstehen keine doppelten Schüler. Was '
+        + 'unklar ist, fragt der nächste Schritt ab. Bewertet wird über einen '
+        + 'Punkt „Gesamtbewertung" mit dem Moodle-Prozentwert.'),
       DRS.feld('Titel', titel),
       DRS.feld('Datum', datum),
+      DRS.feld('Klasse oder Lerngruppe', ziel),
       DRS.feld('Moodle-JSON', datei),
-      info,
     ]);
 
+    let laeuft = false;
     DRS.modal({
       title: '⬆ Moodle-Test importieren',
       body,
       actions: [
         {
-          label: 'Importieren', kind: 'primary', onClick: async (close) => {
+          label: 'Weiter →', kind: 'primary', onClick: async (close) => {
+            if (laeuft) return;
+            if (!ziel.value) { DRS.toast('Bitte eine Klasse oder Lerngruppe wählen.'); return; }
             if (!datei.files.length) { DRS.toast('Bitte eine Datei wählen.'); return; }
-            if (!geprueft) { DRS.toast('Die Datei wird noch geprüft.'); return; }
+            const [zielTyp, zielId] = ziel.value.split(':');
             const fd = new FormData();
-            fd.append('titel', titel.value.trim());
-            fd.append('datum', datum.value);
             fd.append('datei', datei.files[0]);
+            fd.append('ziel_typ', zielTyp);
+            fd.append('ziel_id', zielId);
+            laeuft = true;
+            let plan;
             try {
-              const r = await fetch('/api/exams/moodle', { method: 'POST', body: fd });
-              const d = await r.json();
-              if (!r.ok) throw new Error(d.detail || 'Import fehlgeschlagen');
-              close();
-              location.href = d.url;
-            } catch (e) { DRS.toast(e.message || 'Import fehlgeschlagen.'); }
+              const r = await fetch('/api/exams/moodle/vorschau', { method: 'POST', body: fd });
+              plan = await r.json();
+              if (!r.ok) throw new Error(plan.detail || 'Datei nicht lesbar');
+            } catch (e) {
+              DRS.toast(e.message || 'Datei konnte nicht gelesen werden.');
+              return;
+            } finally { laeuft = false; }
+            close();
+            const grund = { titel: titel.value.trim(), datum: datum.value,
+                            ziel_typ: zielTyp, ziel_id: parseInt(zielId, 10) };
+            EX.fragedialog(plan, {
+              titel: '⬆ ' + (grund.titel || 'Moodle-Test') + ' — Namen zuordnen',
+              verb: 'Prüfung anlegen',
+              mitProzent: true,
+              extra: plan.ohne_ergebnis
+                ? el('p', { class: 'muted' }, plan.ohne_ergebnis === 1
+                    ? '1 Zeile der Datei hat kein Ergebnis und bekommt keine Bewertung.'
+                    : plan.ohne_ergebnis + ' Zeilen der Datei haben kein Ergebnis und bekommen keine Bewertung.')
+                : null,
+              async onFertig(zeilen) {
+                const d = await DRS.postJSON('/api/exams/moodle', Object.assign({}, grund, {
+                  zeilen: zeilen.map((z) => ({
+                    nachname: z.nachname, vorname: z.vorname, percent: z.percent,
+                    student_id: z.student_id, neu_klasse_id: z.neu_klasse_id,
+                  })),
+                }));
+                location.href = d.url;
+              },
+            });
           },
         },
         { label: 'Abbrechen', kind: 'sec', onClick: (c) => c() },
@@ -315,166 +574,158 @@
 
   // ---------- Moodle-Ergebnisse in eine bestehende Prüfung ----------
 
-  /* Der Gegenweg zu `moodleImport`: Die Prüfung steht schon und hängt an einer
-   * Lerngruppe — importiert werden nur die ERGEBNISSE. Damit dabei keine
-   * Karteileichen entstehen, zeigt der Dialog vor dem Schreiben, welcher Name
-   * aus der Datei auf welchen Schüler trifft; unklare Zeilen bekommen ein
-   * Dropdown, keine Vermutung.
-   */
+  /* Die Prüfung steht schon und hängt an einer Lerngruppe — importiert werden
+   * nur die ERGEBNISSE. Gleicher Fragedialog wie beim Anlegen; das Ziel
+   * (welcher Feedbackpunkt) wird in der Zusammenfassung gewählt. */
   EX.moodleErgebnisse = function (examId) {
     const datei = el('input', { type: 'file', accept: '.json,application/json' });
-    const info = el('div', { class: 'moodle-info muted' },
-      'Wähle die aus Moodle exportierte JSON-Datei.');
-    const tabelleWrap = el('div', { style: 'margin-top:.8rem' });
-    const zielWrap = el('div', { style: 'margin-top:.8rem' });
-    let daten = null;
-    let zielWahl = null;
-    let neuName = null;
-    let seq = 0;
+    let laeuft = false;
 
-    function namensWahl(zeile) {
-      const s = el('select', {}, [el('option', { value: '' }, '— nicht zuordnen —')]
-        .concat(daten.kandidaten.map((k) => el('option', { value: String(k.id) }, k.name))));
-      s.value = zeile.student_id ? String(zeile.student_id) : '';
-      s.addEventListener('change', () => {
-        zeile.student_id = s.value ? parseInt(s.value, 10) : null;
-      });
-      return s;
-    }
-
-    function trefferPille(art) {
-      const text = art === 'voll' ? 'Name' : (art === 'nachname' ? 'Nachname' : 'offen');
-      const farbe = art === 'voll' ? '#2e7d32' : (art === 'nachname' ? '#9a6b00' : '#c62828');
-      return el('span', {
-        style: 'font-size:10px;font-weight:700;color:' + farbe,
-      }, text);
-    }
-
-    function zeichneTabelle() {
-      tabelleWrap.textContent = '';
-      const kopf = el('div', {}, [
-        el('strong', {}, daten.zeilen.length + ' Zeilen in der Datei'),
-        daten.offen
-          ? el('div', { class: 'muted' },
-              daten.offen + ' davon ohne sichere Zuordnung — bitte unten wählen.')
-          : el('div', { class: 'muted' }, 'Alle Namen konnten zugeordnet werden.'),
-        daten.ohne_ergebnis
-          ? el('div', { class: 'muted' },
-              daten.ohne_ergebnis + ' Zeilen ohne Ergebnis werden übersprungen.')
-          : null,
-      ]);
-      const tab = el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
-        el('thead', {}, el('tr', {}, [
-          el('th', { style: 'text-align:left;padding:.3rem' }, 'Aus der Datei'),
-          el('th', { style: 'text-align:right;padding:.3rem' }, '%'),
-          el('th', { style: 'text-align:left;padding:.3rem' }, 'Schüler'),
-          el('th', { style: 'text-align:left;padding:.3rem' }, 'Treffer'),
-        ])),
-        el('tbody', {}, daten.zeilen.map((z) => el('tr', {}, [
-          el('td', { style: 'padding:.3rem' },
-            (z.nachname || '') + (z.vorname ? ', ' + z.vorname : '')),
-          el('td', { style: 'padding:.3rem;text-align:right' },
-            z.percent === null || z.percent === undefined ? '—' : String(z.percent)),
-          el('td', { style: 'padding:.3rem' }, namensWahl(z)),
-          el('td', { style: 'padding:.3rem' }, trefferPille(z.treffer)),
-        ]))),
-      ]);
-      tabelleWrap.appendChild(kopf);
-      tabelleWrap.appendChild(
-        el('div', { style: 'max-height:45vh;overflow:auto;margin-top:.4rem' }, tab));
-    }
-
-    function zeichneZiel() {
-      zielWrap.textContent = '';
+    function zielAuswahl(plan) {
       // Nur Punkte-Feedbackpunkte je Schüler können einen Prozentwert aufnehmen —
       // für Schulnote, Stufen oder Gruppenpunkte gäbe es keine ehrliche Umrechnung.
-      const passend = (daten.feedback_points || []).filter(
+      const passend = (plan.feedback_points || []).filter(
         (f) => f.eval_type === 'punkte' && f.scope !== 'group' && f.max_points > 0);
-      zielWahl = el('select', {}, [el('option', { value: '' }, 'Neuen Feedbackpunkt anlegen')]
+      const wahl = el('select', {}, [el('option', { value: '' }, 'Neuen Feedbackpunkt anlegen')]
         .concat(passend.map((f) => el('option', { value: String(f.id) },
           f.name + ' (max ' + f.max_points + ')'))));
-      neuName = el('input', { type: 'text', value: 'Moodle-Test' });
-
-      const neuFeld = DRS.feld('Name des neuen Punktes', neuName,
+      const name = el('input', { type: 'text', value: 'Moodle-Test' });
+      const neuFeld = DRS.feld('Name des neuen Punktes', name,
         'Bekommt 100 Punkte — der Moodle-Prozentwert steht dann unverändert drin.');
-      zielWahl.addEventListener('change', () => {
-        neuFeld.style.display = zielWahl.value ? 'none' : '';
-      });
-
-      zielWrap.appendChild(DRS.feld('Ergebnisse buchen auf', zielWahl,
-        passend.length
-          ? 'Bei einem vorhandenen Punkt wird der Prozentwert auf dessen '
-            + 'Maximalpunkte umgerechnet.'
-          : 'Diese Prüfung hat noch keinen passenden Punkte-Feedbackpunkt.'));
-      zielWrap.appendChild(neuFeld);
+      wahl.addEventListener('change', () => { neuFeld.style.display = wahl.value ? 'none' : ''; });
+      const box = el('div', { class: 'fz-ziel' }, [
+        DRS.feld('Ergebnisse buchen auf', wahl, passend.length
+          ? 'Bei einem vorhandenen Punkt wird der Prozentwert auf dessen Maximalpunkte umgerechnet.'
+          : 'Diese Prüfung hat noch keinen passenden Punkte-Feedbackpunkt.'),
+        neuFeld,
+      ]);
+      return { box, wahl, name };
     }
-
-    datei.addEventListener('change', async () => {
-      const my = ++seq;
-      daten = null;
-      tabelleWrap.textContent = '';
-      zielWrap.textContent = '';
-      if (!datei.files.length) { info.textContent = 'Keine Datei gewählt.'; return; }
-      info.textContent = 'lese Datei …';
-      const fd = new FormData();
-      fd.append('datei', datei.files[0]);
-      try {
-        const r = await fetch('/api/exams/' + examId + '/moodle/vorschau',
-          { method: 'POST', body: fd });
-        const d = await r.json();
-        if (my !== seq) return;          // eine neuere Datei ist unterwegs
-        if (!r.ok) throw new Error(d.detail || 'Datei nicht lesbar');
-        daten = d;
-        info.textContent = '';
-        zeichneTabelle();
-        zeichneZiel();
-      } catch (e) {
-        if (my !== seq) return;
-        info.textContent = e.message || 'Datei konnte nicht gelesen werden.';
-      }
-    });
-
-    const body = el('div', {}, [
-      el('p', { class: 'muted' },
-        'Die Namen aus der Datei werden den Schülern dieser Prüfung zugeordnet — '
-        + 'es entstehen keine neuen Schüler-Datensätze. Geschrieben wird erst, '
-        + 'wenn du die Tabelle unten bestätigst.'),
-      DRS.feld('Moodle-JSON', datei),
-      info,
-      tabelleWrap,
-      zielWrap,
-    ]);
 
     DRS.modal({
       title: '⬆ Moodle-Ergebnisse übernehmen',
-      body,
+      body: el('div', {}, [
+        el('p', { class: 'muted' },
+          'Die Namen aus der Datei werden den Schülern dieser Prüfung zugeordnet — '
+          + 'es entstehen keine doppelten Schüler. Was unklar ist, fragt der '
+          + 'nächste Schritt ab.'),
+        DRS.feld('Moodle-JSON', datei),
+      ]),
       actions: [
         { label: 'Abbrechen', kind: 'sec', onClick: (c) => c() },
         {
-          label: 'Übernehmen', kind: 'primary', onClick: async (close) => {
-            if (!daten) { DRS.toast('Bitte erst eine Datei wählen.'); return; }
-            const zuordnung = daten.zeilen
-              .filter((z) => z.student_id && z.percent !== null && z.percent !== undefined)
-              .map((z) => ({ student_id: z.student_id, percent: z.percent }));
-            if (!zuordnung.length) {
-              DRS.toast('Keine Zeile hat Schüler und Ergebnis.');
-              return;
-            }
+          label: 'Weiter →', kind: 'primary', onClick: async (close) => {
+            if (laeuft) return;
+            if (!datei.files.length) { DRS.toast('Bitte eine Datei wählen.'); return; }
+            const fd = new FormData();
+            fd.append('datei', datei.files[0]);
+            laeuft = true;
+            let plan;
             try {
-              const d = await DRS.postJSON(
-                '/api/exams/' + examId + '/moodle/import', {
+              const r = await fetch('/api/exams/' + examId + '/moodle/vorschau',
+                { method: 'POST', body: fd });
+              plan = await r.json();
+              if (!r.ok) throw new Error(plan.detail || 'Datei nicht lesbar');
+            } catch (e) {
+              DRS.toast(e.message || 'Datei konnte nicht gelesen werden.');
+              return;
+            } finally { laeuft = false; }
+            close();
+            const ziel = zielAuswahl(plan);
+            EX.fragedialog(plan, {
+              titel: '⬆ Moodle-Ergebnisse — Namen zuordnen',
+              verb: 'Ergebnisse übernehmen',
+              mitProzent: true,
+              extra: ziel.box,
+              async onFertig(zeilen) {
+                const zuordnung = zeilen
+                  .filter((z) => (z.student_id || z.neu_klasse_id)
+                                 && z.percent !== null && z.percent !== undefined)
+                  .map((z) => ({ student_id: z.student_id, neu_klasse_id: z.neu_klasse_id,
+                                 percent: z.percent, nachname: z.nachname, vorname: z.vorname }));
+                if (!zuordnung.length) throw new Error('Keine Zeile hat Schüler und Ergebnis.');
+                const d = await DRS.postJSON('/api/exams/' + examId + '/moodle/import', {
                   zuordnung,
-                  fp_id: zielWahl && zielWahl.value ? parseInt(zielWahl.value, 10) : null,
-                  fp_name: neuName ? neuName.value.trim() : '',
+                  fp_id: ziel.wahl.value ? parseInt(ziel.wahl.value, 10) : null,
+                  fp_name: ziel.name.value.trim(),
                 });
-              close();
-              DRS.toast(d.gebucht + ' Ergebnisse übernommen — lade neu …');
-              setTimeout(() => location.reload(), 700);
-            } catch (e) { DRS.toast(e.message || 'Import fehlgeschlagen.'); }
+                DRS.toast(d.gebucht + ' Ergebnisse übernommen — lade neu …');
+                setTimeout(() => location.reload(), 700);
+              },
+            });
           },
         },
       ],
     });
+  };
+
+  // ---------- Doppelte aus dem alten Moodle-Import zusammenführen ----------
+
+  EX.gaesteAufraeumen = async function (examId) {
+    let plan;
+    try {
+      // nicht DRS.getJSON: das verschluckt die Begründung des Servers
+      const r = await fetch('/api/exams/' + examId + '/gaeste');
+      plan = await r.json();
+      if (!r.ok) throw new Error(plan.detail || 'Serverfehler');
+    } catch (e) {
+      DRS.toast(e.message || 'Konnte nicht geladen werden.');
+      return;
+    }
+    if (!plan.zeilen.length) { DRS.toast('Keine Doppelten mehr in dieser Prüfung.'); return; }
+    EX.fragedialog(plan, {
+      titel: '🧹 Doppelte Schüler zusammenführen',
+      verb: 'Zusammenführen',
+      anlegenLabel: 'In die Klasse aufnehmen',
+      extra: el('p', { class: 'muted' },
+        'Bewertungen der Doppelten wandern auf den echten Schüler. Hat der schon '
+        + 'Werte, bleiben seine stehen. Leere Doppelte werden danach gelöscht.'),
+      async onFertig(zeilen) {
+        const d = await DRS.postJSON('/api/exams/' + examId + '/gaeste/zusammenfuehren', {
+          zeilen: zeilen.map((z) => ({ gast_id: z.gast_id, student_id: z.student_id,
+                                       neu_klasse_id: z.neu_klasse_id })),
+        });
+        DRS.toast(d.zusammengefuehrt + ' zusammengeführt'
+          + (d.eingeordnet ? ', ' + d.eingeordnet + ' in die Klasse aufgenommen' : '')
+          + ' — lade neu …');
+        setTimeout(() => { location.href = location.pathname; }, 700);
+      },
+    });
+  };
+
+  // ---------- Gesamt-PDF ----------
+
+  /* Holt das PDF per fetch statt über einen nackten Link: So lässt sich
+   * melden, wer mangels Bewertung fehlt, und der Knopf zeigt, dass gerade
+   * gerendert wird (je Schüler ein Chromium-Durchlauf, das dauert). */
+  EX.gesamtPdf = async function (examId, duplex, knopf) {
+    const vorher = knopf ? knopf.textContent : '';
+    if (knopf) { knopf.disabled = true; knopf.textContent = 'PDF wird erstellt …'; }
+    try {
+      const r = await fetch('/exams/' + examId + '/export.pdf?duplex=' + (duplex ? 1 : 0));
+      if (!r.ok) {
+        let msg = 'PDF konnte nicht erstellt werden.';
+        try { msg = (await r.json()).detail || msg; } catch (e) { /* kein JSON */ }
+        throw new Error(msg);
+      }
+      const blob = await r.blob();
+      const cd = r.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename="([^"]+)"/);
+      const a = el('a', { href: URL.createObjectURL(blob),
+                          download: m ? decodeURIComponent(m[1]) : 'pruefung.pdf' });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      const ohne = decodeURIComponent(r.headers.get('X-Ohne-Bewertung') || '');
+      const fehler = decodeURIComponent(r.headers.get('X-Fehler') || '');
+      if (fehler) DRS.toast('Nicht erzeugt: ' + fehler, 8000);
+      else if (ohne) DRS.toast('Ohne Bewertung, daher nicht enthalten: ' + ohne, 8000);
+    } catch (e) {
+      DRS.toast(e.message || 'PDF konnte nicht erstellt werden.');
+    } finally {
+      if (knopf) { knopf.disabled = false; knopf.textContent = vorher; }
+    }
   };
 
   // ---------- Zuordnung ändern ----------
@@ -538,7 +789,9 @@
               await DRS.postJSON(`/exams/${examId}/save`,
                 { tab: 'einstellungen', lerngruppe_id: lgId });
               close();
-              location.reload();
+              // Stecken noch Doppelte aus dem alten Moodle-Import drin, öffnet
+              // die Seite nach dem Laden direkt das Zusammenführen.
+              location.href = location.pathname + '?aufraeumen=1';
             } catch (e) { DRS.toast(e.message || 'Konnte nicht speichern.'); }
           },
         },
