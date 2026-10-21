@@ -819,8 +819,17 @@ async def api_exam_moodle_vorschau(
     lg = _exam_lerngruppe(db, user, ex)
     plan = _zuordnungs_plan(db, user, lg, eintraege,
                             kern_extra=[s for s, _ in _exam_participants(db, ex)])
+    # Ein zweites JSON (andere Teilgruppe, zweiter Teil) gehört in dieselbe
+    # Spalte wie das erste — sonst stehen zwei „Moodle-Test" im PDF. Darum den
+    # jüngsten Moodle-Punkt vorschlagen; Schüler ohne Prozentwert in der neuen
+    # Datei bleiben dabei unberührt.
+    moodle_fps = [fp for fp in ex.feedback_points
+                  if fp.eval_type == "punkte" and fp.scope != "group"
+                  and float(fp.max_points or 0) > 0
+                  and re.search(r"moodle|gesamtbewertung", fp.name or "", re.I)]
     plan.update(
         ok=True,
+        vorschlag_fp_id=max((fp.id for fp in moodle_fps), default=None),
         feedback_points=[
             {"id": fp.id, "name": fp.name, "max_points": float(fp.max_points or 0),
              "eval_type": fp.eval_type, "scope": fp.scope}
@@ -1427,15 +1436,21 @@ def _build_student_pdf_html(
 
     Spalten richten sich nach ex.bewertung_mode:
       • note  → Feedbackpunkt | Gewichtung | Note (+ optional Bemerkung)
-      • punkte → Feedbackpunkt | Max | Erreicht (+ optional Bemerkung)
+      • punkte → Feedbackpunkt | Erreicht | Max | % (+ optional Bemerkung)
       • mixed → wie bisher (Art, Gewichtung, Max, Erreicht)
-    Mündliche Ergänzungen erscheinen pro FP nur wenn ausgefüllt.
+    Sind ALLE Feedbackpunkte Punkte, gilt das Punkte-Layout unabhängig vom
+    Modus — sonst landete etwa ein Moodle-Ergebnis in einer Prüfung, die im
+    Notenmodus angelegt wurde, als „24,14" in der Spalte „Note".
+    Punkte ohne Wert für diesen Schüler fallen weg (z. B. der Moodle-Teil
+    der anderen Teilgruppe); mit Bemerkung bleiben sie stehen.
     """
     er = ctx["indiv_results"].get(student.id, {})
     ger = ctx["group_results"].get(group_label or "", {})
     remarks = ctx["indiv_remarks"].get(student.id, {})
     grem = ctx["group_remarks"].get(group_label or "", {})
     mode = ctx.get("bewertung_mode", "mixed")
+    if ctx["fps"] and all(fp.eval_type == "punkte" for fp in ctx["fps"]):
+        mode = "punkte"
 
     stufen = ctx["stufen"]
     rows = []
@@ -1445,8 +1460,11 @@ def _build_student_pdf_html(
     for fp in ctx["fps"]:
         raw = (ger if fp.scope == "group" else er).get(str(fp.id), "")
         rem = (grem if fp.scope == "group" else remarks).get(str(fp.id), "")
+        if raw in (None, "") and not rem:
+            continue
         if rem:
             any_remark = True
+        pct_row = ""
         if fp.eval_type == "note":
             erreicht_str = str(raw) if raw not in (None, "") else "—"
             max_str = "Note"
@@ -1473,11 +1491,15 @@ def _build_student_pdf_html(
             if raw not in (None, ""):
                 sum_erreicht += val_f
                 sum_max += float(fp.max_points or 0)
+                if fp.max_points:
+                    pct_row = _format_number(
+                        round(val_f / float(fp.max_points) * 100.0, 1)) + " %"
         weight_str = (f"{_format_number(fp.weight_pct)} %"
                       if fp.eval_type == "note" and fp.weight_pct else "—")
         rows.append({
             "name": fp.name, "scope": fp.scope, "typ": typ,
             "max_str": max_str, "erreicht_str": erreicht_str,
+            "pct_str": pct_row or "—",
             "weight_str": weight_str, "remark": rem or "",
         })
 

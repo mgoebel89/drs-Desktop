@@ -78,8 +78,9 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
       {% elif mode == 'punkte' %}
       <tr>
         <th>Feedbackpunkt</th>
-        <th class="num">Max</th>
         <th class="num-err">Erreicht</th>
+        <th class="num">Max</th>
+        <th class="num">Prozent</th>
         {% if any_remark %}<th>Bemerkung</th>{% endif %}
       </tr>
       {% else %}
@@ -101,8 +102,9 @@ table.bewertung tr:nth-child(even) td{background:#fafafa;}
         <td class="num">{{ row.weight_str }}</td>
         <td class="num-err">{{ row.erreicht_str }}</td>
         {% elif mode == 'punkte' %}
-        <td class="num">{{ row.max_str }}</td>
         <td class="num-err">{{ row.erreicht_str }}</td>
+        <td class="num">{{ row.max_str }}</td>
+        <td class="num">{{ row.pct_str }}</td>
         {% else %}
         <td style="font-size:11px;color:#666">{{ row.typ }}</td>
         <td class="num">{{ row.weight_str }}</td>

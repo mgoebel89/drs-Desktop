@@ -340,6 +340,16 @@ Header `X-Ohne-Bewertung`; der Knopf holt das PDF deshalb per `fetch` und
 meldet sie. Duplex-Wahl merkt sich `localStorage drs.pdfDuplex`. ZIP bleibt
 als Nebenaktion.
 
+**Nachtrag aus dem Container-Test (2026-10-21):** Zwei Teilgruppen-JSONs in
+EINE Klassenprüfung ergaben zwei Feedbackpunkte „Moodle-Test", weil das
+Import-Ziel auf „Neuen Punkt anlegen" stand. Jetzt schlägt die Vorschau den
+jüngsten Moodle-Punkt vor (`vorschlag_fp_id`: Punkte, je Schüler, Name enthält
+„Moodle" oder „Gesamtbewertung"). Im Schüler-PDF gilt das Punkte-Layout
+(**Erreicht | Max | Prozent**), sobald ALLE Feedbackpunkte Punkte sind — auch
+in Prüfungen, die im Notenmodus angelegt wurden (vorher stand „24,14" in der
+Spalte „Note"). Feedbackpunkte ohne Wert für den Schüler fallen im PDF weg,
+außer sie tragen eine Bemerkung.
+
 **Falle:** Die globale Formularregel in `drs.css` kennt `input[type=search]`
 nicht — ein Suchfeld bleibt dort ungestylt und schmal. Im Dialog deshalb
 `type=text`.

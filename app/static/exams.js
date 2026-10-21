@@ -593,9 +593,16 @@
       const neuFeld = DRS.feld('Name des neuen Punktes', name,
         'Bekommt 100 Punkte — der Moodle-Prozentwert steht dann unverändert drin.');
       wahl.addEventListener('change', () => { neuFeld.style.display = wahl.value ? 'none' : ''; });
+      // Schon ein Moodle-Punkt da (z. B. Teil der anderen Teilgruppe)? Dann
+      // dorthin — ein zweiter gleichnamiger Punkt stünde doppelt im PDF.
+      if (plan.vorschlag_fp_id && passend.some((f) => f.id === plan.vorschlag_fp_id)) {
+        wahl.value = String(plan.vorschlag_fp_id);
+        neuFeld.style.display = 'none';
+      }
       const box = el('div', { class: 'fz-ziel' }, [
         DRS.feld('Ergebnisse buchen auf', wahl, passend.length
-          ? 'Bei einem vorhandenen Punkt wird der Prozentwert auf dessen Maximalpunkte umgerechnet.'
+          ? 'Bei einem vorhandenen Punkt wird der Prozentwert auf dessen Maximalpunkte '
+            + 'umgerechnet. Schüler ohne Prozentwert in dieser Datei behalten ihren Wert.'
           : 'Diese Prüfung hat noch keinen passenden Punkte-Feedbackpunkt.'),
         neuFeld,
       ]);
