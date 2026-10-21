@@ -389,8 +389,9 @@
   <p class="muted" style="font-size:12px;margin-bottom:.6rem">
     Diese Bilder werden automatisch auf erzeugten Bewertungs-PDFs eingebettet —
     die <strong>Unterschrift</strong> auf den Einzel-Schüler-PDFs (über der Linie),
-    die <strong>Paraphe</strong> auf der Lehrer-Zusammenfassung. PNG oder JPG,
-    max. 500 KB. Transparenter Hintergrund empfohlen.
+    die <strong>Paraphe</strong> auf der Lehrer-Zusammenfassung. Direkt mit Stift
+    oder Finger zeichnen — oder eine Datei hochladen (PNG oder JPG, max. 500 KB,
+    transparenter Hintergrund empfohlen).
   </p>
 
   <div class="form-2" style="gap:1.2rem;margin-bottom:1rem">
@@ -403,6 +404,7 @@
         <span class="muted" style="font-size:12px">noch keine Unterschrift</span>
         {% endif %}
       </div>
+      <button type="button" class="btn" data-zeichnen="signature" style="margin-bottom:.6rem">✎ Mit Stift zeichnen</button>
       <form method="post" action="/profile/signature" enctype="multipart/form-data" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <input type="file" name="file" accept="image/png,image/jpeg" required>
         <button class="btn btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Hochladen</button>
@@ -424,6 +426,7 @@
         <span class="muted" style="font-size:12px">noch keine Paraphe</span>
         {% endif %}
       </div>
+      <button type="button" class="btn" data-zeichnen="paraphe" style="margin-bottom:.6rem">✎ Mit Stift zeichnen</button>
       <form method="post" action="/profile/paraphe" enctype="multipart/form-data" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <input type="file" name="file" accept="image/png,image/jpeg" required>
         <button class="btn btn-sec" type="submit" style="padding:4px 10px;font-size:12px">Hochladen</button>
@@ -554,5 +557,22 @@
   if (HASH_KAT[hash]) start = HASH_KAT[hash];
   zeige(start);
 })();
+</script>
+{% endblock %}
+
+{% block scripts %}
+{# Muss nach drs.js laufen (base.html bindet es erst nach dem content-Block ein). #}
+<script src="/static/unterschrift.js?v={{ static_version() }}"></script>
+<script>
+document.querySelectorAll('[data-zeichnen]').forEach((btn) => {
+  btn.addEventListener('click', () => DRSUnterschrift.oeffnen({
+    art: btn.dataset.zeichnen,
+    // neu laden, damit Vorschau und „Entfernen" den neuen Stand zeigen
+    nachSpeichern: () => setTimeout(() => {
+      location.href = '/profile#unterschrift';
+      location.reload();
+    }, 600),
+  }));
+});
 </script>
 {% endblock %}

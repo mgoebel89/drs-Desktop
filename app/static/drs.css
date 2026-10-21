@@ -552,3 +552,33 @@ tr:hover td { background: #fafafa; }
 .fz-ziel { border-top: 1px solid var(--border); padding-top: 10px; }
 .fz-nav { display: flex; justify-content: space-between; align-items: center;
   gap: 8px; margin-top: auto; padding-top: 8px; }
+
+/* ---------- Unterschrift/Paraphe zeichnen (unterschrift.js) ---------- */
+.usz { position: fixed; inset: 0; z-index: 55; background: #eef1f4;
+  display: flex; flex-direction: column; }
+.usz-leiste { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.usz-werkzeuge { display: flex; align-items: center; gap: 6px; flex: 1; flex-wrap: wrap;
+  justify-content: center; }
+.usz-k { min-height: 44px; min-width: 44px; padding: 0 12px; display: inline-flex;
+  align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); font: inherit; font-size: 14px; cursor: pointer; }
+.usz-k.an { border-color: var(--blau); background: var(--blau-hell); color: var(--blau);
+  font-weight: 600; }
+.usz-farbe { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
+.usz-trenner { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+.usz-hinweis { text-align: center; font-size: 13px; color: var(--muted); padding: 8px 12px 0; }
+.usz-buehne { flex: 1; display: flex; align-items: center; justify-content: center;
+  min-height: 0; }
+.usz-blatt { position: relative; background: #fff; border-radius: var(--r);
+  box-shadow: var(--shadow); }
+.usz-canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+/* Grundlinie nur zur Orientierung — sie landet nicht im Bild */
+.usz-linie { position: absolute; left: 6%; right: 6%; top: 72%;
+  border-top: 2px dashed #b8c2cc; pointer-events: none; }
+.usz-vorschau { background: #fff; border: 1px solid var(--border); border-radius: var(--r);
+  padding: 24px 24px 12px; display: flex; flex-direction: column; align-items: flex-end; }
+.usz-v-sig { max-height: 55px; max-width: 200px; display: block; }
+.usz-v-paraphe { max-height: 40px; max-width: 120px; display: block; }
+.usz-v-linie { width: 210px; border-top: 1px solid #000; margin-top: 2px; }
