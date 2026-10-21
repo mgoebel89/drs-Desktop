@@ -106,6 +106,16 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   Dialog dient „⬆ Moodle-Ergebnisse" und dem **Zusammenführen der Doppelten**
   aus alten Importen. Export: **Gesamt-PDF** aller bewerteten Schüler
   (alphabetisch, ohne Zusammenfassung, optional mit Duplex-Leerseiten).
+- **NEU: Unterschrift & Paraphe mit Stift zeichnen** (2026-10-21, keine
+  Migration, kein Backend-Umbau): In den Einstellungen öffnet „✎ Mit Stift
+  zeichnen" eine Vollbild-Fläche (`static/unterschrift.js`) mit Grundlinie,
+  Schwarz/Blau, Andruck-Strichstärke, Rückgängig und „nur Stift"
+  (Handballen-Sperre wie bei den Unterrichtsbesuchen). Nach „Fertig" zeigt
+  eine Vorschau das Bild in PDF-Größe; erst „Übernehmen" lädt es über die
+  bestehenden Routen `/profile/signature|paraphe` hoch. Das PNG ist
+  **transparent und eng auf die Schrift zugeschnitten** (max. 1200 px breit,
+  typisch ~30 KB). Die Fläche hat `z-index: 55` — UNTER den Modals (60),
+  sonst verschwände die Rückfrage „Zeichnung verwerfen?" dahinter.
 - **NEU: Modul „Unterrichtsbesuche" — Stufe 1** (2026-09-29, Migration **0034**,
   Branch `feat/unterrichtsbesuche`): Hospitationsprotokolle für Anwärter.
   Anwärter als Stammdatum, Besuch per Assistent (Kopfdaten + vom Anwärter
