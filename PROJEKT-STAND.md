@@ -1,6 +1,6 @@
 # Projektstand: DRS Unterrichtsmaterial-System
 
-**Datum**: 2026-09-29 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
+**Datum**: 2026-10-21 · **Schule**: David-Roentgen-Schule Neuwied, BBS Gewerbe + Technik (Mechatronik)
 
 > Wenn du dieses Dokument in einer neuen Claude-Session lädst, sag direkt:
 > *„Lies `PROJEKT-STAND.md` für den Stand. Ich möchte als Nächstes mit **\<Modul\>** weitermachen."*
@@ -98,6 +98,14 @@ Gemeindeverwaltung** (Kacheln, Karten, Vollbild-Assistenten, Detail-Modals).
   nimmt „⬆ Moodle-Ergebnisse" eine JSON auf, ordnet die Namen den Schülern der
   Lerngruppe zu und bucht die Prozentwerte auf einen **wählbaren**
   Feedbackpunkt. Es entstehen **keine neuen Schüler-Datensätze** mehr.
+- **NEU: Moodle-Import ohne doppelte Schüler + Gesamt-PDF** (2026-10-21, keine
+  Migration): „⬆ Moodle-Test" fragt zuerst nach Klasse/Lerngruppe und ordnet
+  die Namen deren Schülern zu — der alte Weg „ein neuer Schüler je Name" ist
+  weg. Unklares klärt ein **Fragedialog** (eine Karte je Fall, die andere
+  Teilgruppe gesammelt in einer Frage, neu anlegen nur auf Klick). Derselbe
+  Dialog dient „⬆ Moodle-Ergebnisse" und dem **Zusammenführen der Doppelten**
+  aus alten Importen. Export: **Gesamt-PDF** aller bewerteten Schüler
+  (alphabetisch, ohne Zusammenfassung, optional mit Duplex-Leerseiten).
 - **NEU: Modul „Unterrichtsbesuche" — Stufe 1** (2026-09-29, Migration **0034**,
   Branch `feat/unterrichtsbesuche`): Hospitationsprotokolle für Anwärter.
   Anwärter als Stammdatum, Besuch per Assistent (Kopfdaten + vom Anwärter
@@ -293,6 +301,57 @@ Verschlankung **ausgeblendet** (siehe Abschnitt 0).
 ---
 
 ## 3. Aktuell offene Punkte
+
+### Moodle-Import mit Fragedialog + Gesamt-PDF (2026-10-21, NEU)
+
+**Ursache der Doppelten:** `POST /api/exams/moodle` legte für jeden Namen der
+Datei einen inaktiven Schüler ohne Klasse an. Wurde die Prüfung danach einer
+Klasse zugeordnet, ergänzte `_set_lerngruppe` deren echte Schüler — jeder
+stand zweimal drin. Der Weg ist ersetzt, ebenso der Moodle-Zweig im alten
+Formular `POST /exams` (aus der UI nicht mehr verlinkt).
+
+**Ein Regelwerk, drei Wege.** `moodle_quiz.ordne_zu(eintraege, kern, weitere)`
+liefert je Zeile `status`: `sicher` (voller Name, eindeutig im Kern → still
+zugeordnet), `teilgruppe` (voller Name, aber nur in den übrigen Schülern
+derselben Klassen), `frage` (Kandidaten, aber nicht eindeutig — auch ein nur
+über den Nachnamen gefundener Schüler ist bloß ein Vorschlag), `keiner`.
+`_zuordnungs_plan` im Router baut daraus die Antwort für `EX.fragedialog`
+(exams.js); `_zuordnung_aufloesen` prüft die bestätigte Zuordnung (Besitz,
+kein Schüler in zwei Zeilen) und legt nur bei `neu_klasse_id` an — und zwar
+nur in einer Klasse der Lerngruppe, bei einer Teilgruppe auch in die Gruppe.
+Genutzt von: neue Prüfung aus Moodle (`/api/exams/moodle[/vorschau]`, jetzt
+JSON + Ziel), Ergebnisse in bestehende Prüfung (`/api/exams/{id}/moodle/…`)
+und Aufräumen (`/api/exams/{id}/gaeste[/zusammenfuehren]`).
+
+**Gast** = Altlast des alten Imports: `active=False`, ohne `schulklasse_id`,
+`jahrgang_id` und `klassen_key` (`_ist_moodle_gast`). Pool-Schüler (haben
+Jahrgang) und Ausgetretene (haben Klasse) fallen bewusst nicht darunter.
+Zusammenführen hängt Ergebnis, Bemerkungen, Kommentar und Gruppe auf den
+echten Schüler um — **dessen Werte gewinnen**, vom Gast kommt nur, was leer
+ist. Ein Gast ohne weitere Prüfung wird gelöscht. „In die Klasse aufnehmen"
+macht den Gast selbst zum Schüler (kein neuer Datensatz). Die Detailseite
+zeigt einen Hinweis mit Knopf; nach „Zuordnung ändern" öffnet der Dialog
+direkt (`?aufraeumen=1`).
+
+**Gesamt-PDF** `GET /exams/{id}/export.pdf?duplex=0|1`: Einzel-PDFs wie
+bisher gerendert und mit pypdf zusammengefügt, alphabetisch (nicht nach
+Gruppe), nur wer mindestens einen Wert hat. Fehlende stehen URL-kodiert im
+Header `X-Ohne-Bewertung`; der Knopf holt das PDF deshalb per `fetch` und
+meldet sie. Duplex-Wahl merkt sich `localStorage drs.pdfDuplex`. ZIP bleibt
+als Nebenaktion.
+
+**Falle:** Die globale Formularregel in `drs.css` kennt `input[type=search]`
+nicht — ein Suchfeld bleibt dort ungestylt und schmal. Im Dialog deshalb
+`type=text`.
+
+**Offen:**
+- Im Container testen (`drs-update`, keine Migration): echte Moodle-Datei
+  einer geteilten Klasse, Aufräumen einer echten Altprüfung, Gesamt-PDF
+  drucken (doppelseitig).
+- Rendern dauert pro Schüler rund 2–3 s (je Bogen ein Chromium-Start, wie
+  schon beim ZIP). Bei großen Klassen ließe sich ein Browser für alle Bögen
+  wiederverwenden.
+- Fragedialog auf Handybreite nicht eigens geprüft.
 
 ### Unterrichtsbesuche (2026-09-29, NEU)
 

@@ -511,3 +511,44 @@ tr:hover td { background: #fafafa; }
   .wiz-step .wiz-label { display: none; }
   .drs-modal-foot, .wiz-foot { border-radius: 0; }
 }
+
+/* ---------- Fragedialog: Namen Schülern zuordnen (exams.js) ---------- */
+.fz { display: flex; flex-direction: column; gap: 12px; min-height: 260px; }
+.fz p { margin: 0; }
+.fz-kopf { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--blau); }
+.fz-kopf .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.fz-karte { border: 1px solid var(--blau); background: var(--blau-hell);
+  border-radius: var(--r); padding: 14px 16px; }
+.fz-name { font-size: 20px; font-weight: 700; color: var(--blau); }
+.fz-proz { font-weight: 600; color: var(--text); white-space: nowrap; }
+.fz-optionen, .fz-suche-treffer { display: grid; gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.fz-suche-treffer { margin-top: 6px; }
+.fz-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 10px 12px; min-height: 44px; border: 1px solid var(--border);
+  border-radius: var(--r); background: var(--surface); cursor: pointer; font: inherit; }
+.fz-opt:hover:not([disabled]) { border-color: var(--blau); background: var(--blau-hell); }
+.fz-opt.fz-aktiv { border-color: var(--blau); box-shadow: inset 0 0 0 1px var(--blau); }
+.fz-opt[disabled] { opacity: .5; cursor: not-allowed; }
+.fz-opt-name { font-weight: 600; }
+.fz-opt-sub { font-size: 12px; color: var(--muted); }
+.fz-badge { margin-left: 6px; font-size: 10px; font-weight: 700; color: var(--blau);
+  background: var(--blau-hell); border-radius: 8px; padding: 1px 6px; }
+.fz-anlegen { border-top: 1px dashed var(--border); padding-top: 10px; }
+.fz-frage { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.fz-anlegen-zeile { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fz-anlegen-zeile select { width: auto; }
+.fz-liste { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; overflow: auto; }
+.fz-check { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; }
+.fz-check input { width: auto; margin: 0; }
+.fz-check > span:nth-child(2) { flex: 1; }
+.fz-summe { margin: 0; padding-left: 18px; line-height: 1.8; }
+.fz-details summary { cursor: pointer; color: var(--blau); font-size: 13px; }
+.fz-mini { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6;
+  max-height: 30vh; overflow: auto; }
+.fz-ziel { border-top: 1px solid var(--border); padding-top: 10px; }
+.fz-nav { display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-top: auto; padding-top: 8px; }

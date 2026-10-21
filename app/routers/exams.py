@@ -18,10 +18,11 @@ from app.db import get_db
 from app.models import (Exam, ExamFeedbackPoint, ExamGroupResult, ExamResult,
                         ExamStudent, FeedbackTemplate, LearningSituation,
                         LessonNote, Student, TtJahrgang, TtKlasse,
-                        TtSchulklasse, User)
+                        TtLerngruppeStudent, TtSchulklasse, User)
 from app.services import (exam_md, exam_scoring, grading, moodle_quiz,
                           obsidian_writer)
-from app.services.lerngruppen import (lerngruppe_der_klasse, lerngruppen,
+from app.services.lerngruppen import (klassen_der_lerngruppe,
+                                      lerngruppe_der_klasse, lerngruppen,
                                       schueler_der_lerngruppe)
 from app.services.playwright_pdf import render_pdf
 from app import branding
@@ -319,8 +320,10 @@ async def exams_create(
     grading_scale_key: str = Form("builtin:mss_noten"),
     input_mode: str = Form("numeric"),
     bewertung_mode: str = Form("note"),
-    moodle_json: UploadFile | None = File(default=None),
 ):
+    """Alter Formularweg (Fallback, aus der Oberfläche nicht mehr verlinkt).
+    Moodle-Dateien nimmt er nicht mehr an — die legten hier für jeden Namen
+    einen neuen Schüler an. Dafür gibt es den Import mit Fragedialog."""
     title = title.strip()[:200] or "Neue Prüfung"
     if input_mode not in ("numeric", "stages"):
         input_mode = "numeric"
@@ -349,26 +352,6 @@ async def exams_create(
         except ValueError:
             pass
 
-    # Moodle-JSON-Pfad: Schüler + Bewertungen kommen aus der Datei,
-    # Klassen-Checkboxen werden ignoriert.
-    moodle_entries: list[dict] = []
-    has_moodle = moodle_json is not None and (moodle_json.filename or "").strip()
-    if has_moodle:
-        try:
-            raw = (await moodle_json.read()).decode("utf-8-sig", errors="replace")
-            moodle_entries = moodle_quiz.parse_moodle_json(raw)
-        except (ValueError, UnicodeDecodeError) as e:
-            raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
-        if not moodle_entries:
-            raise HTTPException(400, "Moodle-JSON enthält keine Schüler.")
-        # Klassen aus den abteilung-Werten der JSON ableiten
-        abteilungen = []
-        for e in moodle_entries:
-            ab = (e.get("abteilung") or "").strip()
-            if ab and ab not in abteilungen:
-                abteilungen.append(ab)
-        klassen_clean = abteilungen or ["Moodle-Import"]
-
     ex = Exam(
         owner_user_id=user.id,
         title=title,
@@ -380,59 +363,17 @@ async def exams_create(
         learning_situation_id=ls_id,
         grading_scale_key=grading_scale_key,
         input_mode=input_mode,
-        bewertung_mode="punkte" if has_moodle else bewertung_mode,
+        bewertung_mode=bewertung_mode,
     )
     db.add(ex)
     db.flush()
 
-    if has_moodle:
-        # Auto-FP "Gesamtbewertung" (max 100, eval_type=punkte)
-        fp = ExamFeedbackPoint(
-            exam_id=ex.id, position=0, name="Gesamtbewertung",
-            max_points=100.0, scope="individual",
-            eval_type="punkte", weight_pct=100.0,
-        )
-        db.add(fp)
-        db.flush()
-
-        # Schüler werden pro Moodle-Import frisch angelegt — KEINE Zuordnung
-        # zu einer bestehenden Klasse (Moodle-Klassenbezeichnungen weichen
-        # ab und ein Moodle-Kurs bündelt oft mehrere Schulklassen).
-        # Sentinel: klassen_key="" und active=False → tauchen weder in der
-        # Klassen-Auswahl noch in der Schülerliste auf.
-        for entry in moodle_entries:
-            s = Student(
-                owner_user_id=user.id,
-                klassen_key="",
-                nachname=entry["nachname"][:120],
-                vorname=entry["vorname"][:120],
-                active=False,
-            )
-            db.add(s)
-            db.flush()
-            db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
-            if entry["percent"] is not None:
-                r = ExamResult(
-                    exam_id=ex.id, student_id=s.id,
-                    erreicht_json=json.dumps(
-                        {str(fp.id): round(float(entry["percent"]), 2)},
-                        ensure_ascii=False,
-                    ),
-                )
-                db.add(r)
-    else:
-        _add_gruppe_members(db, user, ex, gewaehlt)
+    _add_gruppe_members(db, user, ex, gewaehlt)
 
     audit(db, "exam_created", actor=user, target=str(ex.id),
-          detail=f"{title} / {ex.klassen_key}"
-                 + (f" / moodle={len(moodle_entries)}" if has_moodle else ""),
-          request=request)
+          detail=f"{title} / {ex.klassen_key}", request=request)
     db.commit()
-
-    target = f"/exams/{ex.id}"
-    if has_moodle:
-        target += "?moodle_imported=" + str(len(moodle_entries))
-    return RedirectResponse(target, status_code=303)
+    return RedirectResponse(f"/exams/{ex.id}", status_code=303)
 
 
 def _valid_scale_ref(db: Session, user: User, ref: str) -> bool:
@@ -524,26 +465,8 @@ def api_exam_create(
     title = (body.get("title") or "").strip()[:200] or "Neue Prüfung"
     datum = (body.get("datum") or "").strip()[:10]
 
-    ziel_typ = (body.get("ziel_typ") or "").strip()
-    ziel_id = body.get("ziel_id")
-    if ziel_typ == "klasse":
-        try:
-            k = db.get(TtSchulklasse, int(ziel_id))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Ungültige Klasse.")
-        if not k or k.user_id != user.id:
-            raise HTTPException(404, "Klasse nicht gefunden.")
-        lg = lerngruppe_der_klasse(db, user, k.id)
-        if not lg:
-            raise HTTPException(
-                400, f'Zur Klasse „{k.name}" gibt es keine Lerngruppe. '
-                     'Leg sie in den Stammdaten an, dann lässt sich die '
-                     'Prüfung zuordnen.')
-        lerngruppe_id = lg.id
-    elif ziel_typ == "lerngruppe":
-        lerngruppe_id = ziel_id
-    else:
-        raise HTTPException(400, "Bitte eine Klasse oder Lerngruppe wählen.")
+    lerngruppe_id = _ziel_zu_lerngruppe(
+        db, user, (body.get("ziel_typ") or "").strip(), body.get("ziel_id")).id
 
     scale = body.get("grading_scale_key") or grading.DEFAULT_SCALE
     if not _valid_scale_ref(db, user, scale):
@@ -585,114 +508,302 @@ def api_exam_create(
     return JSONResponse({"ok": True, "id": ex.id, "url": f"/exams/{ex.id}"})
 
 
+# ── Moodle-Import: Namens-Zuordnung mit Fragedialog ───────────────────────
+#
+# Früher legte „⬆ Moodle-Test" für jeden Namen der Datei einen neuen, inaktiven
+# Schüler an. Ordnete man die Prüfung danach einer Klasse zu, kamen deren echte
+# Schüler dazu — jeder stand doppelt drin. Jetzt gibt es nur noch EINE Regel:
+# Die Namen treffen auf die Schüler der Lerngruppe. Sicheres wird still
+# zugeordnet, Unklares fragt der Dialog ab, und neu angelegt wird ein Schüler
+# nur auf ausdrücklichen Klick — dann richtig, in seiner Klasse.
+#
+# Drei Wege nutzen dieselben Bausteine: neue Prüfung aus einer Datei,
+# Ergebnisse in eine bestehende Prüfung und das Aufräumen der „Gäste", die der
+# alte Import hinterlassen hat.
+
+async def _lies_moodle(datei: UploadFile) -> list[dict]:
+    try:
+        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
+        eintraege = moodle_quiz.parse_moodle_json(raw)
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
+    if not eintraege:
+        raise HTTPException(400, "Die Datei enthält keine Schüler.")
+    return eintraege
+
+
+def _ziel_zu_lerngruppe(db: Session, user: User, ziel_typ: str, ziel_id) -> TtKlasse:
+    """Klasse ODER Lerngruppe → Lerngruppe. Eine Klasse wird auf ihre
+    1:1-Lerngruppe aufgelöst, damit die Prüfung an demselben Verband hängt,
+    der auch im Stundenplan steht."""
+    if ziel_typ == "klasse":
+        try:
+            k = db.get(TtSchulklasse, int(ziel_id))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Ungültige Klasse.")
+        if not k or k.user_id != user.id:
+            raise HTTPException(404, "Klasse nicht gefunden.")
+        lg = lerngruppe_der_klasse(db, user, k.id)
+        if not lg:
+            raise HTTPException(
+                400, f'Zur Klasse „{k.name}" gibt es keine Lerngruppe. '
+                     'Leg sie in den Stammdaten an, dann lässt sich die '
+                     'Prüfung zuordnen.')
+        return lg
+    if ziel_typ == "lerngruppe":
+        try:
+            lg = db.get(TtKlasse, int(ziel_id))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Ungültige Lerngruppe.")
+        if not lg or lg.user_id != user.id:
+            raise HTTPException(404, "Lerngruppe nicht gefunden.")
+        return lg
+    raise HTTPException(400, "Bitte eine Klasse oder Lerngruppe wählen.")
+
+
+def _ist_moodle_gast(s: Student) -> bool:
+    """Ein Datensatz, den der frühere Moodle-Import aus der Datei angelegt hat:
+    inaktiv, ohne Klasse, ohne Jahrgang, ohne Schlüssel. Pool-Schüler aus dem
+    Schüler-Import haben einen Jahrgang, Ausgetretene ihre Klasse — beide
+    fallen hier also nicht hinein."""
+    return (not s.active and s.schulklasse_id is None and s.jahrgang_id is None
+            and not (s.klassen_key or "").strip())
+
+
+def _kandidat(s: Student) -> dict:
+    return {"id": s.id, "nachname": s.nachname or "", "vorname": s.vorname or ""}
+
+
+def _zuordnungs_plan(db: Session, user: User, lg: TtKlasse | None,
+                     eintraege: list[dict], kern_extra: list[Student] = (),
+                     ohne: set[int] = frozenset()) -> dict:
+    """Alles, was der Fragedialog braucht.
+
+    Kern = Schüler der Lerngruppe (+ `kern_extra`, z. B. bereits erfasste
+    Teilnehmer). Weitere = die übrigen aktiven Schüler derselben Klassen — bei
+    einer Teilgruppe die andere Hälfte, die der Dialog gesammelt abfragt.
+    `schueler` ist die Suchliste für Namen ohne Treffer: alle aktiven Schüler
+    des Lehrers, damit sich auch ein Klassenwechsler finden lässt."""
+    kern: dict[int, Student] = {}
+    if lg:
+        for s in schueler_der_lerngruppe(db, user, lg):
+            kern[s.id] = s
+    for s in kern_extra:
+        kern.setdefault(s.id, s)
+    kern = {i: s for i, s in kern.items()
+            if i not in ohne and not _ist_moodle_gast(s)}
+
+    klassen = klassen_der_lerngruppe(db, lg) if lg else []
+    weitere: dict[int, Student] = {}
+    if klassen:
+        for s in db.scalars(
+            select(Student).where(
+                Student.owner_user_id == user.id, Student.active.is_(True),
+                Student.schulklasse_id.in_([k.id for k in klassen]))
+        ).all():
+            if s.id not in kern and s.id not in ohne:
+                weitere[s.id] = s
+
+    zeilen = moodle_quiz.ordne_zu(
+        eintraege, [_kandidat(s) for s in kern.values()],
+        [_kandidat(s) for s in weitere.values()])
+
+    alle: dict[int, Student] = {}
+    for s in db.scalars(
+        select(Student).where(Student.owner_user_id == user.id,
+                              Student.active.is_(True))
+    ).all():
+        if s.id not in ohne:
+            alle[s.id] = s
+    for s in list(kern.values()) + list(weitere.values()):
+        alle.setdefault(s.id, s)
+    klassenname = {k.id: k.name for k in db.scalars(
+        select(TtSchulklasse).where(TtSchulklasse.user_id == user.id)).all()}
+    schueler = [
+        {"id": s.id, "name": f"{s.nachname}, {s.vorname}".strip(", "),
+         "klasse": klassenname.get(s.schulklasse_id, ""), "kern": s.id in kern}
+        for s in sorted(alle.values(), key=lambda s: ((s.nachname or "").lower(),
+                                                      (s.vorname or "").lower()))
+    ]
+
+    zahlen = {"sicher": 0, "teilgruppe": 0, "frage": 0, "keiner": 0}
+    for z in zeilen:
+        zahlen[z["status"]] += 1
+    return {
+        "zeilen": zeilen,
+        "schueler": schueler,
+        "klassen": [{"id": k.id, "name": k.name} for k in klassen],
+        "lerngruppe": ({"id": lg.id, "name": lg.display_name or lg.klassen_key,
+                        "art": lg.art} if lg else None),
+        "zahlen": zahlen,
+    }
+
+
+def _klasse_fuer_neuanlage(db: Session, lg: TtKlasse | None, roh) -> TtSchulklasse:
+    """Neu angelegt wird nur in einer Klasse, die zur Lerngruppe gehört — sonst
+    stünde der Schüler hinterher in keiner Liste, in der man ihn sucht."""
+    erlaubt = {k.id: k for k in klassen_der_lerngruppe(db, lg)} if lg else {}
+    try:
+        k = erlaubt.get(int(roh))
+    except (TypeError, ValueError):
+        k = None
+    if k is None:
+        raise HTTPException(400, "Neu anlegen geht nur in einer Klasse der Lerngruppe.")
+    return k
+
+
+def _in_klasse_einsortieren(db: Session, user: User, s: Student,
+                            k: TtSchulklasse, lg: TtKlasse | None) -> None:
+    """Macht aus einem Datensatz einen ordentlichen Schüler der Klasse `k`.
+    Bei einer Teilgruppe kommt er auch in die Gruppe — er hat ja in ihr die
+    Prüfung geschrieben."""
+    eigene = lerngruppe_der_klasse(db, user, k.id)
+    s.schulklasse_id = k.id
+    s.jahrgang_id = k.jahrgang_id
+    s.klassen_key = ((eigene.klassen_key if eigene else "") or "")[:255]
+    s.active = True
+    db.flush()
+    if lg is not None and lg.art == "gruppe":
+        if not db.get(TtLerngruppeStudent,
+                      {"lerngruppe_id": lg.id, "student_id": s.id}):
+            db.add(TtLerngruppeStudent(lerngruppe_id=lg.id, student_id=s.id))
+
+
+def _zuordnung_aufloesen(db: Session, user: User, lg: TtKlasse | None,
+                         zeilen: list) -> list[tuple[Student, dict]]:
+    """Die im Dialog bestätigte Zuordnung → (Schüler, Zeile).
+
+    Je Zeile entweder `student_id` (vorhandener Schüler) oder `neu_klasse_id`
+    (ausdrücklich neu anlegen) oder nichts (überspringen). Ein Schüler darf nur
+    EINER Zeile gehören — sonst überschreibt die zweite still die erste."""
+    if not isinstance(zeilen, list) or not zeilen:
+        raise HTTPException(400, "Keine Zuordnung übergeben.")
+    vergeben: set[int] = set()
+    out: list[tuple[Student, dict]] = []
+    for z in zeilen:
+        if not isinstance(z, dict):
+            continue
+        sid = z.get("student_id")
+        if sid:
+            s = db.get(Student, int(sid))
+            if not s or s.owner_user_id != user.id:
+                raise HTTPException(404, "Unbekannter Schüler in der Zuordnung.")
+            if s.id in vergeben:
+                raise HTTPException(
+                    400, f"{s.nachname}, {s.vorname} ist mehreren Zeilen zugeordnet.")
+            vergeben.add(s.id)
+            out.append((s, z))
+        elif z.get("neu_klasse_id"):
+            k = _klasse_fuer_neuanlage(db, lg, z.get("neu_klasse_id"))
+            nachname = (z.get("nachname") or "").strip()[:120]
+            if not nachname:
+                raise HTTPException(400, "Zum Anlegen fehlt der Nachname.")
+            s = Student(owner_user_id=user.id, nachname=nachname,
+                        vorname=(z.get("vorname") or "").strip()[:120])
+            db.add(s)
+            db.flush()
+            _in_klasse_einsortieren(db, user, s, k, lg)
+            vergeben.add(s.id)
+            out.append((s, z))
+    return out
+
+
+def _buche_prozent(db: Session, ex: Exam, fp: ExamFeedbackPoint,
+                   paare: list[tuple[Student, dict]]) -> tuple[int, int]:
+    """Bucht die Prozentwerte auf `fp` (umgerechnet auf dessen Maximalpunkte).
+    Fasst nur diese eine Spalte an — von Hand erfasste Punkte desselben
+    Schülers bleiben stehen. Rückgabe: (gebucht, neue Teilnehmer)."""
+    mitglieder = {es.student_id for es in ex.students}
+    ergebnisse = {r.student_id: r for r in ex.results}
+    max_points = float(fp.max_points or 0) or 100.0
+    gebucht = neue = 0
+    for s, z in paare:
+        prozent = z.get("percent")
+        if prozent is None:
+            continue
+        try:
+            wert = round(float(prozent) / 100.0 * max_points, 2)
+        except (TypeError, ValueError):
+            continue
+        if s.id not in mitglieder:
+            db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+            mitglieder.add(s.id)
+            neue += 1
+        res = ergebnisse.get(s.id)
+        if res is None:
+            res = ExamResult(exam_id=ex.id, student_id=s.id, erreicht_json="{}")
+            db.add(res)
+            ergebnisse[s.id] = res
+        werte = _loadjson(res.erreicht_json)
+        werte[str(fp.id)] = wert
+        res.erreicht_json = json.dumps(werte, ensure_ascii=False)
+        gebucht += 1
+    return gebucht, neue
+
+
 @router.post("/api/exams/moodle/vorschau")
 async def api_moodle_vorschau(
     user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
     datei: UploadFile = File(...),
+    ziel_typ: str = Form(""),
+    ziel_id: str = Form(""),
 ):
-    """Liest die Moodle-JSON und zeigt, was ankäme — schreibt NICHTS.
-    Gleiches zweistufiges Muster wie der Schüler-Import."""
-    try:
-        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
-        eintraege = moodle_quiz.parse_moodle_json(raw)
-    except (ValueError, UnicodeDecodeError) as e:
-        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
-    if not eintraege:
-        raise HTTPException(400, "Die Datei enthält keine Schüler.")
-    ohne_note = sum(1 for e in eintraege if e.get("percent") is None)
-    return JSONResponse({
-        "ok": True,
-        "anzahl": len(eintraege),
-        "ohne_ergebnis": ohne_note,
-        "abteilungen": sorted({(e.get("abteilung") or "").strip()
-                               for e in eintraege if (e.get("abteilung") or "").strip()}),
-        "namen": [f'{e["nachname"]}, {e["vorname"]}' for e in eintraege[:8]],
-    })
+    """Liest die Datei und plant die Zuordnung gegen die gewählte Klasse oder
+    Lerngruppe — schreibt NICHTS. Die Antwort speist den Fragedialog."""
+    eintraege = await _lies_moodle(datei)
+    lg = _ziel_zu_lerngruppe(db, user, ziel_typ, ziel_id)
+    plan = _zuordnungs_plan(db, user, lg, eintraege)
+    plan.update(ok=True, anzahl=len(eintraege),
+                ohne_ergebnis=sum(1 for e in eintraege if e.get("percent") is None))
+    return JSONResponse(plan)
 
 
 @router.post("/api/exams/moodle")
-async def api_moodle_import(
+def api_moodle_import(
     request: Request,
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
-    titel: str = Form(""),
-    datum: str = Form(""),
-    datei: UploadFile = File(...),
+    body: dict = Body(...),
 ):
-    """Legt eine Prüfung aus einem Moodle-Test an.
+    """Legt eine Prüfung aus einem Moodle-Test an — in EINEM Request, nachdem
+    der Fragedialog durch ist. `zeilen` ist die bestätigte Zuordnung.
 
-    Bewusst ein eigener Weg neben dem Assistenten: Die Teilnehmer kommen hier
-    aus der Datei, nicht aus einer Klasse — eine Zuordnung zu einer Lerngruppe
-    gibt es deshalb nicht. Die Schüler werden als eigene, inaktive Datensätze
-    ohne `klassen_key` angelegt (Moodle-Kurse bündeln oft mehrere Schulklassen
-    und die Bezeichnungen weichen ab); so tauchen sie weder in der Klassen-
-    auswahl noch in der Schülerliste auf, bleiben aber in dieser Prüfung
-    sichtbar und bewertbar."""
-    try:
-        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
-        eintraege = moodle_quiz.parse_moodle_json(raw)
-    except (ValueError, UnicodeDecodeError) as e:
-        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
-    if not eintraege:
-        raise HTTPException(400, "Die Datei enthält keine Schüler.")
-
-    abteilungen = []
-    for e in eintraege:
-        ab = (e.get("abteilung") or "").strip()
-        if ab and ab not in abteilungen:
-            abteilungen.append(ab)
-
+    Die Prüfung hängt an der gewählten Lerngruppe; deren Schüler sind wie beim
+    Assistenten Teilnehmer (auch wer in der Datei fehlt — der bekommt eben
+    keine Bewertung). Bewertet wird über „Gesamtbewertung" mit 100 Punkten."""
+    lg = _ziel_zu_lerngruppe(db, user, (body.get("ziel_typ") or "").strip(),
+                             body.get("ziel_id"))
+    zeilen = body.get("zeilen")
     ex = Exam(
         owner_user_id=user.id,
-        title=(titel or "").strip()[:200] or "Moodle-Test",
-        datum=(datum or "").strip()[:10],
-        klassen_key=", ".join(abteilungen or ["Moodle-Import"])[:255],
+        title=(body.get("titel") or "").strip()[:200] or "Moodle-Test",
+        datum=(body.get("datum") or "").strip()[:10],
         grading_scale_key=grading.DEFAULT_SCALE,
         input_mode="numeric",
         bewertung_mode="punkte",
     )
     db.add(ex)
     db.flush()
+    _set_lerngruppe(db, user, ex, lg.id)
 
-    # Ein Feedbackpunkt „Gesamtbewertung" — Moodle liefert nur ein Prozentergebnis.
     fp = ExamFeedbackPoint(
         exam_id=ex.id, position=0, name="Gesamtbewertung", max_points=100.0,
         scope="individual", eval_type="punkte", weight_pct=100.0,
     )
     db.add(fp)
     db.flush()
+    db.refresh(ex)
 
-    for eintrag in eintraege:
-        s = Student(
-            owner_user_id=user.id, klassen_key="",
-            nachname=eintrag["nachname"][:120], vorname=eintrag["vorname"][:120],
-            active=False,
-        )
-        db.add(s)
-        db.flush()
-        db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
-        if eintrag.get("percent") is not None:
-            db.add(ExamResult(
-                exam_id=ex.id, student_id=s.id,
-                erreicht_json=json.dumps(
-                    {str(fp.id): round(float(eintrag["percent"]), 2)},
-                    ensure_ascii=False),
-            ))
+    paare = _zuordnung_aufloesen(db, user, lg, zeilen)
+    gebucht, _ = _buche_prozent(db, ex, fp, paare)
 
     audit(db, "exam_created", actor=user, target=str(ex.id),
-          detail=f"{ex.title} / moodle={len(eintraege)}", request=request)
+          detail=f"{ex.title} / moodle={gebucht} / {ex.klassen_key}", request=request)
     db.commit()
-    return JSONResponse({"ok": True, "id": ex.id, "url": f"/exams/{ex.id}",
-                         "anzahl": len(eintraege)})
+    return JSONResponse({"ok": True, "id": ex.id, "gebucht": gebucht,
+                         "url": f"/exams/{ex.id}?moodle_imported={gebucht}"})
 
-
-# ── Moodle-Ergebnisse in eine BESTEHENDE Prüfung ──────────────────────────
-#
-# Der Weg oben legt eine neue Prüfung aus der Datei an; die Teilnehmer kommen
-# dort aus der Datei. Hier ist es umgekehrt: Die Prüfung existiert bereits und
-# hängt an einer Lerngruppe — die Namen aus der Datei müssen also auf ihre
-# Schüler treffen, statt Karteileichen anzulegen. Wieder zweistufig: erst
-# Vorschau samt Zuordnungstabelle, dann schreiben.
 
 @router.post("/api/exams/{ex_id}/moodle/vorschau")
 async def api_exam_moodle_vorschau(
@@ -701,37 +812,23 @@ async def api_exam_moodle_vorschau(
     db: Annotated[Session, Depends(get_db)],
     datei: UploadFile = File(...),
 ):
+    """Ergebnisse in eine BESTEHENDE Prüfung: Kern sind die Lerngruppe und
+    alle, die schon Teilnehmer sind."""
     ex = _get_exam(db, user, ex_id)
-    try:
-        raw = (await datei.read()).decode("utf-8-sig", errors="replace")
-        eintraege = moodle_quiz.parse_moodle_json(raw)
-    except (ValueError, UnicodeDecodeError) as e:
-        raise HTTPException(400, f"Moodle-JSON konnte nicht gelesen werden: {e}")
-    if not eintraege:
-        raise HTTPException(400, "Die Datei enthält keine Schüler.")
-
-    # Dieselbe Kandidatenliste wie im Teilnehmer-Schritt: Lerngruppe plus alle,
-    # die bereits an der Prüfung hängen.
-    roster = _exam_roster(db, user, ex)
-    kandidaten = [{"id": r["student"].id,
-                   "nachname": r["student"].nachname or "",
-                   "vorname": r["student"].vorname or ""} for r in roster]
-    zeilen = moodle_quiz.matche(eintraege, kandidaten)
-
-    return JSONResponse({
-        "ok": True,
-        "zeilen": zeilen,
-        "kandidaten": [{"id": k["id"],
-                        "name": f'{k["nachname"]}, {k["vorname"]}'.strip(", ")}
-                       for k in kandidaten],
-        "feedback_points": [
+    eintraege = await _lies_moodle(datei)
+    lg = _exam_lerngruppe(db, user, ex)
+    plan = _zuordnungs_plan(db, user, lg, eintraege,
+                            kern_extra=[s for s, _ in _exam_participants(db, ex)])
+    plan.update(
+        ok=True,
+        feedback_points=[
             {"id": fp.id, "name": fp.name, "max_points": float(fp.max_points or 0),
              "eval_type": fp.eval_type, "scope": fp.scope}
             for fp in ex.feedback_points
         ],
-        "offen": sum(1 for z in zeilen if not z["student_id"]),
-        "ohne_ergebnis": sum(1 for z in zeilen if z["percent"] is None),
-    })
+        ohne_ergebnis=sum(1 for e in eintraege if e.get("percent") is None),
+    )
+    return JSONResponse(plan)
 
 
 @router.post("/api/exams/{ex_id}/moodle/import")
@@ -744,12 +841,13 @@ def api_exam_moodle_import(
 ):
     """Bucht die Prozentwerte auf einen Feedbackpunkt der Prüfung.
 
-    `zuordnung`: [{'student_id': int|null, 'percent': float|null}] — genau die
-    Tabelle aus der Vorschau, wie der Lehrer sie bestätigt hat. Zeilen ohne
+    `zuordnung`: die bestätigten Zeilen aus dem Fragedialog
+    ({student_id | neu_klasse_id, percent, nachname, vorname}). Zeilen ohne
     Schüler oder ohne Ergebnis werden übersprungen, nicht geraten.
     `fp_id` wählt einen vorhandenen Punkt, sonst entsteht ein neuer mit
     `fp_name` und 100 Punkten."""
     ex = _get_exam(db, user, ex_id)
+    lg = _exam_lerngruppe(db, user, ex)
     zuordnung = payload.get("zuordnung") or []
     if not isinstance(zuordnung, list) or not zuordnung:
         raise HTTPException(400, "Keine Zuordnung übergeben.")
@@ -781,50 +879,154 @@ def api_exam_moodle_import(
         db.add(fp)
         db.flush()
 
-    mitglieder = {es.student_id: es for es in ex.students}
-    ergebnisse = {r.student_id: r for r in ex.results}
-    max_points = float(fp.max_points or 0) or 100.0
-
-    gebucht = 0
-    neue_teilnehmer = 0
-    for zeile in zuordnung:
-        sid = zeile.get("student_id")
-        prozent = zeile.get("percent")
-        if not sid or prozent is None:
-            continue
-        s = db.get(Student, int(sid))
-        if not s or s.owner_user_id != user.id:
-            raise HTTPException(404, "Unbekannter Schüler in der Zuordnung.")
-        try:
-            wert = round(float(prozent) / 100.0 * max_points, 2)
-        except (TypeError, ValueError):
-            continue
-
-        if s.id not in mitglieder:
-            es = ExamStudent(exam_id=ex.id, student_id=s.id, group_label="")
-            db.add(es)
-            mitglieder[s.id] = es
-            neue_teilnehmer += 1
-
-        res = ergebnisse.get(s.id)
-        if res is None:
-            res = ExamResult(exam_id=ex.id, student_id=s.id, erreicht_json="{}")
-            db.add(res)
-            ergebnisse[s.id] = res
-        # Nur die eine Spalte anfassen — die übrigen Feedbackpunkte dieses
-        # Schülers dürfen ein Import nicht abräumen.
-        werte = _loadjson(res.erreicht_json)
-        werte[str(fp.id)] = wert
-        res.erreicht_json = json.dumps(werte, ensure_ascii=False)
-        gebucht += 1
+    # Nur Zeilen mit Ergebnis weiterreichen — ein neu angelegter Schüler ohne
+    # Wert wäre genau die Karteileiche, die wir loswerden wollen.
+    mit_wert = [z for z in zuordnung
+                if isinstance(z, dict) and z.get("percent") is not None
+                and (z.get("student_id") or z.get("neu_klasse_id"))]
+    if not mit_wert:
+        raise HTTPException(400, "Keine Zeile hat Schüler und Ergebnis.")
+    paare = _zuordnung_aufloesen(db, user, lg, mit_wert)
+    gebucht, neue = _buche_prozent(db, ex, fp, paare)
 
     audit(db, "exam_moodle_results", actor=user, target=str(ex.id),
           detail=f"{ex.title} / {gebucht} Ergebnisse auf „{fp.name}“",
           request=request)
     db.commit()
     return JSONResponse({"ok": True, "gebucht": gebucht,
-                         "neue_teilnehmer": neue_teilnehmer,
+                         "neue_teilnehmer": neue,
                          "fp_id": fp.id, "fp_name": fp.name})
+
+
+# ── Aufräumen: Gäste des alten Moodle-Imports zusammenführen ──────────────
+
+def _gaeste(db: Session, ex: Exam) -> list[Student]:
+    return [s for s, _ in _exam_participants(db, ex) if _ist_moodle_gast(s)]
+
+
+def _fuehre_zusammen(db: Session, ex: Exam, gast: Student, ziel: Student) -> None:
+    """Hängt Bewertung und Gruppe des Gastes in DIESER Prüfung auf den echten
+    Schüler um. Hat der echte Schüler schon Werte, gewinnen seine — vom Gast
+    kommt nur, was dort noch leer ist."""
+    res_g = db.scalar(select(ExamResult).where(ExamResult.exam_id == ex.id,
+                                               ExamResult.student_id == gast.id))
+    res_z = db.scalar(select(ExamResult).where(ExamResult.exam_id == ex.id,
+                                               ExamResult.student_id == ziel.id))
+    if res_g is not None:
+        if res_z is None:
+            res_g.student_id = ziel.id
+        else:
+            for feld in ("erreicht_json", "feedback_remarks_json"):
+                von = _loadjson(getattr(res_g, feld))
+                nach = _loadjson(getattr(res_z, feld))
+                for k, v in von.items():
+                    if nach.get(k) in (None, ""):
+                        nach[k] = v
+                setattr(res_z, feld, json.dumps(nach, ensure_ascii=False))
+            if not (res_z.comment or "").strip() and (res_g.comment or "").strip():
+                res_z.comment = res_g.comment
+            db.delete(res_g)
+
+    es_g = db.get(ExamStudent, {"exam_id": ex.id, "student_id": gast.id})
+    es_z = db.get(ExamStudent, {"exam_id": ex.id, "student_id": ziel.id})
+    gruppe = es_g.group_label if es_g else ""
+    if es_g is not None:
+        db.delete(es_g)
+    if es_z is None:
+        db.add(ExamStudent(exam_id=ex.id, student_id=ziel.id, group_label=gruppe))
+    elif not es_z.group_label and gruppe:
+        es_z.group_label = gruppe
+    db.flush()
+
+
+@router.get("/api/exams/{ex_id}/gaeste")
+def api_exam_gaeste(
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Plan für das Zusammenführen — gleiche Logik wie beim Import, nur dass
+    die „Datei" hier die Gast-Datensätze dieser Prüfung sind."""
+    ex = _get_exam(db, user, ex_id)
+    lg = _exam_lerngruppe(db, user, ex)
+    if lg is None:
+        raise HTTPException(
+            400, "Ordne die Prüfung zuerst einer Klasse oder Lerngruppe zu.")
+    gaeste = _gaeste(db, ex)
+    eintraege = [{"nachname": g.nachname or "", "vorname": g.vorname or "",
+                  "percent": None} for g in gaeste]
+    plan = _zuordnungs_plan(db, user, lg, eintraege, ohne={g.id for g in gaeste})
+    for z, g in zip(plan["zeilen"], gaeste):
+        z["gast_id"] = g.id
+    plan["ok"] = True
+    return JSONResponse(plan)
+
+
+@router.post("/api/exams/{ex_id}/gaeste/zusammenfuehren")
+def api_exam_gaeste_zusammenfuehren(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    body: dict = Body(...),
+):
+    """`zeilen`: [{gast_id, student_id | neu_klasse_id}]. Mit `student_id` wird
+    der Gast in den echten Schüler überführt und — wenn ihn sonst keine
+    Prüfung mehr braucht — gelöscht. Mit `neu_klasse_id` wird der Gast selbst
+    zum Schüler dieser Klasse (kein neuer Datensatz). Ohne beides bleibt er."""
+    ex = _get_exam(db, user, ex_id)
+    lg = _exam_lerngruppe(db, user, ex)
+    if lg is None:
+        raise HTTPException(
+            400, "Ordne die Prüfung zuerst einer Klasse oder Lerngruppe zu.")
+    gaeste = {g.id: g for g in _gaeste(db, ex)}
+    zeilen = body.get("zeilen") or []
+
+    ziele: set[int] = set()
+    zusammen: list[Student] = []
+    eingeordnet = 0
+    for z in zeilen:
+        if not isinstance(z, dict):
+            continue
+        try:
+            gast = gaeste.get(int(z.get("gast_id") or 0))
+        except (TypeError, ValueError):
+            gast = None
+        if gast is None:
+            continue
+        if z.get("student_id"):
+            ziel = db.get(Student, int(z["student_id"]))
+            if not ziel or ziel.owner_user_id != user.id or ziel.id in gaeste:
+                raise HTTPException(404, "Unbekannter Schüler in der Zuordnung.")
+            if ziel.id in ziele:
+                raise HTTPException(
+                    400, f"{ziel.nachname}, {ziel.vorname} ist mehreren "
+                         "Einträgen zugeordnet.")
+            ziele.add(ziel.id)
+            _fuehre_zusammen(db, ex, gast, ziel)
+            zusammen.append(gast)
+        elif z.get("neu_klasse_id"):
+            k = _klasse_fuer_neuanlage(db, lg, z["neu_klasse_id"])
+            _in_klasse_einsortieren(db, user, gast, k, lg)
+            eingeordnet += 1
+
+    # Ein Gast, der in keiner Prüfung mehr vorkommt, ist ein leerer Datensatz.
+    geloescht = 0
+    for gast in zusammen:
+        noch = db.scalar(select(func.count()).select_from(ExamStudent)
+                         .where(ExamStudent.student_id == gast.id)) or 0
+        noch += db.scalar(select(func.count()).select_from(ExamResult)
+                          .where(ExamResult.student_id == gast.id)) or 0
+        if not noch:
+            db.delete(gast)
+            geloescht += 1
+
+    audit(db, "exam_gaeste_merge", actor=user, target=str(ex.id),
+          detail=f"{len(zusammen)} zusammengeführt, {eingeordnet} eingeordnet, "
+                 f"{geloescht} gelöscht", request=request)
+    db.commit()
+    return JSONResponse({"ok": True, "zusammengefuehrt": len(zusammen),
+                         "eingeordnet": eingeordnet, "geloescht": geloescht})
 
 
 @router.get("/exams/{ex_id}", response_class=HTMLResponse)
@@ -900,6 +1102,8 @@ def exams_detail(
         "all_klassen": all_klassen,
         "exam_classes": exam_classes,
         "lerngruppe": lerngruppe,
+        # Doppelte aus dem alten Moodle-Import → Hinweis mit Aufräum-Knopf
+        "gaeste_anzahl": sum(1 for s, _ in participants if _ist_moodle_gast(s)),
         "sum_max": ctx["sum_max"],
         "scales": grading.list_scales_for(db, user),
         "scale_labels": scale_labels,
@@ -1434,6 +1638,74 @@ async def exams_export_zip(
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{quote(zip_name)}"',
+        },
+    )
+
+
+@router.get("/exams/{ex_id}/export.pdf")
+async def exams_export_gesamt_pdf(
+    request: Request,
+    ex_id: int,
+    user: Annotated[User, Depends(require_user)],
+    db: Annotated[Session, Depends(get_db)],
+    duplex: int = 0,
+):
+    """Alle Bewertungsbögen in EINER Datei — zum Ausdrucken.
+
+    Alphabetisch nach Nachname (nicht nach Gruppe wie in der Bewertungs-
+    tabelle), damit der Stapel zur Klassenliste passt. Wer noch gar keine
+    Bewertung hat, fehlt — die Namen stehen im Header `X-Ohne-Bewertung`, die
+    Oberfläche meldet sie. Die Lehrer-Zusammenfassung gehört bewusst NICHT
+    hinein; der Stapel geht an die Schüler.
+
+    `duplex=1`: Nach jedem Bogen mit ungerader Seitenzahl eine Leerseite, damit
+    beim doppelseitigen Druck jeder Schüler auf einem eigenen Blatt beginnt."""
+    from pypdf import PdfReader, PdfWriter
+
+    ex = _get_exam(db, user, ex_id)
+    ctx = _scoring_ctx(db, user, ex)
+    reihenfolge = sorted(_exam_participants(db, ex),
+                         key=lambda p: ((p[0].nachname or "").lower(),
+                                        (p[0].vorname or "").lower()))
+    bewertet, ohne = [], []
+    for s, g in reihenfolge:
+        n_filled, _, _ = _student_total(ctx, s.id, g)
+        (bewertet if n_filled else ohne).append((s, g))
+    if not bewertet:
+        raise HTTPException(400, "In dieser Prüfung ist noch niemand bewertet.")
+
+    writer = PdfWriter()
+    fehler = []
+    for s, g in bewertet:
+        try:
+            html = _build_student_pdf_html(request, db, user, ex, s, g, ctx)
+            reader = PdfReader(io.BytesIO(await render_pdf(html)))
+        except Exception:
+            fehler.append(f"{s.nachname}, {s.vorname}")
+            continue
+        for page in reader.pages:
+            writer.add_page(page)
+        if duplex and len(reader.pages) % 2:
+            writer.add_blank_page()
+    if not len(writer.pages):
+        raise HTTPException(500, "Keiner der Bögen ließ sich erzeugen.")
+    buf = io.BytesIO()
+    writer.write(buf)
+
+    audit(db, "exam_pdf_gesamt", actor=user, target=str(ex_id),
+          detail=f"{len(bewertet) - len(fehler)} Bögen, duplex={bool(duplex)}",
+          request=request)
+    db.commit()
+
+    filename = f"{slugify(ex.title)}_{ex.datum or 'ohne_datum'}_alle.pdf"
+    return Response(
+        content=buf.getvalue(), media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{quote(filename)}"',
+            "X-Ohne-Bewertung": quote("; ".join(f"{s.nachname}, {s.vorname}"
+                                                for s, _ in ohne)),
+            "X-Fehler": quote("; ".join(fehler)),
+            "Access-Control-Expose-Headers": "X-Ohne-Bewertung, X-Fehler",
         },
     )
 

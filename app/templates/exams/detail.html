@@ -27,7 +27,25 @@
       {{ request.query_params.get('moodle_imported') }} Schüler übernommen.
       Noten wurden über den Notenschlüssel berechnet.
     </div>
-    <a class="btn" href="/exams/{{ exam.id }}/export.zip">📦 PDFs als ZIP herunterladen</a>
+    <button type="button" class="btn" data-gesamt-pdf>📄 Gesamt-PDF herunterladen</button>
+  </div>
+  {% endif %}
+
+  {% if gaeste_anzahl %}
+  {# Überbleibsel des alten Moodle-Imports: Er legte für jeden Namen einen
+     eigenen Datensatz an, der neben dem echten Schüler steht. #}
+  <div class="ex-gaeste">
+    <div style="flex:1;min-width:240px">
+      <strong>{{ gaeste_anzahl }} Schüler stehen doppelt drin.</strong>
+      Der frühere Moodle-Import hat sie als eigene Datensätze angelegt.
+      {% if lerngruppe %}Beim Zusammenführen wandern ihre Bewertungen auf die echten Schüler.
+      {% else %}Ordne die Prüfung zuerst einer Klasse zu, dann lassen sie sich zusammenführen.{% endif %}
+    </div>
+    {% if lerngruppe %}
+      <button type="button" class="btn" id="btn-gaeste">🧹 Zusammenführen</button>
+    {% else %}
+      <button type="button" class="btn" id="btn-gaeste-zuordnen">🎓 Klasse zuordnen</button>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -162,8 +180,16 @@
   <!-- ── EXPORT ── -->
   <div id="tab-exp" class="tab-pane" style="padding:1rem 0;display:none">
     <h3 style="margin-top:0">PDF-Export</h3>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:.5rem">
+      <button type="button" class="btn" data-gesamt-pdf>📄 Gesamt-PDF zum Drucken</button>
+      <label class="ex-duplex"><input type="checkbox" id="pdf-duplex"> doppelseitig (Leerseiten einfügen)</label>
+    </div>
+    <p class="muted" style="font-size:12px;margin:0 0 1rem">
+      Alle bewerteten Schüler alphabetisch in einer Datei, ohne Zusammenfassung.
+      Doppelseitig: Jeder Bogen beginnt auf einem eigenen Blatt.
+    </p>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.4rem">
-      <a class="btn" href="/exams/{{ exam.id }}/export.zip">📦 Alle als ZIP (inkl. Zusammenfassung)</a>
+      <a class="btn btn-sec" href="/exams/{{ exam.id }}/export.zip">📦 Einzel-PDFs als ZIP (inkl. Zusammenfassung)</a>
       <a class="btn btn-sec" href="/exams/{{ exam.id }}/summary.pdf">📊 Nur Zusammenfassung</a>
     </div>
     {% if students_view %}
@@ -548,6 +574,9 @@ if(nmBtn)nmBtn.addEventListener('click',()=>{
   .ex-actions .ex-del{color:var(--pink);border-color:var(--pink);margin-left:auto;}
   .ex-actions .ex-del:hover{background:#fdecea;}
   /* Bereiche, die nur im Overlay erscheinen — nie auf der Seite selbst */
+  .ex-gaeste{margin:.8rem 0 1rem;padding:.8rem 1rem;background:#fff6e5;border:1px solid var(--gelb);border-radius:8px;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;}
+  .ex-duplex{display:flex;align-items:center;gap:.4rem;font-size:13px;cursor:pointer;}
+  .ex-duplex input{width:auto;margin:0;}
   .pane-modal{display:none;}
   .drs-modal .pane-modal{display:block !important;padding-top:0 !important;}
 </style>
@@ -589,6 +618,30 @@ if(nmBtn)nmBtn.addEventListener('click',()=>{
 
   document.getElementById('btn-moodle-erg').addEventListener('click',
     () => DRSExams.moodleErgebnisse(EXAM_ID));
+
+  // Doppelte aus dem alten Moodle-Import
+  const gaesteBtn = document.getElementById('btn-gaeste');
+  if (gaesteBtn) {
+    gaesteBtn.addEventListener('click', () => DRSExams.gaesteAufraeumen(EXAM_ID));
+    // direkt nach dem Zuordnen einer Klasse gleich weitermachen
+    if (new URLSearchParams(location.search).get('aufraeumen')) {
+      DRSExams.gaesteAufraeumen(EXAM_ID);
+    }
+  }
+  const gaesteZuord = document.getElementById('btn-gaeste-zuordnen');
+  if (gaesteZuord) {
+    gaesteZuord.addEventListener('click', () => DRSExams.zuordnungModal(EXAM_ID));
+  }
+
+  // Gesamt-PDF; die Duplex-Wahl merkt sich der Browser
+  const duplex = document.getElementById('pdf-duplex');
+  try { duplex.checked = localStorage.getItem('drs.pdfDuplex') === '1'; } catch (e) { /* egal */ }
+  duplex.addEventListener('change', () => {
+    try { localStorage.setItem('drs.pdfDuplex', duplex.checked ? '1' : '0'); } catch (e) { /* egal */ }
+  });
+  document.querySelectorAll('[data-gesamt-pdf]').forEach((btn) => {
+    btn.addEventListener('click', () => DRSExams.gesamtPdf(EXAM_ID, duplex.checked, btn));
+  });
 
   document.getElementById('btn-exam-del').addEventListener('click', async () => {
     let fakten = [];
