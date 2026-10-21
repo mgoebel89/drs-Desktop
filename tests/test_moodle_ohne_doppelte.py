@@ -380,3 +380,98 @@ def test_gesamt_pdf_ohne_bewertungen(client, db, stamm):
     db.commit()
     r = client.get(f"/exams/{ex.id}/export.pdf")
     assert r.status_code == 400
+
+
+# ── Zwei Teilgruppen-JSONs in EINE Prüfung ────────────────────────────────
+
+@pytest.fixture()
+def klassenpruefung(db, stamm):
+    """Über den Assistenten angelegt (Notenmodus), Teil 1 schon importiert:
+    Ada hat 80 % auf „Moodle-Test"."""
+    ada = stamm["schueler"][0]
+    ex = Exam(owner_user_id=stamm["user"].id, title="KA", datum="2026-10-01",
+              lerngruppe_id=stamm["lg_a"].id, klassen_key="BSMT26a",
+              bewertung_mode="note")
+    db.add(ex)
+    db.flush()
+    fp = ExamFeedbackPoint(exam_id=ex.id, position=0, name="Moodle-Test",
+                           max_points=100.0, scope="individual", eval_type="punkte")
+    db.add(fp)
+    db.flush()
+    for s in stamm["schueler"]:
+        db.add(ExamStudent(exam_id=ex.id, student_id=s.id, group_label=""))
+    db.add(ExamResult(exam_id=ex.id, student_id=ada.id,
+                      erreicht_json=json.dumps({str(fp.id): 80.0})))
+    db.commit()
+    return {"ex": ex, "fp": fp}
+
+
+def test_vorschau_schlaegt_den_vorhandenen_moodle_punkt_vor(client, klassenpruefung):
+    ex = klassenpruefung["ex"]
+    r = client.post(f"/api/exams/{ex.id}/moodle/vorschau",
+                    files=_datei([("Ahrens", "Ada", "-"), ("Curt", "Cem", "40,00")]))
+    assert r.status_code == 200, r.text
+    assert r.json()["vorschlag_fp_id"] == klassenpruefung["fp"].id
+
+
+def test_kein_vorschlag_ohne_moodle_punkt(client, db, stamm):
+    ex = Exam(owner_user_id=stamm["user"].id, title="Hand", datum="2026-10-01",
+              lerngruppe_id=stamm["lg_a"].id, klassen_key="BSMT26a")
+    db.add(ex)
+    db.flush()
+    db.add(ExamFeedbackPoint(exam_id=ex.id, position=0, name="Aufgabe 1",
+                             max_points=10.0, scope="individual", eval_type="punkte"))
+    db.commit()
+    r = client.post(f"/api/exams/{ex.id}/moodle/vorschau",
+                    files=_datei([("Curt", "Cem", "40,00")]))
+    assert r.json()["vorschlag_fp_id"] is None
+
+
+def test_teil_zwei_landet_in_derselben_spalte(client, db, stamm, klassenpruefung):
+    ada, _, cem = stamm["schueler"]
+    ex, fp = klassenpruefung["ex"], klassenpruefung["fp"]
+    r = client.post(f"/api/exams/{ex.id}/moodle/import", json={
+        "zuordnung": [{"student_id": cem.id, "percent": 40.0}], "fp_id": fp.id})
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    assert db.query(ExamFeedbackPoint).filter_by(exam_id=ex.id).count() == 1
+    werte = {r.student_id: json.loads(r.erreicht_json)
+             for r in db.query(ExamResult).filter_by(exam_id=ex.id)}
+    assert werte == {ada.id: {str(fp.id): 80.0}, cem.id: {str(fp.id): 40.0}}
+
+
+# ── Schüler-PDF: Punkte-Layout und leere Zeilen ───────────────────────────
+
+def _pdf_html(client, ex, student, monkeypatch):
+    erfasst = {}
+
+    async def fake_render(html):
+        erfasst["html"] = html
+        return _leeres_pdf(1)
+    monkeypatch.setattr(ex_router, "render_pdf", fake_render)
+    r = client.get(f"/exams/{ex.id}/export/pdf", params={"student_id": student.id})
+    assert r.status_code == 200, r.text
+    return erfasst["html"]
+
+
+def test_pdf_punkte_layout_auch_im_notenmodus(client, db, stamm, klassenpruefung,
+                                               monkeypatch):
+    """Nur Punkte-Feedbackpunkte → Erreicht | Max | Prozent, nicht „Note"."""
+    html = _pdf_html(client, klassenpruefung["ex"], stamm["schueler"][0], monkeypatch)
+    kopf = re.sub(r"\s+", " ", html.split("<thead>")[1].split("</thead>")[0])
+    assert "Erreicht" in kopf and "Max" in kopf and "Prozent" in kopf
+    assert "Gewichtung" not in kopf
+    assert "80 %" in html or "80,0 %" in html
+
+
+def test_pdf_blendet_punkte_ohne_wert_aus(client, db, stamm, klassenpruefung,
+                                          monkeypatch):
+    """Der zweite Moodle-Teil, den dieser Schüler nicht geschrieben hat, fällt weg."""
+    ex = klassenpruefung["ex"]
+    db.add(ExamFeedbackPoint(exam_id=ex.id, position=1, name="Moodle-Test Teil 2",
+                             max_points=100.0, scope="individual", eval_type="punkte"))
+    db.commit()
+    html = _pdf_html(client, ex, stamm["schueler"][0], monkeypatch)
+    tbody = html.split("<tbody>")[1].split("</tbody>")[0]
+    assert "Moodle-Test" in tbody
+    assert "Teil 2" not in tbody
